@@ -283,21 +283,23 @@ Unique / Index:
 
 주요 컬럼:
 
-| 컬럼                | 타입 제안      | nullable | 설명                        |
-| ------------------- | -------------- | -------- | --------------------------- |
-| `id`                | `BIGINT`       | N        | 방 PK                       |
-| `host_member_id`    | `BIGINT`       | N        | 방 생성자 FK                |
-| `title`             | `VARCHAR(100)` | N        | 크루 제목                   |
-| `description`       | `TEXT`         | Y        | 크루 설명                   |
-| `visibility`        | `VARCHAR(20)`  | N        | 공개/비공개                 |
-| `join_code`         | `CHAR(6)`      | Y        | 비공개 참여 코드            |
-| `status`            | `VARCHAR(20)`  | N        | 방 상태                     |
-| `deposit_amount`    | `BIGINT`       | N        | 방 기본 보증금              |
-| `min_participants`  | `INT`          | N        | 최소 시작 인원              |
-| `max_participants`  | `INT`          | N        | 최대 참여 인원              |
-| `start_at`          | `DATETIME(6)`  | N        | 미션 시작 시각              |
-| `end_at`            | `DATETIME(6)`  | N        | 미션 종료 시각              |
-| `settlement_status` | `VARCHAR(20)`  | Y        | 조회 최적화용 비정규화 필드 |
+| 컬럼                   | 타입 제안      | nullable | 설명                                      |
+| ---------------------- | -------------- | -------- | ----------------------------------------- |
+| `id`                   | `BIGINT`       | N        | 방 PK                                     |
+| `host_member_id`       | `BIGINT`       | N        | 방 생성자 FK                              |
+| `title`                | `VARCHAR(100)` | N        | 크루 제목                                 |
+| `description`          | `TEXT`         | Y        | 크루 설명                                 |
+| `visibility`           | `VARCHAR(20)`  | N        | 공개/비공개                               |
+| `join_code`            | `CHAR(6)`      | Y        | 비공개 참여 코드                          |
+| `status`               | `VARCHAR(20)`  | N        | 방 상태                                   |
+| `deposit_amount`       | `BIGINT`       | N        | 방 기본 보증금                            |
+| `min_participants`     | `INT`          | N        | 시작 command 시점에 재검증하는 최소 인원 |
+| `max_participants`     | `INT`          | N        | 최대 참여 인원                            |
+| `recruitment_deadline` | `DATETIME(6)`  | N        | 신규 참여 마감 시각                       |
+| `start_at`             | `DATETIME(6)`  | N        | 예정 시작 시각 / MVP 수동 시작 가능 만료 |
+| `activated_at`         | `DATETIME(6)`  | Y        | 실제 ACTIVE 전이 시각                     |
+| `end_at`               | `DATETIME(6)`  | N        | 계획된 미션 종료 cutoff                   |
+| `settlement_status`    | `VARCHAR(20)`  | Y        | 조회 최적화용 비정규화 필드               |
 | `created_at`        | `DATETIME(6)`  | N        | 생성 시각                   |
 | `updated_at`        | `DATETIME(6)`  | N        | 수정 시각                   |
 
@@ -313,7 +315,9 @@ Unique / Index:
 
 - `unique(join_code)`
 - `index(host_member_id, created_at)`
+- `index(status, recruitment_deadline)`
 - `index(status, start_at, end_at)`
+- `index(status, activated_at)`
 - `check(min_participants >= 2 and min_participants <= max_participants and max_participants <= 10)`
 
 상태값 / Enum:
@@ -324,8 +328,11 @@ Unique / Index:
 
 주의사항:
 
-- 신규 참여는 `RECRUITING` 상태에서만 허용한다.
-- `min_participants` 기본값은 `2`고, `2 <= min_participants <= max_participants <= 10`을 만족해야 한다.
+- 신규 참여는 `RECRUITING` 상태이면서 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
+- `min_participants` 기본값은 `2`고, `2 <= min_participants <= max_participants <= 10`을 만족해야 한다. 이는 자동 시작 트리거가 아니라 `StartRoom` command 시점의 precondition이다.
+- `start_at`은 예정 시작 시각이자 MVP에서 수동 시작 가능 만료 시각이다. 실제 lifecycle/정산/log/projection anchor는 `activated_at`이다.
+- `activated_at`은 `StartRoom` 성공 전까지 `NULL`이며, `ACTIVE`/`CLOSED` 방에서는 실제 ACTIVE 전이 시각이어야 한다.
+- `end_at`은 계획된 미션 종료 cutoff이며 activation 지연으로 자동 이동하지 않는다.
 - `settlement_status`는 있더라도 조회 최적화용이다. 정산 처리 원천 상태는 `settlement.status`다.
 - `deposit_amount`는 방 규칙의 기본 보증금이고, 실제 정산 원천 금액은 `room_participant.deposit_amount`를 사용한다.
 
@@ -819,7 +826,9 @@ erDiagram
         BIGINT deposit_amount
         INT min_participants
         INT max_participants
+        DATETIME recruitment_deadline
         DATETIME start_at
+        DATETIME activated_at
         DATETIME end_at
         VARCHAR settlement_status
     }

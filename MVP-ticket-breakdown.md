@@ -16,42 +16,44 @@
 
 ## 2. 릴리스 티켓 맵
 
-| Ticket | Phase | Role  | Linked Story  | 제목                                       | 선행 의존성 |
-| ------ | ----- | ----- | ------------- | ------------------------------------------ | ----------- |
-| T-01   | 1     | BE    | US-01, US-01A | 인증 도메인과 최소 프로필 API 구현         | 없음        |
-| T-02   | 1     | FE    | US-01, US-01A | 회원가입/로그인 화면과 프로필 UI 구현      | T-01        |
-| T-03   | 1     | BE    | US-02         | 크루 생성 API와 규칙 검증 구현             | T-01        |
-| T-04   | 1     | FE    | US-02         | 크루 생성 폼과 입력 검증 UI 구현           | T-03        |
-| T-05   | 1     | BE    | US-05         | 포인트 원장과 충전 콜백 처리 구현          | T-01        |
-| T-06   | 1     | FE    | US-05         | 포인트 충전/이력 화면 구현                 | T-05        |
-| T-07   | 2     | BE    | US-03, US-04  | 공개 목록/상세/참여코드 조회 API 구현      | T-03        |
-| T-08   | 2     | FE    | US-03, US-04  | 크루 탐색/상세/참여코드 입력 UI 구현       | T-07        |
-| T-09   | 2     | BE    | US-06         | 크루 입장과 보증금 예치 트랜잭션 구현      | T-05, T-07  |
-| T-10   | 2     | FE    | US-06         | 크루 입장과 잔액 부족 처리 UI 구현         | T-09        |
-| T-11   | 2     | Infra | US-07         | 인증 이미지 업로드 저장소와 접근 정책 구성 | T-03        |
-| T-12   | 2     | BE    | US-07         | 인증 제출 API와 시간 규칙 검증 구현        | T-09, T-11  |
-| T-13   | 2     | BE    | US-08         | Exif 파서와 인증 결과 저장 로직 구현       | T-12        |
-| T-14   | 2     | FE    | US-07, US-08  | 인증 업로드/결과 UI 구현                   | T-12, T-13  |
-| T-15   | 2     | QA    | US-01~US-08   | 가입-입장-인증 회귀 테스트 정의            | T-14        |
-| T-16   | 3     | BE    | US-09         | 지분율 집계 조회 모델 구현                 | T-13        |
-| T-17   | 3     | BE    | US-10         | 정산 규칙 엔진 구현                        | T-09, T-13  |
-| T-18   | 3     | BE    | US-10         | 정산 배치, 재시도, 멱등 처리 구현          | T-17        |
-| T-19   | 3     | BE    | US-10, US-11  | 환급 반영과 정산 히스토리 API 구현         | T-18        |
-| T-20   | 3     | FE    | US-09         | 실시간 지분율 대시보드 UI 구현             | T-16        |
-| T-21   | 3     | FE    | US-11         | 정산 결과/포인트 히스토리 화면 구현        | T-19        |
-| T-22   | 3     | QA    | US-09~US-11   | 정산 골든 데이터 테스트 작성               | T-18, T-21  |
-| T-23   | 4     | BE    | US-12         | SSE 이벤트 발행과 구독 인증 구현           | T-13, T-16  |
-| T-24   | 4     | FE    | US-12         | 인앱 알림 UI와 SSE 클라이언트 구현         | T-23        |
-| T-25   | 4     | BE    | US-13         | 정산 완료 이메일 발송 구현                 | T-19        |
-| T-26   | 4     | BE    | US-14         | AI 미션 추천 API 연동 구현                 | T-03        |
-| T-27   | 4     | FE    | US-14         | AI 미션 추천 UI와 폼 반영 구현             | T-26        |
-| T-28   | 4     | BE    | US-15         | AI 습관 리포트 생성/저장 구현              | T-19        |
-| T-29   | 4     | FE    | US-15         | AI 습관 리포트 조회 UI 구현                | T-28        |
-| T-30   | 4     | BE    | US-16         | 관리자 정산 상태 조회 API 구현             | T-18        |
-| T-31   | 4     | FE    | US-16         | 관리자 정산 모니터링 화면 구현             | T-30        |
-| T-32   | 4     | Infra | US-16         | 배치/정산 운영 모니터링과 알림 구성        | T-18, T-30  |
-| T-33   | 2     | BE    | US-17         | 인증 피드 조회 API 구현                    | T-13        |
-| T-34   | 2     | BE    | US-18         | 인증 피드 리액션 API 구현                  | T-33        |
+| Ticket | Phase | Role  | Linked Story  | 제목                                            | 선행 의존성 |
+| ------ | ----- | ----- | ------------- | ----------------------------------------------- | ----------- |
+| T-01   | 1     | BE    | US-01, US-01A | 인증 도메인과 최소 프로필 API 구현              | 없음        |
+| T-02   | 1     | FE    | US-01, US-01A | 회원가입/로그인 화면과 프로필 UI 구현           | T-01        |
+| T-03   | 1     | BE    | US-02         | 크루 생성 API와 규칙 검증 구현                  | T-01        |
+| T-04   | 1     | FE    | US-02         | 크루 생성 폼과 입력 검증 UI 구현                | T-03        |
+| T-04A  | 2     | BE    | US-06A        | 방장 미션 시작 API와 lifecycle 전이 구현        | T-03, T-09  |
+| T-04B  | 2     | FE    | US-06A        | 방장 미션 시작 버튼과 상태 안내 UI 구현         | T-04A       |
+| T-05   | 1     | BE    | US-05         | 포인트 원장과 충전 콜백 처리 구현               | T-01        |
+| T-06   | 1     | FE    | US-05         | 포인트 충전/이력 화면 구현                      | T-05        |
+| T-07   | 2     | BE    | US-03, US-04  | 공개 목록/상세/참여코드 조회 API 구현           | T-03        |
+| T-08   | 2     | FE    | US-03, US-04  | 크루 탐색/상세/참여코드 입력 UI 구현            | T-07        |
+| T-09   | 2     | BE    | US-06         | 크루 입장과 보증금 예치 트랜잭션 구현           | T-05, T-07  |
+| T-10   | 2     | FE    | US-06         | 크루 입장과 잔액 부족 처리 UI 구현              | T-09        |
+| T-11   | 2     | Infra | US-07         | 인증 이미지 업로드 저장소와 접근 정책 구성      | T-03        |
+| T-12   | 2     | BE    | US-07         | 인증 제출 API와 시간 규칙 검증 구현             | T-09, T-11  |
+| T-13   | 2     | BE    | US-08         | Exif 파서와 인증 결과 저장 로직 구현            | T-12        |
+| T-14   | 2     | FE    | US-07, US-08  | 인증 업로드/결과 UI 구현                        | T-12, T-13  |
+| T-15   | 2     | QA    | US-01~US-08   | 가입-입장-인증 회귀 테스트 정의                 | T-14        |
+| T-16   | 3     | BE    | US-09         | 지분율 집계 조회 모델 구현                      | T-13        |
+| T-17   | 3     | BE    | US-10         | 정산 규칙 엔진 구현                             | T-09, T-13  |
+| T-18   | 3     | BE    | US-10         | 정산 배치, 시작 전 취소, 재시도, 멱등 처리 구현 | T-17, T-04A |
+| T-19   | 3     | BE    | US-10, US-11  | 환급 반영과 정산 히스토리 API 구현              | T-18        |
+| T-20   | 3     | FE    | US-09         | 실시간 지분율 대시보드 UI 구현                  | T-16        |
+| T-21   | 3     | FE    | US-11         | 정산 결과/포인트 히스토리 화면 구현             | T-19        |
+| T-22   | 3     | QA    | US-09~US-11   | 정산/시작 lifecycle 골든 데이터 테스트 작성     | T-18, T-21  |
+| T-23   | 4     | BE    | US-12         | SSE 이벤트 발행과 구독 인증 구현                | T-13, T-16  |
+| T-24   | 4     | FE    | US-12         | 인앱 알림 UI와 SSE 클라이언트 구현              | T-23        |
+| T-25   | 4     | BE    | US-13         | 정산 완료 이메일 발송 구현                      | T-19        |
+| T-26   | 4     | BE    | US-14         | AI 미션 추천 API 연동 구현                      | T-03        |
+| T-27   | 4     | FE    | US-14         | AI 미션 추천 UI와 폼 반영 구현                  | T-26        |
+| T-28   | 4     | BE    | US-15         | AI 습관 리포트 생성/저장 구현                   | T-19        |
+| T-29   | 4     | FE    | US-15         | AI 습관 리포트 조회 UI 구현                     | T-28        |
+| T-30   | 4     | BE    | US-16         | 관리자 정산 상태 조회 API 구현                  | T-18        |
+| T-31   | 4     | FE    | US-16         | 관리자 정산 모니터링 화면 구현                  | T-30        |
+| T-32   | 4     | Infra | US-16         | 배치/정산 운영 모니터링과 알림 구성             | T-18, T-30  |
+| T-33   | 2     | BE    | US-17         | 인증 피드 조회 API 구현                         | T-13        |
+| T-34   | 2     | BE    | US-18         | 인증 피드 리액션 API 구현                       | T-33        |
 
 `T-33`과 `T-34`는 피드/리액션 API 구현 누락을 보완하는 appended tickets이며, 기존 정산 관련 티켓(`T-17`~`T-22`)의 선행 의존성이나 우선순위를 변경하지 않는다.
 
@@ -123,7 +125,7 @@
 크루 생성은 제품의 핵심 계약 입력 지점이다. 기간, 인원, 보증금 규칙이 이 단계에서 고정돼야 이후 입장, 인증, 정산 계산이 일관된다.
 
 **What:**  
-공개/비공개 크루 생성 API와 규칙 검증을 구현한다. 기간 `1주~3개월`, 최대 인원 `10명`, 보증금 `1,000원~100만원`, `1,000원 단위`, 비공개 `6자리 참여 코드` 생성 규칙을 포함한다.
+공개/비공개 크루 생성 API와 규칙 검증을 구현한다. 기간 `1주~3개월`, 최대 인원 `10명`, 보증금 `1,000원~100만원`, `1,000원 단위`, 비공개 `6자리 참여 코드`, `min_participants`, `recruitment_deadline`, 예정 시작/수동 시작 만료 시각인 `start_at` 생성 규칙을 포함한다.
 
 **Acceptance Criteria:**
 
@@ -131,6 +133,8 @@
 - 허용 범위를 벗어난 기간, 인원, 보증금은 저장되지 않는다.
 - 비공개 크루 생성 시 고유한 참여 코드가 생성된다.
 - 생성된 크루는 운영자 정보와 함께 조회 가능하다.
+- `min_participants`는 자동 시작 트리거가 아니라 `StartRoom` precondition으로 문서화된다.
+- `recruitment_deadline`은 join cutoff, `start_at`은 planned start/latest manual-start deadline으로 저장된다.
 
 ### T-04. 크루 생성 폼과 입력 검증 UI 구현
 
@@ -146,6 +150,39 @@
 - 기간, 보증금, 인원 제약이 UI에서 먼저 안내된다.
 - 비공개 선택 시 참여 코드 발급 결과가 확인된다.
 - 생성 성공 후 사용자는 새 크루 상세 화면으로 이동한다.
+
+### T-04A. 방장 미션 시작 API와 lifecycle 전이 구현
+
+**Why:**  
+최소 인원 충족을 자동 ACTIVE 전이로 해석하면 정산 기준 시각, 인증 가능 시점, participant baseline이 흔들린다. MVP에서는 host `StartRoom` command를 단일 lifecycle commit point로 고정해야 한다.
+
+**What:**  
+`POST /api/rooms/{roomId}/start` command를 구현한다. host 권한, `RECRUITING` 상태, `start_at` 만료 여부, command 시점 `min_participants` 재검증, `activated_at` 기록, `ACTIVE` 전이를 하나의 조건부 transaction으로 처리한다.
+
+**Acceptance Criteria:**
+
+- host만 미션 시작을 요청할 수 있다.
+- 성공 시 `status = ACTIVE`와 `activated_at = server_now`가 함께 기록된다.
+- 이미 `ACTIVE`인 방은 멱등 성공/no-op으로 처리된다.
+- `CANCELLED`/`CLOSED` 방은 conflict로 거절된다.
+- `min_participants` 미달은 `MIN_PARTICIPANTS_NOT_MET` 계열 오류로 거절된다.
+- `start_at` 경과 후 요청은 `ROOM_START_EXPIRED` 또는 terminal-state conflict로 거절된다.
+- 동시 start 요청은 하나의 조건부 전이만 성공한다.
+
+### T-04B. 방장 미션 시작 버튼과 상태 안내 UI 구현
+
+**Why:**  
+최신 기획안의 “방장이 미션 시작 버튼을 눌러 시작” 정책을 사용자가 이해하려면 상세 화면에서 시작 가능 조건과 만료 상태를 명확히 보여줘야 한다.
+
+**What:**  
+host 전용 미션 시작 버튼, 최소 인원 충족 여부, `recruitment_deadline`, `start_at` 시작 가능 만료 안내, 시작 실패/성공 상태 메시지를 구현한다.
+
+**Acceptance Criteria:**
+
+- host는 시작 가능한 `RECRUITING` 방에서 미션 시작 버튼을 볼 수 있다.
+- 비 host는 시작 버튼을 볼 수 없거나 권한 없음 안내를 본다.
+- 최소 인원 미달, 모집 마감 전/후, 시작 만료 상태가 구분되어 표시된다.
+- 시작 성공 후 화면은 `ACTIVE`와 `activated_at` 기준 진행 상태를 보여준다.
 
 ### T-05. 포인트 원장과 충전 콜백 처리 구현
 
@@ -352,12 +389,14 @@ Exif 추출, 촬영 시각 비교, 성공/실패 사유 분류, 인증 결과 �
 정산 엔진만 있어도 운영 가능한 서비스는 아니다. 종료 시점 자동 실행, 실패 재시도, 중복 실행 방지가 있어야 실제 시스템이 된다.
 
 **What:**  
-`익일 새벽` 정산 배치, 실패 `3회` 재시도, 동일 미션 멱등 처리, 어드민 확인 대상 상태 저장을 구현한다. 필요 시 락/큐/상태 전이를 포함한다.
+`익일 새벽` 일반 정산 배치, `start_at` 만료 미시작 방의 `RECRUITING -> CANCELLED` 취소 batch, 실패 `3회` 재시도, 동일 미션/취소 정산 멱등 처리, 어드민 확인 대상 상태 저장을 구현한다. 필요 시 락/큐/상태 전이를 포함한다.
 
 **Acceptance Criteria:**
 
 - 종료된 미션에 대해 정산 배치가 자동 실행된다.
-- 동일 미션 정산이 중복 반영되지 않는다.
+- `start_at`까지 시작되지 않은 `RECRUITING` 방은 `CANCELLED` 처리되고 취소형 정산이 생성된다.
+- `StartRoom`과 취소 batch가 경합해도 하나의 조건부 전이만 성공한다.
+- 동일 미션 정산과 취소형 정산이 중복 반영되지 않는다.
 - 실패 시 최대 `3회` 재시도 후 운영 확인 상태로 남는다.
 - 배치 실행 상태가 추적 가능하게 저장된다.
 
@@ -414,13 +453,14 @@ Exif 추출, 촬영 시각 비교, 성공/실패 사유 분류, 인증 결과 �
 정산은 눈으로 보기엔 맞아도 금액 오차가 숨어들기 쉽다. 고정 입력과 기대 결과를 가진 골든 데이터 세트가 있어야 회귀를 막을 수 있다.
 
 **What:**  
-정산 예시 데이터와 기대 환급 결과를 만드는 테스트 세트를 작성한다. `전체 성공 횟수 0`, `잔액 발생`, `1위 동점`, `중도 탈퇴`, `인원 미달` 케이스를 포함한다. Dashboard projection 회귀 fixture는 최종 정산 골든 데이터와 구분해, query-time estimated projection과 final settlement의 차이를 함께 검증한다.
+정산 예시 데이터와 기대 환급 결과를 만드는 테스트 세트를 작성한다. `전체 성공 횟수 0`, `잔액 발생`, `1위 동점`, `중도 탈퇴`, `인원 미달`, `start_at` 만료 미시작 취소, `StartRoom`/취소 batch 경합 케이스를 포함한다. Dashboard projection 회귀 fixture는 최종 정산 골든 데이터와 구분해, query-time estimated projection과 final settlement의 차이를 함께 검증한다.
 
 **Acceptance Criteria:**
 
 - 핵심 예외 케이스가 골든 데이터 테스트로 정의된다.
 - 기대 환급 결과가 수치로 고정된다.
-- Dashboard projection fixture가 `DAILY` duplicate, `SPECIFIC_DAYS` invalid weekday, `WEEKLY_N` overflow, `withdrawn_at` cutoff, `CLOSED` cutoff를 포함한다.
+- Dashboard projection fixture가 `DAILY` duplicate, `SPECIFIC_DAYS` invalid weekday, `WEEKLY_N` overflow, `withdrawn_at` cutoff, `activated_at` 이전 `BEFORE_START`, `CLOSED` cutoff를 포함한다.
+- stale reference 검색에서 post-activation eligibility가 `room.start_at`이 아니라 `room.activated_at`을 기준으로 문서화됐는지 확인한다.
 - Dashboard projection fixture가 `rank_estimated` 동률 시 `participant_id ASC`, zero-total equal-share base estimate, base estimate와 final settlement remainder/draw 차이를 포함한다.
 - 배치 또는 엔진 변경 후 같은 결과를 재검증할 수 있다.
 - 금액 오차 또는 규칙 누락을 빠르게 탐지할 수 있다.
@@ -613,9 +653,3 @@ DB-level upsert(`ON CONFLICT`)를 사용해 동시 요청에서도 오류 없이
 - DELETE는 멱등하게 동작한다.
 - 동시 요청에서도 unique constraint 오류가 발생하지 않는다.
 - 리액션은 정산, 포인트, 상태 계산에 영향을 주지 않는다.
-
-## 5. 바로 다음 계획
-
-1. `T-17`, `T-18`, `T-22`를 묶어 정산 상세 설계 문서를 먼저 고정한다.
-2. `T-01`~`T-06`까지를 Sprint 1, `T-07`~`T-15`를 Sprint 2 후보로 잡는다.
-3. 구현 전에 `T-12`~`T-19` 구간 API 계약을 먼저 정리하면 FE/BE 병렬 진행이 쉬워진다.

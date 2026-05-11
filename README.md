@@ -15,7 +15,7 @@
 3. 계약: FE/BE가 어떤 인터페이스로 연결되는가
 4. 실행: 어떤 순서로 구현하고 검증하는가
 
-원본 기획서(`.docx`)는 출발점이자 제품/UX 배경 참고 자료다. 현재 활성 제품/UX 참고 문서는 `docs/갓세이빙_프로젝트기획서.docx`이며, 구현과 운영 판단의 기준은 여전히 이 폴더의 Markdown 문서(`docs/*.md`)다. 제안서 표현이 Markdown 문서와 충돌하면 Markdown 문서가 우선한다.
+원본 기획안(`.docx`)은 출발점이자 제품/UX 배경 참고 자료다. 현재 활성 제품/UX 참고 문서는 `docs/갓세이빙_프로젝트기획안.docx`이며, 구현과 운영 판단의 기준은 여전히 이 폴더의 Markdown 문서(`docs/*.md`)다. 기존 `갓세이빙_프로젝트기획서.docx` 명칭이나 사본이 등장하면 legacy/reference 입력으로만 취급한다. 제안서 표현이 Markdown 문서와 충돌하면 Markdown 문서가 우선한다.
 
 ## 2. 추천 읽기 순서
 
@@ -29,7 +29,7 @@
    앞선 문서들을 기반으로 FE/BE 계약을 확인한다. API는 독립 출발점이 아니라 PRD, ERD, 정산 설계를 외부 인터페이스로 고정한 결과물이다.
 4. [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md) + [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)
    마지막으로 실행 계획을 본다. 여기서는 무엇을 만들지 다시 정의하지 않고, 이미 결정된 범위를 어떤 단위로 구현할지 확인한다.
-5. [갓세이빙\_프로젝트기획서.docx](./갓세이빙_프로젝트기획서.docx)
+5. [갓세이빙\_프로젝트기획안.docx](./갓세이빙_프로젝트기획안.docx)
    활성 제품/UX 참고 자료다. 배경, 화면 의도, 소셜 피드 표현을 확인할 때만 본다. 구현 판단은 Markdown source of truth 문서에 승격된 내용만 따른다.
 
 ## 3. 문서별 역할 정의
@@ -42,7 +42,7 @@
 | [API-spec-god-saving.md](./API-spec-god-saving.md)              | FE/BE가 공유하는 엔드포인트, 요청/응답, 에러, 상태값 계약을 정의한다. | 화면 연동, API 구현, QA 시나리오 작성 시        | 외부 API 계약                          |
 | [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md)    | MVP 기능을 사용자 가치 중심의 백로그와 스토리로 정리한다.             | 우선순위 검토, 스프린트 범위 설정 시            | 스토리 레벨 구현 대상과 우선순위       |
 | [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)            | 스토리를 구현 가능한 티켓과 의존성으로 분해한다.                      | 실제 작업 착수, 일정/병렬화 계획 수립 시        | 구현 단위, 선행 의존성, 실행 순서      |
-| [갓세이빙\_프로젝트기획서.docx](./갓세이빙_프로젝트기획서.docx) | 활성 제품/UX 참고 자료다.                                             | 배경, UX 의도, 제안서 표현 확인이 필요할 때     | 현재 source of truth 아님. 참고용 입력 |
+| [갓세이빙\_프로젝트기획안.docx](./갓세이빙_프로젝트기획안.docx) | 활성 제품/UX 참고 자료다.                                             | 배경, UX 의도, 제안서 표현 확인이 필요할 때     | 현재 source of truth 아님. 참고용 입력 |
 
 문서 충돌 시 우선순위는 아래를 따른다.
 
@@ -50,7 +50,7 @@
 2. Settlement-design / ERD: 도메인 규칙과 데이터 구조
 3. API-spec: 외부 인터페이스 계약
 4. Backlog / Ticket: 실행 계획
-5. 활성 제안서 docx: 참고 자료
+5. 활성 기획안 docx: 참고 자료
 
 ## 4. 문서 간 관계 구조
 
@@ -70,7 +70,7 @@
 간단히 보면 구조는 아래와 같다.
 
 ```text
-활성 제안서(docx)
+활성 기획안(docx)
     ↓
 PRD
     ↓
@@ -93,7 +93,7 @@ MVP-ticket-breakdown
 - 엔드포인트, 요청/응답 JSON, 에러 응답, API enum은 `API-spec`에만 상세 정의한다.
 - 백로그 우선순위와 user story는 `MVP-backlog-user-stories`에만 정의한다.
 - 구현 티켓, 선행 의존성, 병렬 실행 순서는 `MVP-ticket-breakdown`에만 정의한다.
-- 활성 제안서(`docs/갓세이빙_프로젝트기획서.docx`)의 표현이 현재 Markdown 문서와 다르면 제안서를 직접 구현 기준으로 사용하지 않는다. 필요한 내용은 먼저 소유 Markdown source of truth 문서로 승격한 뒤 구현한다.
+- 활성 기획안(`docs/갓세이빙_프로젝트기획안.docx`)의 표현이 현재 Markdown 문서와 다르면 docx를 직접 구현 기준으로 사용하지 않는다. 필요한 내용은 먼저 소유 Markdown source of truth 문서로 승격한 뒤 구현한다. 기존 `갓세이빙_프로젝트기획서.docx`는 legacy/reference 입력으로만 취급한다.
 - AI 비트랜잭션 경계는 `PRD`, `API-spec`, `ERD`가 같은 정책을 유지해야 한다.
 - `point_history.reference_type`의 DB enum/constraint 언어는 `ERD`가 소유하고, `API-spec`은 FE/BE 계약에 필요한 소비자-facing enum과 매핑만 반복한다.
 

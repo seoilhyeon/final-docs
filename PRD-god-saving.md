@@ -1,6 +1,6 @@
 # PRD: 갓세이빙 (God-Saving)
 
-작성 기준 문서: `docs/갓세이빙_프로젝트기획서.docx` (제품/UX 참고 자료). 구현 기준은 이 PRD와 `docs/*.md` source of truth 문서다.
+작성 기준 문서: `docs/갓세이빙_프로젝트기획안.docx` (활성 제품/UX 참고 자료). 기존 `갓세이빙_프로젝트기획서.docx` 명칭이나 사본은 legacy/reference 입력으로만 취급한다. 구현 기준은 이 PRD와 `docs/*.md` source of truth 문서다.
 
 ## 1. Summary
 
@@ -113,9 +113,9 @@
 핵심 사용자 흐름은 아래와 같다.
 
 1. 사용자는 랜딩에서 공개 크루를 찾거나 새 크루를 만든다.
-2. 새 크루를 만들 때 AI 챗봇이 미션 제목, 기간, 인증 방식, 보증금 금액을 추천하고, host는 `min_participants`를 직접 설정한다.
-3. 사용자는 포인트를 충전하고, 입장 시 보증금이 미션 종료 전까지 사용할 수 없도록 잠긴다.
-4. 미션 기간 동안 정해진 시간 안에 사진을 올리고 인증 결과를 바로 확인한다.
+2. 새 크루를 만들 때 AI 챗봇이 미션 제목, 기간, 인증 방식, 보증금 금액을 추천하고, host는 `min_participants`, `recruitment_deadline`, `start_at`을 직접 설정한다.
+3. 사용자는 포인트를 충전하고, `recruitment_deadline` 전까지 입장하며, 입장 시 보증금이 미션 종료 전까지 사용할 수 없도록 잠긴다.
+4. 최소 인원이 충족되면 host가 `미션 시작` 버튼을 눌러 `StartRoom` command를 실행하고, 성공 시점의 `activated_at`부터 인증할 수 있다.
 5. 대시보드에서 내 지분율, 예상 환급금, 랭킹 변화를 매일 본다.
 6. 미션 종료 후 익일 새벽에 자동 정산이 진행되고, 사용자는 정산 결과, 환급금, AI 습관 리포트를 확인한다.
 
@@ -134,7 +134,7 @@
 핵심 UX 안내 문구:
 
 - 크루 생성 시 `min_participants` 설정 영역에 아래 문구를 노출한다.
-  `모든 참여자가 미션을 수행하지 않을 경우, 보증금은 전액 균등하게 환급됩니다.`
+  `최소 인원이 모여도 미션은 자동 시작되지 않습니다. 모집 마감 후 시작 예정 시각 전까지 방장이 미션 시작을 눌러야 하며, 시작되지 않은 미션은 취소되어 보증금이 환급됩니다.`
 - 정산 결과 화면에서 전체 성공 횟수가 `0`인 경우 아래 문구를 노출한다.
   `이번 미션에서는 모든 참여자의 성공 기록이 없어, 보증금이 균등하게 환급되었습니다.`
 
@@ -146,7 +146,7 @@
 | ------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 회원가입 / 로그인         | JWT 기반 인증                                    | 기본 회원 흐름과 권한 분리                                                                                                                                         |
 | 사용자 프로필             | 닉네임과 프로필 이미지를 관리한다                | 프로필은 사용자 식별을 위한 최소 정보이며, 소셜 그래프, 팔로우/친구, 공개 범위 설정은 포함하지 않는다                                                              |
-| 크루 생성 / 모집 / 입장   | 공개 모집과 비공개 참여 코드 지원                | 기간은 1주~3개월, host가 `min_participants`를 설정할 수 있고 기본값은 `2`, 제약은 `2 <= min_participants <= max_participants <= 10`, 비공개는 6자리 참여 코드 사용 |
+| 크루 생성 / 모집 / 입장   | 공개 모집과 비공개 참여 코드 및 host 수동 시작 지원 | 기간은 1주~3개월, host가 `min_participants`, `recruitment_deadline`, `start_at`을 설정한다. `min_participants`는 시작 전제 조건이고 자동 시작 트리거가 아니며, 비공개는 6자리 참여 코드 사용 |
 | 포인트 충전 / 예치 / 환급 | 포인트를 충전하고 보증금을 잠근 뒤 정산 후 환급  | 보증금은 1,000원~100만원, 1,000원 단위이며 모든 포인트 변화는 source of truth인 `point_history`에 남기고, `point_account.balance`는 재계산 가능한 현재값 캐시로만 사용한다 |
 | 이미지 인증 업로드        | 정해진 시간 안에 사진으로 미션 수행              | S3 업로드, 서버 수신 시간 기록                                                                                                                                     |
 | Exif 검증                 | 촬영 시각과 서버 기록을 비교                     | Exif 없음 또는 불일치 시 실패 처리                                                                                                                                 |
@@ -191,7 +191,13 @@ AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조
 #### 핵심 비즈니스 규칙
 
 - `min_participants`는 방별 설정값이며, host가 생성 시 정한다. 기본값은 `2`명이고 `2 <= min_participants <= max_participants <= 10`을 만족해야 한다.
-- 크루는 해당 방의 `min_participants` 이상 모여야 시작한다. 인원 미달이면 보증금은 전액 환급한다.
+- MVP에서 크루는 `min_participants` 충족만으로 자동 시작되지 않는다. `RECRUITING -> ACTIVE` 전이의 유일한 트리거는 host의 `StartRoom` command 성공이다.
+- `StartRoom` command는 host 전용이며, 실행 시점에 방이 `RECRUITING`인지, 서버 시간이 `start_at`을 넘지 않았는지, 현재 eligible participant 수가 `min_participants` 이상인지 재검증한다.
+- `StartRoom` 성공 시 `activated_at = server_now`를 기록하고, 이 시점의 참여자 집합을 MVP 정산/인증 기준 ACTIVE participant baseline으로 고정한다.
+- `recruitment_deadline`은 신규 참여 마감 시각이다. 이 시각 이후 신규 참여는 불가하지만, 조건을 만족한 방은 `start_at` 전까지 host가 시작할 수 있다.
+- `start_at`은 예정 시작 시각이자 MVP에서 host가 수동 시작할 수 있는 latest deadline이다. `start_at` 이후에도 시작되지 않은 `RECRUITING` 방은 batch가 `CANCELLED` 처리하고 취소형 정산으로 보증금을 전액 환급한다.
+- `activated_at`은 실제 ACTIVE 전이 시각이며, 인증 가능 시점, 정산 인정, projection/log eligibility, 분쟁 replay의 actual activation anchor다.
+- `end_at`은 MVP에서 계획된 미션 종료 cutoff로 유지하며, `activated_at`이 늦어져도 자동으로 뒤로 밀리지 않는다. `start_at` 경과 후 activation은 허용하지 않는다. 이로 인해 실제 수행 가능 기간이 짧아질 수 있지만, MVP에서는 단순한 운영 정책, deterministic settlement, replay consistency를 우선한 의도적 trade-off로 둔다.
 - 지분율 공식은 `나의 누적 성공 횟수 / 크루 전체 누적 성공 횟수 합계`다.
 - 인증 주기는 세 가지다: 매일, 반복 요일, 주 N회.
 - `SPECIFIC_DAYS`는 특정 날짜 지정이 아니라 반복 요일 규칙으로 운영한다.
@@ -199,7 +205,7 @@ AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조
 - 사용자는 `ACTIVE` 상태에서도 중도 탈퇴할 수 있지만, 탈퇴 시 보증금은 즉시 환급되지 않는다.
 - 크루 참여 시 보증금은 미션 종료 전까지 사용할 수 없도록 잠기며, 정산 결과에 따라 일부 또는 전액이 환급된다.
 - 중도 탈퇴자는 탈퇴 후 인증할 수 없고, 정산에는 `withdrawn_at` 이전 성공 횟수까지만 반영한다.
-- 크루 참여는 `RECRUITING` 상태에서만 가능하며, `ACTIVE` 이후에는 신규 참여를 받지 않는다.
+- 크루 참여는 `RECRUITING` 상태이면서 `recruitment_deadline` 전일 때만 가능하며, `ACTIVE` 이후에는 신규 참여를 받지 않는다.
 - 탈퇴 후 동일 크루 재참여는 MVP에서 지원하지 않는다.
 - 정산 계산은 크루 참여 단위(participant) 기준으로 이루어지며, 실제 포인트 환급은 사용자 계정(member) 기준으로 반영된다.
 - 실시간 지분율은 사용자 안내용 추정값이며, `Settlement.status = SUCCEEDED` 전 최종 정산 계산은 `MissionLog`와 참여자 상태를 다시 읽어 확정한다.
@@ -209,7 +215,7 @@ AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조
 - 전체 성공 `0` 분기에서는 `equal_base = FLOOR(total_locked_amount / participant_count)`를 적용하고, 남은 잔액은 같은 재현 가능한 규칙에 따라 `1원씩` 분배한다.
 - 전체 성공 `0` 분기에는 추가 차감 규칙을 두지 않는다.
 - 일반 정산에서 절사 후 남은 잔액은 기여도 1위 참여자에게 지급한다. 기여도 1위가 동점인 경우 성공 횟수를 비교하고, 그래도 동일하면 같은 재현 가능한 규칙으로 1명을 결정한다.
-- 중도 참여와 재참여는 향후 별도 정산 규칙이 정의된 뒤 지원 여부를 검토한다.
+- 중도 참여, 재참여, 자동 시작, 예약 시작은 향후 별도 lifecycle/정산 규칙이 정의된 뒤 지원 여부를 검토한다. MVP에서는 host 수동 시작만 지원한다.
 - 정산 처리 상태의 원천은 `Settlement.status`이며, `MissionRoom.settlement_status`가 있더라도 조회 최적화용 비정규화 필드로만 본다.
 - 모든 포인트 변화는 source of truth인 `point_history`에 남기고, `point_account.balance`는 `point_history`에서 재계산 가능한 캐시로 취급한다.
 - 정산 환급은 participant 단위 지급 모델이다. 각 `settlement_item`은 deterministic `idempotency_key`로 하나의 `point_history`에만 연결되며, `SUCCEEDED`가 되려면 모든 item의 지급 원장 연결이 완료되어야 한다.
@@ -225,6 +231,7 @@ AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조
 - 전체 성공 횟수 `0`: 보증금은 균등 환급하고, 절사 후 잔액이 있으면 재현 가능한 규칙에 따라 `1원씩` 분배
 - 배치 실패: 실패 코드 저장, 3회 재시도 후 알림, 필요 시 어드민 수동 처리
 - 같은 방 동시 정산 요청: DB 조건부 `PENDING/RETRY_WAIT -> RUNNING` claim을 1차 기준으로 삼고, Redisson 락은 보조 수단, DB unique와 `point_history.idempotency_key`는 최종 방어선으로 삼는다
+- `StartRoom`과 시작 만료 취소 batch가 경합하면 둘 다 `RECRUITING` 조건부 전이로 처리한다. 하나만 `ACTIVE` 또는 `CANCELLED`로 성공하고, loser는 최종 상태를 재조회하며 취소형 settlement는 unique/idempotent하게 1회만 생성한다.
 - 동시 인증 폭주: 인증 로그는 먼저 저장하고, 실시간 지표가 일부 지연되더라도 `SUCCEEDED` 전 정산 계산은 MissionLog 재계산으로 확정
 
 ### 7.3 Technology

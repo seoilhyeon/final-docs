@@ -5,7 +5,7 @@
 - [PRD-god-saving.md](./PRD-god-saving.md)
 - [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md)
 - [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)
-- `docs/갓세이빙_기획서.docx`
+- `docs/갓세이빙_프로젝트기획안.docx` (활성 제품/UX 참고 자료; 기존 `갓세이빙_프로젝트기획서.docx` 명칭이나 사본은 legacy/reference 입력)
 
 ## 1. 목적
 
@@ -44,6 +44,11 @@
 
 - MVP의 정산 기준 시간대는 `Asia/Seoul`로 고정한다.
 - 사용자에게 보이는 미션 종료 시점은 `종료일 23:59:59 KST`다.
+- `recruitment_deadline`은 신규 참여 마감 시각이고, activation/settlement 기준 시각이 아니다.
+- `start_at`은 예정 시작 시각이자 MVP에서 host 수동 시작 가능 latest deadline이다. `start_at` 이후에도 `RECRUITING`이면 시작 만료 취소 대상이다.
+- `activated_at`은 실제 `RECRUITING -> ACTIVE` 전이 시각이며, 인증 가능 여부, 정산 인정, projection/log eligibility의 actual anchor다.
+- `end_at`은 계획된 미션 종료 cutoff로 유지하며, activation 지연으로 자동 연장하지 않는다. 실제 수행 가능 기간이 짧아질 수 있지만, MVP에서는 단순한 운영 정책, deterministic settlement, replay consistency를 우선한 의도적 trade-off다.
+- 따라서 성공한 activation은 운영상 `activated_at <= start_at`을 만족한다. `StartRoom`은 `start_at` 이후 실패하고, `start_at` 이후에도 `RECRUITING`인 방은 취소 batch 대상이기 때문이다. 이는 구현/운영 판단용 MVP invariant이며, 별도 DB constraint 추가를 의미하지 않는다.
 - 배치 스케줄러는 `익일 00:05 KST`부터 정산을 시작한다.
 - 이 `5분` 버퍼는 마지막 인증 저장, 로그 커밋, 시계 오차 흡수를 위한 구현 결정이다.
 - 목표 SLA는 `00:30 KST` 이내 정산 완료다.
@@ -62,19 +67,24 @@
 - 탈퇴 후에는 추가 인증이 불가하고, 탈퇴 직후 보증금을 즉시 환급하지 않는다.
 - 탈퇴자의 보증금은 최종 정산 시점까지 풀에 남는다.
 - 탈퇴는 `미래 기여를 중단하는 이벤트`이며, 과거 기여는 그대로 인정한다.
-- 신규 참여는 `MissionRoom.status = RECRUITING`에서만 허용한다.
+- 신규 참여는 `MissionRoom.status = RECRUITING`이고 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
 - `ACTIVE` 이후 신규 참여는 허용하지 않고, 탈퇴 후 동일 방 재참여도 MVP에서는 지원하지 않는다.
+- `StartRoom` 성공 시점의 eligible participant 집합을 MVP 정산 기준 ACTIVE participant baseline으로 본다. 별도 snapshot/versioning table은 MVP에서 추가하지 않고, `activated_at`과 participant 상태 이력으로 replay한다.
 
 ### 3.3 `min_participants` 정책
 
 - `min_participants`는 `MissionRoom`별 설정값으로 관리한다.
 - 방 생성 시 host가 설정할 수 있고, 기본값은 `2`명이다.
 - 제약 조건은 `2 <= min_participants <= max_participants <= 10`이다.
+- MVP에서 `min_participants` 충족은 자동 시작 트리거가 아니라 `StartRoom` command의 precondition이다.
+- `StartRoom` 실행 시점에 eligible participant 수를 다시 검증하며, 미달이면 `ACTIVE`로 전이하지 않는다.
 
-### 3.4 인원 미달 취소
+### 3.4 시작 만료 / 인원 미달 취소
 
-- 크루 시작 시점까지 해당 방의 `min_participants`를 채우지 못하면 미션은 `CANCELLED` 처리한다.
-- 인원 미달 취소는 일반 정산과 별개가 아니라 `취소형 정산`으로 기록한다.
+- `recruitment_deadline` 이후 신규 참여는 차단한다.
+- `min_participants`를 충족한 방도 host가 `start_at`까지 `StartRoom`을 성공시키지 않으면 시작되지 않는다.
+- `start_at` 이후에도 `RECRUITING`인 방은 batch가 `CANCELLED` 처리한다.
+- 시작 만료 또는 인원 미달 취소는 일반 정산과 별개가 아니라 `취소형 정산`으로 기록한다.
 - 취소형 정산에서는 각 참여자에게 `잠긴 보증금 전액`을 환급한다.
 
 ### 3.5 정산 계산 입력과 성공 후 운영 원천
@@ -129,9 +139,11 @@
 
 기본 흐름:
 
-- `RECRUITING -> ACTIVE`
-- `RECRUITING -> CANCELLED`
-- `ACTIVE -> CLOSED`
+- `RECRUITING -> ACTIVE`: host의 `StartRoom` command가 조건부 전이에 성공할 때만 발생한다.
+- `RECRUITING -> CANCELLED`: `start_at` 만료 후에도 미시작 상태이거나 기존 취소 정책이 조건부 전이에 성공할 때 발생한다.
+- `ACTIVE -> CLOSED`: 계획된 `end_at` cutoff 이후 정상 종료 처리로 발생한다.
+
+`StartRoom`과 시작 만료 취소 batch는 모두 `RECRUITING` 상태를 조건으로 하는 전이다. 동시에 경합하면 하나만 성공하고, loser는 최종 room 상태를 재조회한다. 취소형 settlement 생성은 unique/idempotent해야 한다.
 
 ### 5.2 Settlement 상태
 
@@ -530,8 +542,8 @@ where id = :settlementId
 
 ### 8.4 WEEKLY_N
 
-- 기준: `room.start_at`을 기준으로 7일씩 끊은 주간 버킷마다 최대 `N회` 인정
-- 구현: `week_index = floor(days_between(start_date, log_date) / 7) + 1`
+- 기준: 실제 activation 이후에는 `room.activated_at`의 KST date를 기준으로 7일씩 끊은 주간 버킷마다 최대 `N회` 인정
+- 구현: `week_index = floor(days_between(kst_date(room.activated_at), log_date) / 7) + 1`
 - 각 `week_index`별 성공 개수 중 `min(success_count, frequency_count)`만 인정
 - 스냅샷: 주차별 인정/제외 수를 `calculation_reason.weeklyBuckets`에 남긴다
 
@@ -616,7 +628,7 @@ remainder = total_locked_amount - (equal_base × participant_count)
 
 - 참여자 수가 `n`명일 때 절사 후 잔액은 항상 `0 <= remainder < n`이다.
 - MVP 최대 인원 `10명` 기준으로 남는 잔액은 `최대 9원`이다.
-- 기획서의 `1~10원`은 설명용 표현으로 보고, 구현 기준은 위 수학적 상한으로 고정한다.
+- 원문 기획안/legacy 기획서의 `1~10원`은 설명용 표현으로 보고, 구현 기준은 위 수학적 상한으로 고정한다.
 
 ### 9.5 deterministic draw 규칙
 
@@ -1013,6 +1025,21 @@ remainder = 0
 - MVP라도 돈이 오가는 규칙은 `설명 가능성`, `재현 가능성`, `재시도 가능성`이 우선이므로 스냅샷 테이블 + 선생성된 `Settlement` 구조를 채택한다.
 
 ## 18. 테스트 시나리오
+
+### 18.0 Lifecycle / activation 테스트
+
+- `TS-LC-01` host `StartRoom` 성공
+  기대 결과: `RECRUITING` 방에서 host가 시작 조건을 만족해 command를 실행하면 `ACTIVE`로 전이하고 `activated_at`이 기록된다.
+- `TS-LC-02` `min_participants` 미달 시작 실패
+  기대 결과: command 실행 시점의 eligible participant 수가 `min_participants` 미만이면 `ACTIVE`로 전이하지 않는다.
+- `TS-LC-03` `start_at` 만료 후 시작 실패
+  기대 결과: `start_at` 이후 host start 요청은 만료 오류 또는 이미 취소된 최종 상태로 응답한다.
+- `TS-LC-04` 시작 만료 취소 settlement 멱등성
+  기대 결과: `RECRUITING -> CANCELLED` batch가 성공하면 `CANCELLED_BEFORE_START` settlement가 1회만 생성되고 재시도해도 중복 환급되지 않는다.
+- `TS-LC-05` `StartRoom`과 취소 batch 경합
+  기대 결과: 하나의 조건부 전이만 성공하고 loser는 최종 상태를 재조회한다.
+- `TS-LC-06` 인증/log eligibility anchor
+  기대 결과: `MissionLog.server_time < room.activated_at`이면 `BEFORE_START` 또는 동등 사유로 정산 인정에서 제외한다.
 
 ### 18.1 단위 테스트
 

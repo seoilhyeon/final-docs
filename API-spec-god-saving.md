@@ -67,7 +67,7 @@
 
 ### 2.6 상태값 원칙
 
-- `MissionRoom.status`는 방 상태다.
+- `MissionRoom.status`는 방 상태다. MVP에서 `RECRUITING -> ACTIVE`는 host `StartRoom` command 성공으로만 발생한다.
 - `Participant.status`는 참여 상태다.
 - `Settlement.status`는 정산 처리 상태의 원천이다.
 - `NONE`은 `Settlement` row가 아직 없는 상태를 보여주기 위한 API 응답용 값이다. DB `settlement.status`에는 저장하지 않는다.
@@ -78,10 +78,10 @@
 
 ### 3.1 RoomStatus
 
-- `RECRUITING`
-- `ACTIVE`
-- `CLOSED`
-- `CANCELLED`
+- `RECRUITING`: 모집 중. `recruitment_deadline` 전에는 신규 참여 가능, 이후에는 신규 참여 불가.
+- `ACTIVE`: host `StartRoom` command가 성공해 `activated_at`이 기록된 진행 중 상태.
+- `CLOSED`: 계획된 `end_at` 이후 정상 종료 상태.
+- `CANCELLED`: 시작 전 취소 상태. `start_at`까지 미시작이면 batch가 취소형 정산 대상으로 전이할 수 있다.
 
 ### 3.2 RoomVisibility
 
@@ -173,6 +173,7 @@
 | 크루/참여   | `GET`    | `/api/rooms/join-code/{joinCode}`               | 참여 코드로 방 조회                      |
 | 크루/참여   | `POST`   | `/api/rooms/{roomId}/participants`              | 방 참여 및 보증금 lock                   |
 | 크루/참여   | `POST`   | `/api/rooms/{roomId}/withdraw`                  | 방 탈퇴                                  |
+| 크루/참여   | `POST`   | `/api/rooms/{roomId}/start`                     | host 수동 미션 시작                      |
 | 미션 인증   | `POST`   | `/api/mission-logs`                             | 인증 제출                                |
 | 미션 인증   | `GET`    | `/api/rooms/{roomId}/mission-logs/me`           | 내 인증 기록 조회                        |
 | 피드/리액션 | `GET`    | `/api/rooms/{roomId}/feed`                      | 방 인증 피드와 파생 일자 상태 조회       |
@@ -419,7 +420,9 @@ Response `200 OK`:
       "frequency_type": "DAILY",
       "frequency_count": null,
       "mission_schedule_days": [],
+      "recruitment_deadline": "2026-05-09T23:59:59+09:00",
       "start_at": "2026-05-10T00:00:00+09:00",
+      "activated_at": null,
       "end_at": "2026-05-31T23:59:59+09:00"
     }
   ]
@@ -450,8 +453,9 @@ Request:
 | `frequency_type`        | `string`   | Y    | `DAILY` / `SPECIFIC_DAYS` / `WEEKLY_N`                  |
 | `frequency_count`       | `integer`  | N    | `WEEKLY_N`일 때 필수                                    |
 | `mission_schedule_days` | `string[]` | N    | `SPECIFIC_DAYS`일 때 필수. 예: `["MONDAY","WEDNESDAY"]` |
-| `start_date`            | `string`   | Y    | `YYYY-MM-DD`                                            |
-| `end_date`              | `string`   | Y    | `YYYY-MM-DD`                                            |
+| `recruitment_deadline`  | `string`   | Y    | ISO-8601. 신규 참여 마감 시각                           |
+| `start_date`            | `string`   | Y    | `YYYY-MM-DD`. 예정 시작일                               |
+| `end_date`              | `string`   | Y    | `YYYY-MM-DD`. 계획된 종료일                             |
 
 Response `201 Created`:
 
@@ -468,7 +472,9 @@ Response `201 Created`:
   "frequency_type": "SPECIFIC_DAYS",
   "frequency_count": null,
   "mission_schedule_days": ["MONDAY", "WEDNESDAY", "FRIDAY"],
+  "recruitment_deadline": "2026-05-09T23:59:59+09:00",
   "start_at": "2026-05-10T00:00:00+09:00",
+  "activated_at": null,
   "end_at": "2026-05-31T23:59:59+09:00",
   "created_at": "2026-05-07T09:00:00+09:00"
 }
@@ -485,7 +491,9 @@ Error:
 - `deposit_amount`는 `1,000원 ~ 1,000,000원`, `1,000원 단위`를 만족해야 한다.
 - `min_participants`는 기본값 `2`고, `2 <= min_participants <= max_participants <= 10`을 만족해야 한다.
 - `SPECIFIC_DAYS`는 특정 날짜가 아니라 반복 요일 규칙이며 `mission_schedule_day` 원본으로 저장한다.
-- `start_date`, `end_date`는 서버에서 `Asia/Seoul` 기준 `start_at`, `end_at`으로 정규화한다.
+- `recruitment_deadline`은 신규 참여 마감 시각이며 activation/settlement 기준이 아니다.
+- `start_date`, `end_date`는 서버에서 `Asia/Seoul` 기준 `start_at`, `end_at`으로 정규화한다. `start_at`은 예정 시작 및 MVP 수동 시작 가능 만료 시각이고, 실제 ACTIVE 전이 시각은 `activated_at`이다.
+- `end_at`은 계획된 미션 종료 cutoff이며 activation 지연으로 자동 이동하지 않는다.
 
 ### `GET /api/rooms/{roomId}`
 
@@ -510,7 +518,9 @@ Response `200 OK`:
   "frequency_type": "DAILY",
   "frequency_count": null,
   "mission_schedule_days": [],
+  "recruitment_deadline": "2026-05-09T23:59:59+09:00",
   "start_at": "2026-05-10T00:00:00+09:00",
+  "activated_at": "2026-05-09T23:30:00+09:00",
   "end_at": "2026-05-31T23:59:59+09:00",
   "my_participation": {
     "participant_id": 101,
@@ -552,7 +562,9 @@ Response `200 OK`:
   "frequency_type": "DAILY",
   "frequency_count": null,
   "mission_schedule_days": [],
+  "recruitment_deadline": "2026-05-09T23:59:59+09:00",
   "start_at": "2026-05-10T00:00:00+09:00",
+  "activated_at": null,
   "end_at": "2026-05-31T23:59:59+09:00"
 }
 ```
@@ -595,7 +607,8 @@ Error:
 
 정책:
 
-- 신규 참여는 `RECRUITING`에서만 허용한다.
+- 신규 참여는 `RECRUITING` 상태이면서 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
+- `recruitment_deadline` 이후에는 `ROOM_RECRUITMENT_CLOSED` 또는 `ROOM_NOT_RECRUITING` 계열 오류로 거절한다.
 - 같은 `member`는 같은 방에 하나의 `participant`만 가질 수 있다.
 - 참여 처리에서는 아래 세 단계가 하나의 트랜잭션으로 함께 성공하거나 함께 롤백되어야 한다.
   - `point_account.balance` 조건부 차감
@@ -603,6 +616,50 @@ Error:
   - `ROOM_DEPOSIT_LOCK point_history` 생성
 - 잔액 차감은 반드시 `WHERE balance >= deposit_amount` 조건부 update로 수행하고, row count가 `1`일 때만 성공으로 간주한다.
 - `INSUFFICIENT_BALANCE`는 잔액 부족뿐 아니라 동시 요청으로 조건부 update row count가 `0`이 된 경우도 포함한다.
+
+### `POST /api/rooms/{roomId}/start`
+
+역할:
+
+- host가 모집 중인 방을 수동으로 시작한다.
+- MVP에서 이 command의 성공 transaction만 `RECRUITING -> ACTIVE` 전이를 만들 수 있다.
+
+Request:
+
+- body 없음
+
+Response `200 OK` 또는 `204 No Content`:
+
+```json
+{
+  "room_id": 42,
+  "status": "ACTIVE",
+  "min_participants": 2,
+  "current_participant_count": 5,
+  "start_at": "2026-05-10T00:00:00+09:00",
+  "activated_at": "2026-05-09T23:30:00+09:00"
+}
+```
+
+Error:
+
+- `ROOM_NOT_FOUND`
+- `ROOM_START_FORBIDDEN`
+- `ROOM_NOT_RECRUITING`
+- `MIN_PARTICIPANTS_NOT_MET`
+- `ROOM_START_EXPIRED`
+- `CONFLICT`
+
+정책:
+
+- caller는 해당 방의 host여야 한다.
+- room은 `RECRUITING`이어야 한다. 단 이미 `ACTIVE`인 방에 대한 중복 요청은 idempotent success/no-op으로 처리한다.
+- 서버 시간이 `start_at`을 넘으면 `ROOM_START_EXPIRED` 또는 이미 batch가 취소한 경우 terminal-state conflict로 응답한다.
+- command 실행 시점에 eligible participant 수가 `min_participants` 이상인지 재검증한다.
+- 성공 transaction은 `status = ACTIVE`, `activated_at = server_now`를 함께 기록한다. 이 정책상 성공한 activation은 `activated_at <= start_at`을 만족하며, 이는 별도 DB constraint가 아니라 StartRoom 만료 검증과 시작 만료 취소 batch에서 파생되는 MVP invariant다.
+- 동시에 여러 start 요청이 오면 하나의 조건부 전이만 성공한다. loser는 최종 room 상태를 재조회해 deterministic response를 반환한다.
+- `CANCELLED`/`CLOSED` 같은 terminal 상태에는 `CONFLICT` 또는 `ROOM_NOT_RECRUITING` 계열 오류로 응답한다.
+- `activated_at` 이후 post-activation 인증, 정산, projection/log eligibility는 `room.start_at`이 아니라 `room.activated_at`을 기준으로 한다.
 
 ### `POST /api/rooms/{roomId}/withdraw`
 
@@ -1064,15 +1121,15 @@ Error:
 - `my_success_count`는 raw `mission_log.is_success = true` 성공 로그 수다. 정산 인정 성공 수가 아니다.
 - `my_recognized_success_count_estimated`는 현재 시점에서 정산 규칙을 가능한 범위로 반영한 추정 인정 성공 수다.
 - 추정 인정 성공 수는 `MissionLog.server_time`을 `Asia/Seoul` 기준 날짜/요일/주차로 해석해 계산한다.
-- projection 후보 로그는 `mission_log.is_success = true`이고, `room.start_at <= MissionLog.server_time <= projection_cutoff_at`을 만족해야 한다.
+- projection 후보 로그는 `mission_log.is_success = true`이고, `room.activated_at <= MissionLog.server_time <= projection_cutoff_at`을 만족해야 한다. `activated_at`이 `null`이면 post-activation projection을 계산하지 않는다.
   - `LIVE`에서는 `projection_cutoff_at = min(응답 생성 시각, room.end_at)`이다.
   - `FROZEN`에서는 `projection_cutoff_at = room.end_at`이다.
   - `room_participant.withdrawn_at`이 있으면 `MissionLog.server_time < withdrawn_at`인 success 로그만 후보로 사용한다.
 - 대표 success 선택은 모든 frequency projection에서 동일하게 `MissionLog.server_time ASC`, 동률이면 `MissionLog.id ASC` 순서를 사용한다.
 - `DAILY`는 같은 KST date의 첫 success만 인정하고 나머지 success는 duplicate로 제외한다.
 - `SPECIFIC_DAYS`는 `mission_schedule_day`에 포함된 KST weekday의 success만 후보로 삼고, valid KST date별 첫 success만 인정한다.
-- `WEEKLY_N`은 calendar week가 아니라 `room.start_at`의 KST date를 기준으로 7일 bucket을 만들고, bucket별 정렬 상위 `frequency_count`개만 인정한다.
-  - 예: `week_index = floor(days_between(kst_date(room.start_at), kst_date(MissionLog.server_time)) / 7) + 1`
+- `WEEKLY_N`은 calendar week가 아니라 실제 activation anchor인 `room.activated_at`의 KST date를 기준으로 7일 bucket을 만들고, bucket별 정렬 상위 `frequency_count`개만 인정한다.
+  - 예: `week_index = floor(days_between(kst_date(room.activated_at), kst_date(MissionLog.server_time)) / 7) + 1`
 - `total_recognized_success_count_estimated`는 참여자별 추정 인정 성공 수 합계다.
 - `my_share_ratio_estimated`는 소수 정밀도 오해를 줄이기 위해 문자열 decimal로 반환한다.
 - `my_expected_refund_amount`는 deterministic base UX estimate다. `total_recognized_success_count_estimated > 0`이면 `FLOOR(total_locked_amount × my_share_ratio_estimated)`로 계산한다.
@@ -1090,7 +1147,7 @@ Error:
 
 | Room status | Dashboard 동작 |
 | --- | --- |
-| `RECRUITING` | 성과/보상 projection은 시작 전이다. 보증금, 방 규칙, 시작 예정 정보 중심으로 표시한다. |
+| `RECRUITING` | 성과/보상 projection은 시작 전이다. 보증금, 방 규칙, `recruitment_deadline`, `start_at` 중심으로 표시한다. |
 | `ACTIVE` | 실시간 estimated projection을 계산한다. 모든 금액/비율/순위는 추정값이다. |
 | `CLOSED` | `room.end_at` cutoff로 query-time deterministic frozen projection을 재계산해 보여준다. 저장된 snapshot이 아니며, `Settlement.status = SUCCEEDED` 전까지 최종값이 아니므로 pending/running/retry 상태 안내를 함께 제공한다. |
 | `CANCELLED` | 수행 성과 projection을 제공하지 않는다. 시작 전 취소 정산/환급은 Settlement API 기준으로 안내한다. |
@@ -1643,8 +1700,8 @@ Error:
 ### 6.1 Room
 
 ```text
-RECRUITING -> ACTIVE -> CLOSED
-RECRUITING -> CANCELLED
+RECRUITING --host StartRoom success / activated_at set--> ACTIVE -> CLOSED
+RECRUITING --start_at expired cancellation batch--> CANCELLED
 ```
 
 ### 6.2 Participant
