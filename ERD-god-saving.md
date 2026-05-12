@@ -675,12 +675,14 @@ Unique / Index:
 상태값 / Enum:
 
 - `participant_status_snapshot`: `JOINED`, `WITHDRAWN`
+- `calculation_reason` vocabulary는 JSON 내부 진단 코드 문자열이며 DB enum/constraint나 public API enum이 아니다. MVP discoverability 목적의 대표 값은 `DAILY_DUPLICATE`, `INVALID_SCHEDULE_DAY`, `WEEKLY_N_OVERFLOW`, `AFTER_WITHDRAWN_AT`, `BEFORE_START`, `AFTER_END`다.
 
 주의사항:
 
 - 정산 계산 단위는 `participant_id`고, 실제 포인트 지급 단위는 `member_id`다.
 - 같은 방에서 한 `member`가 하나의 `participant`만 가진다는 불변식이 있으므로 계산과 지급 연결이 안정적이다.
 - `calculation_reason`은 `DAILY` 중복 제외, `SPECIFIC_DAYS` 비유효 요일 제외, `WEEKLY_N` 상한 제외, `withdrawn_at` cutoff를 설명해야 한다.
+- `calculation_reason` 값 공간은 정산 스냅샷의 설명/QA 검색성을 위한 vocabulary이며, DB 제약이나 API 응답 enum으로 승격하지 않는다.
 - `settlement_item`은 참여자별 계산 결과의 source of truth고, `point_history`는 그 결과를 실제 잔액에 반영하는 금액 source of truth다. `Settlement.status = SUCCEEDED` 이후에는 두 테이블이 운영/분쟁/조회 기준이다.
 - 정산 실행에서는 `settlement_item`을 먼저 생성해 계산 결과를 고정하고, 이후 `point_history`를 생성한 뒤 `point_history_id`를 연결한다.
 - 두 단계는 participant별 `idempotency_key`를 통해 느슨하게 연결되므로, partial 재시도 시 이미 반영된 환급은 재사용하고 누락된 환급만 안전하게 이어서 처리할 수 있어야 한다.
@@ -727,6 +729,7 @@ Unique / Index:
 상태값 / Enum:
 
 - `status`: `PENDING`, `SUCCEEDED`, `FAILED`
+- `failure_code` MVP catalog: `AI_REPORT_FAILED`, `AI_RESPONSE_INVALID`, `UNKNOWN` (`VARCHAR(50)` 저장값이며 strict DB enum/constraint가 아니다.)
 
 주의사항:
 

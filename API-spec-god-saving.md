@@ -143,13 +143,47 @@
 - `SUCCEEDED`
 - `FAILED`
 
-### 3.11 PointHistoryReferenceType
+### 3.11 AiHabitReportFailureCode
+
+`ai_habit_report.failure_code`의 MVP catalog다.
+
+이 값들은 API/FE/QA의 discoverability를 위한 문서화 목적이며, strict DB enum이나 상세 retry taxonomy를 의미하지 않는다.
+
+- `AI_REPORT_FAILED`
+- `AI_RESPONSE_INVALID`
+- `UNKNOWN`
+
+### 3.12 ProjectionStatus
+
+대시보드 projection 응답 전용 상태값이다.
+
+이 값들은 DB에 저장되는 enum이 아니며, lifecycle 또는 settlement source-of-truth로 사용하지 않는다.
+
+- `NOT_STARTED`
+- `LIVE`
+- `FROZEN`
+- `NOT_PROVIDED`
+- `SETTLEMENT_SUCCEEDED`
+
+### 3.13 ProjectionNotice
+
+대시보드 projection 응답의 현재 상태를 설명하기 위한 안내 값이다.
+
+이 값들은 DB에 저장되지 않으며, projection 응답의 보조 설명 용도로만 사용한다.
+
+- `ESTIMATED_NOT_FINAL`
+- `NOT_STARTED`
+- `NOT_PROVIDED`
+- `SETTLEMENT_RESULT_AVAILABLE`
+- `INSUFFICIENT_PROJECTION_INPUT`
+
+### 3.14 PointHistoryReferenceType
 
 - `POINT_CHARGE`
 - `ROOM_PARTICIPANT`
 - `SETTLEMENT_ITEM`
 
-### 3.12 MissionLogReactionType
+### 3.15 MissionLogReactionType
 
 - `CHEER`
 - `CLAP`

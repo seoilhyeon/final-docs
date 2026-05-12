@@ -416,6 +416,19 @@ where id = :settlementId
 - `point_history_id`는 정산 실행 중간 상태에서는 nullable일 수 있지만, `Settlement.status = SUCCEEDED`인 결과에서는 모두 채워져 있어야 한다.
 - `Settlement.status = SUCCEEDED`가 되려면 모든 `settlement_item`이 유효한 `point_history`를 가리켜야 한다.
 
+MVP `calculation_reason` vocabulary:
+
+이 목록은 정산 스냅샷 진단/QA 검색성을 위한 대표 코드다. Public API enum, DB enum, DB constraint로 승격하지 않는다.
+
+| code | 의미 |
+| --- | --- |
+| `DAILY_DUPLICATE` | `DAILY` 규칙에서 같은 일자 성공 로그 중 대표 1건 외 제외 |
+| `INVALID_SCHEDULE_DAY` | `SPECIFIC_DAYS` 규칙에서 허용 요일이 아닌 성공 로그 제외 |
+| `WEEKLY_N_OVERFLOW` | `WEEKLY_N` 규칙에서 주간 허용 횟수 초과분 제외 |
+| `AFTER_WITHDRAWN_AT` | `withdrawn_at` 이후 성공 로그 제외 |
+| `BEFORE_START` | activation/정산 계산 시작 cutoff 이전 로그 제외 |
+| `AFTER_END` | 방 종료 cutoff 이후 로그 제외 |
+
 `calculation_reason` 예시:
 
 ```json
