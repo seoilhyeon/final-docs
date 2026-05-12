@@ -408,6 +408,7 @@ where id = :settlementId
 - `settlement_item`은 참여자별 정산 계산 결과의 source of truth고, `point_history`는 그 결과를 계정 잔액에 반영하는 금액 source of truth다. `Settlement.status = SUCCEEDED` 이후 두 테이블이 운영/분쟁/조회 기준이다.
 - `deposit_amount`는 participant 단위로 잠겨 있던 보증금의 입력 스냅샷이며, 실제 잔액 반영은 `point_history`가 담당한다.
 - `calculation_reason`은 `DAILY` 중복 제외, `SPECIFIC_DAYS` 비유효 요일 제외, `WEEKLY_N` 상한 제외, `withdrawn_at` cutoff 적용을 설명할 수 있어야 한다.
+- `calculation_reason`의 `AFTER_WITHDRAWN_AT` 같은 값은 정산 계산 스냅샷 key이며, public `MissionLogFailureReason` enum(`AFTER_WITHDRAWN` 등)과 동일 책임이 아니다.
 - `reward_amount`는 잠긴 보증금보다 더 많이 환급된 경우를 설명하기 위한 보조 저장값이다.
 - 잠긴 보증금보다 적게 환급된 경우는 `deposit_amount`, `final_amount`, `share_ratio`, `recognized_success_count` 비교로 설명한다.
 - `settlement_item`을 먼저 생성해 계산 결과를 고정하고, 이후 `point_history`를 생성한 뒤 `point_history_id`를 연결한다.

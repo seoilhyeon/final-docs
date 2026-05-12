@@ -95,7 +95,7 @@ MVP-ticket-breakdown
 - 구현 티켓, 선행 의존성, 병렬 실행 순서는 `MVP-ticket-breakdown`에만 정의한다.
 - 활성 기획안(`docs/갓세이빙_프로젝트기획안.docx`)의 표현이 현재 Markdown 문서와 다르면 docx를 직접 구현 기준으로 사용하지 않는다. 필요한 내용은 먼저 소유 Markdown source of truth 문서로 승격한 뒤 구현한다. 기존 `갓세이빙_프로젝트기획서.docx`는 legacy/reference 입력으로만 취급한다.
 - AI 비트랜잭션 경계는 `PRD`, `API-spec`, `ERD`가 같은 정책을 유지해야 한다.
-- `point_history.reference_type`의 DB enum/constraint 언어는 `ERD`가 소유하고, `API-spec`은 FE/BE 계약에 필요한 소비자-facing enum과 매핑만 반복한다.
+- DB enum/constraint의 source of truth는 `ERD`가 소유하고, `API-spec`은 FE/BE 계약에 필요한 consumer-facing enum과 매핑만 반복한다. 예: `point_history.reference_type`, `settlement_status`, `settlement_type`, `frequency_type`, `transaction_type`.
 
 다른 문서에는 필요한 만큼만 요약하고, 상세 규칙은 source of truth 문서로 링크한다. 같은 표나 enum, 같은 계산식을 여러 문서에 복제하지 않는다.
 

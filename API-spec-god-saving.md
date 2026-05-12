@@ -976,14 +976,7 @@ Error:
 
 - 리액션 대상은 `mission_log.is_success = true`인 feed-eligible `MissionLog`로 제한한다.
 - `POST`는 `(mission_log_id, member_id)` 기준 멱등 upsert다. 기존 리액션이 있으면 같은 row의 `reaction_type`을 교체하고, 없으면 생성한다.
-- 구현은 DB-level upsert conflict handling을 MUST로 한다. PostgreSQL 예:
-
-```sql
-INSERT INTO mission_log_reaction (mission_log_id, member_id, reaction_type, created_at, updated_at)
-VALUES (:mission_log_id, :member_id, :reaction_type, now(), now())
-ON CONFLICT (mission_log_id, member_id)
-DO UPDATE SET reaction_type = EXCLUDED.reaction_type, updated_at = now();
-```
+- 구현은 `(mission_log_id, member_id)` unique constraint 기반의 DB-level idempotent upsert를 MUST로 한다. SQL 문법은 실제 MySQL 8.0 stack에 맞춘다.
 
 - 동일 `(mission_log_id, member_id)`에 대한 동시 중복 요청은 DB unique conflict 때문에 API 에러가 되어서는 안 되며, 최종 상태는 하나의 일관된 `reaction_type`으로 성공적으로 수렴해야 한다.
 - 한 회원은 한 `MissionLog`에 하나의 리액션만 가진다.

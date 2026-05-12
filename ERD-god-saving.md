@@ -263,6 +263,7 @@ Unique / Index:
 - `ROOM_SETTLEMENT_REFUND`는 일반 정산 환급으로 `balance`를 증가시킨다.
 - `ROOM_CANCELLED_REFUND`는 취소형 정산 환급으로 `balance`를 증가시킨다.
 - 포인트 충전은 `reference_type = POINT_CHARGE`, `reference_id = point_history.id`로 추적하고, 결제 식별자는 `idempotency_key = charge:{paymentId}`에 남긴다.
+- MVP에서는 별도 payment aggregate 없이 `point_history` 자체를 충전 ledger로 사용하므로, 충전 이벤트의 `reference_id`는 생성된 자기 `point_history.id`를 가리킨다.
 - 참여 시 보증금 잠금은 `reference_type = ROOM_PARTICIPANT`, `reference_id = room_participant.id`로 추적한다.
 - 정산 지급의 `reference_type = SETTLEMENT_ITEM`, `reference_id = settlement_item.id` 조합으로 어느 계산 결과가 원장에 반영됐는지 추적한다.
 - 모든 포인트 변경은 `idempotency_key`를 반드시 가진다.
