@@ -23,13 +23,15 @@
 
 1. [PRD-god-saving.md](./PRD-god-saving.md)
    제품 목표, MVP 범위, 핵심 비즈니스 규칙을 먼저 이해한다. 이 문서를 읽지 않고 설계나 API부터 보면 왜 그런 제약이 있는지 놓치기 쉽다.
-2. [ERD-god-saving.md](./ERD-god-saving.md) + [Settlement-design.md](./Settlement-design.md)
+2. [Tech-stack-god-saving.md](./Tech-stack-god-saving.md)
+   문서 기준으로 확정된 기술 스택과 아직 미정인 구현 세부사항을 빠르게 확인한다. 이 문서는 요약 문서이며, 세부 기준은 PRD, ERD, 정산 설계, API 문서가 우선한다.
+3. [ERD-god-saving.md](./ERD-god-saving.md) + [Settlement-design.md](./Settlement-design.md)
    PRD를 읽은 뒤에는 도메인 구조와 정산 규칙을 같이 본다. `ERD`는 데이터 모델의 경계를 설명하고, `Settlement-design`은 정산/포인트/동시성/재시도 같은 운영 규칙을 설명한다. 두 문서를 함께 봐야 데이터 구조와 비즈니스 계산 규칙이 연결된다.
-3. [API-spec-god-saving.md](./API-spec-god-saving.md)
+4. [API-spec-god-saving.md](./API-spec-god-saving.md)
    앞선 문서들을 기반으로 FE/BE 계약을 확인한다. API는 독립 출발점이 아니라 PRD, ERD, 정산 설계를 외부 인터페이스로 고정한 결과물이다.
-4. [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md) + [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)
+5. [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md) + [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)
    마지막으로 실행 계획을 본다. 여기서는 무엇을 만들지 다시 정의하지 않고, 이미 결정된 범위를 어떤 단위로 구현할지 확인한다.
-5. [갓세이빙\_프로젝트기획안.docx](./갓세이빙_프로젝트기획안.docx)
+6. [갓세이빙\_프로젝트기획안.docx](./갓세이빙_프로젝트기획안.docx)
    활성 제품/UX 참고 자료다. 배경, 화면 의도, 소셜 피드 표현을 확인할 때만 본다. 구현 판단은 Markdown source of truth 문서에 승격된 내용만 따른다.
 
 ## 3. 문서별 역할 정의
@@ -37,6 +39,7 @@
 | 문서                                                            | 한 줄 요약                                                            | 언제 읽는가                                     | Source of Truth                        |
 | --------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------- |
 | [PRD-god-saving.md](./PRD-god-saving.md)                        | MVP의 목표, 범위, 사용자 가치, 핵심 비즈니스 규칙을 정의한다.         | 프로젝트 온보딩 시작 시, 제품 정책 변경 검토 시 | 비즈니스 요구사항과 MVP 범위           |
+| [Tech-stack-god-saving.md](./Tech-stack-god-saving.md)          | 문서 기준 기술 스택, 운영 원칙, 미정 구현 항목을 요약한다.            | 온보딩, 구현 착수 전 기술 전제 확인 시          | 요약 문서. 세부 기준은 원문 문서 우선  |
 | [ERD-god-saving.md](./ERD-god-saving.md)                        | 핵심 테이블, 관계, 제약, 스냅샷 저장 구조를 정의한다.                 | DB 설계, 쿼리 설계, 영속성 모델 검토 시         | 데이터 구조와 DB 제약                  |
 | [Settlement-design.md](./Settlement-design.md)                  | 정산 계산, 상태 흐름, 멱등성, 동시성, 실패/재시도 정책을 정의한다.    | 정산/포인트/배치 구현 또는 운영 정책 검토 시    | 정산 도메인 규칙과 운영 안전성 정책    |
 | [API-spec-god-saving.md](./API-spec-god-saving.md)              | FE/BE가 공유하는 엔드포인트, 요청/응답, 에러, 상태값 계약을 정의한다. | 화면 연동, API 구현, QA 시나리오 작성 시        | 외부 API 계약                          |
@@ -127,10 +130,11 @@ MVP-ticket-breakdown
 권장 순서:
 
 1. [PRD-god-saving.md](./PRD-god-saving.md)
-2. [Settlement-design.md](./Settlement-design.md)
-3. [ERD-god-saving.md](./ERD-god-saving.md)
-4. [API-spec-god-saving.md](./API-spec-god-saving.md)
-5. [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)
+2. [Tech-stack-god-saving.md](./Tech-stack-god-saving.md)
+3. [Settlement-design.md](./Settlement-design.md)
+4. [ERD-god-saving.md](./ERD-god-saving.md)
+5. [API-spec-god-saving.md](./API-spec-god-saving.md)
+6. [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)
 
 이 순서가 필요한 이유:
 정산, 포인트, 참가/탈퇴, 원장, 배치 같은 핵심 도메인 규칙이 데이터 구조와 강하게 연결되어 있기 때문이다.
@@ -140,9 +144,10 @@ MVP-ticket-breakdown
 권장 순서:
 
 1. [PRD-god-saving.md](./PRD-god-saving.md)
-2. [API-spec-god-saving.md](./API-spec-god-saving.md)
-3. [Settlement-design.md](./Settlement-design.md)
-4. [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md)
+2. [Tech-stack-god-saving.md](./Tech-stack-god-saving.md)
+3. [API-spec-god-saving.md](./API-spec-god-saving.md)
+4. [Settlement-design.md](./Settlement-design.md)
+5. [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md)
 
 이 순서가 필요한 이유:
 화면은 제품 흐름과 API 계약에 직접 연결되고, 정산/인증처럼 오해하기 쉬운 상태는 `Settlement-design`의 기준을 같이 알아야 UI 해석 오류를 줄일 수 있다.
@@ -152,9 +157,10 @@ MVP-ticket-breakdown
 권장 순서:
 
 1. [PRD-god-saving.md](./PRD-god-saving.md)
-2. [Settlement-design.md](./Settlement-design.md)
-3. [ERD-god-saving.md](./ERD-god-saving.md)
-4. [API-spec-god-saving.md](./API-spec-god-saving.md)
+2. [Tech-stack-god-saving.md](./Tech-stack-god-saving.md)
+3. [Settlement-design.md](./Settlement-design.md)
+4. [ERD-god-saving.md](./ERD-god-saving.md)
+5. [API-spec-god-saving.md](./API-spec-god-saving.md)
 
 이 순서가 필요한 이유:
 배치 스케줄, 재시도, 멱등성, 포인트 원장, 운영 복구 경로는 인프라와 운영 설계에 직접 영향을 준다.
