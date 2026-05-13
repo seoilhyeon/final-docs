@@ -582,6 +582,7 @@ Redis 장애 중에도 복구가 필요하면, 별도 관리자 API 또는 batch
 MVP의 기본 fallback은 settlement-level ownership이다.
 
 - `Settlement.status in (PENDING, RETRY_WAIT)`인 row만 대상이다.
+- stale `RUNNING` timeout 후보는 먼저 RUNNING timeout recovery로 `RETRY_WAIT` 전환한 뒤 fallback claim 대상이 된다.
 - 조건부 update로 `PENDING/RETRY_WAIT -> RUNNING` claim을 수행한다.
 - `batch_run_key`, `started_at`, `retry_count`, failure code를 기록한다.
 - update row count가 `1`이면 실행권을 가진다.
@@ -772,6 +773,28 @@ Direct DB mutation은 정상 복구 경로가 아니다. break-glass emergency�
 1. 운영자는 approved API/batch command를 통해서만 금전성 복구를 실행한다.
 2. 복구 command는 idempotent하고 resumable해야 한다.
 3. 복구 실행자는 누가, 언제, 무엇을 실행했는지 audit log를 남긴다.
+
+### 8.1 Implementation gate overlay
+
+구현자는 `docs/implementation-gates.md`를 PR 리뷰용 gate checklist로 함께 사용한다. 이 overlay는 새로운 source of truth가 아니라, 본 ADR과 `API-spec`, `ERD`, `Settlement-design`, runbook의 blocker-level invariant를 구현 중 반복 확인하기 위한 문서다.
+
+Blocker로 취급한다:
+
+- `point_history` source of truth 위반
+- deterministic idempotency key 위반
+- Redis/Batch/CloudWatch를 correctness source로 승격
+- `Settlement.status = SUCCEEDED`인데 `settlement_item.point_history_id` 또는 대응 `point_history`가 누락된 상태
+- client-provided EXIF를 authoritative로 저장
+- 관리자 API/runbook 없이 직접 DB mutation을 정상 복구 경로로 안내
+
+구현 중 조정 가능하지만 blocker invariant를 깨면 안 된다:
+
+- CloudWatch alarm threshold
+- orphan cleanup 주기
+- retry interval/backoff
+- structured log 추가 필드
+- batch step 세분화 수준
+- presigned URL TTL과 content-type whitelist 상세값
 
 ## 9. Cut line / Scope Reduction 전략
 

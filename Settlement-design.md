@@ -735,6 +735,19 @@ settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cance
 - 애플리케이션은 이 충돌을 `이미 지급됨`으로 해석하고 무조건 성공 처리하지 말고, 현재 `Settlement.status`, `settlement_item.point_history_id`, `point_history` payload 일치 여부를 함께 검증해야 한다.
 - 이 원칙은 정산 환급뿐 아니라 충전, 보증금 잠금 같은 모든 포인트 이벤트에도 동일하게 적용한다. 따라서 `point_history.idempotency_key`는 항상 `NOT NULL`이어야 한다.
 
+### 10.7 Implementation constraints
+
+구현 단계에서는 `docs/implementation-gates.md`의 Settlement PR Gate를 함께 적용한다. 특히 아래 항목은 구현 편의나 batch metadata로 대체할 수 없다.
+
+- `Settlement.status` 조건부 claim이 실행권의 최종 기준이다. Redisson lock은 중복 실행 가능성을 낮추는 보조 장치다.
+- `settlement_item`은 먼저 생성되어 participant별 계산 snapshot을 고정하고, 이후 `point_history` 생성/재사용 결과를 `point_history_id`로 연결한다.
+- retry는 새 계산 결과를 만드는 재정산이 아니라, 기존 `Settlement`와 `settlement_item` 기준으로 미완료 participant만 복구하는 작업이다.
+- 이미 `point_history_id`가 연결된 item은 재지급하지 않는다.
+- `point_history`는 있으나 `settlement_item.point_history_id`만 누락된 경우 새 원장을 만들지 않고 기존 원장 payload를 확인한 뒤 FK 연결 보정 대상으로 다룬다.
+- `settlement_item.point_history_id`가 non-null인데 대응 `point_history`가 없으면 `INVALID_INCONSISTENT`로 취급하고 `SUCCEEDED`로 보지 않는다.
+- 모든 item의 `point_history_id`와 대응 `point_history` 존재가 검증되기 전까지 parent `Settlement.status`를 `SUCCEEDED`로 바꾸지 않는다.
+- Email/AI/SSE 같은 후속 이벤트 실패는 settlement, settlement_item, point_history를 rollback하지 않는다.
+
 ## 11. 실패/재시도 정책
 
 ### 11.1 실패 코드 표준

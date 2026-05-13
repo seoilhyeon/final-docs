@@ -86,6 +86,19 @@
 | Phase 3 | 종료된 미션이 자동 정산되고 환급 결과와 이력을 조회할 수 있다.               |
 | Phase 4 | 알림, 이메일, AI, 운영 화면이 핵심 흐름을 깨지 않고 붙는다.                  |
 
+## 3.1 Implementation governance gates
+
+각 티켓의 Acceptance Criteria는 구현 중 refinement될 수 있지만, `docs/implementation-gates.md`의 blocker-level invariant는 구현 중 깨지면 안 된다. 이 섹션은 티켓별 PR 리뷰가 어느 gate를 반드시 참조해야 하는지 지정한다.
+
+| Ticket | Gate source | Blocker-level focus |
+| --- | --- | --- |
+| T-05 | Payment PR Gate | `payment_id = paymentKey`, `charge:{paymentKey}`, duplicate confirm reuse/conflict, point_history 없는 balance update 금지 |
+| T-11/T-12/T-13 | Storage/EXIF PR Gate | presigned URL은 upload delegation only, server-generated key, private object, server-side S3/EXIF validation |
+| T-17/T-18/T-19 | Settlement PR Gate | conditional claim, settlement_item snapshot, participant deterministic idempotency, partial recovery, SUCCEEDED FK 검증 |
+| T-30/T-32 | Recovery/Ops PR Gate | Admin API/runbook recovery, Redis unavailable DB-claim-only fallback, RUNNING timeout recovery, structured log/CloudWatch minimum |
+
+Admin UI는 T-31로 분리되어 MVP 제외다. 따라서 T-30/T-32는 UI가 아니라 API, log, alarm, runbook만으로 운영 복구가 가능한지를 검증해야 한다.
+
 ## 4. 티켓 상세
 
 ### T-01. 인증 도메인과 최소 프로필 API 구현
