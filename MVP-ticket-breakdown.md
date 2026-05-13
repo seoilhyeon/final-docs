@@ -3,6 +3,10 @@
 기준 문서:
 
 - [PRD-god-saving.md](./PRD-god-saving.md)
+- [API-spec-god-saving.md](./API-spec-god-saving.md)
+- [ERD-god-saving.md](./ERD-god-saving.md)
+- [Settlement-design.md](./Settlement-design.md)
+- [adr/ADR-mvp-tech-architecture.md](./adr/ADR-mvp-tech-architecture.md)
 - [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md)
 
 ## 1. 분해 기준
@@ -11,7 +15,7 @@
 - 티켓은 가능한 한 `1개 역할이 1~3일 안에 완료 가능한 크기`를 목표로 나눴다.
 - 역할은 임시로 `BE`, `FE`, `Infra`, `QA`로 표기했다.
 - 각 티켓은 `Why-What-Acceptance` 형식을 따른다.
-- 설계 링크가 아직 없으므로 모든 티켓은 위 두 문서를 기준 설계로 본다.
+- 이 문서는 실행 계획이며 API/payment/DB/settlement 계약의 source of truth가 아니다. 문서 간 충돌 시 `PRD -> API-spec -> ERD -> Settlement-design -> ADR -> Tech-stack summary -> Ticket breakdown` 순으로 따른다.
 - 실제 팀 구성이 풀스택 중심이면 같은 story 아래의 `BE + FE` 티켓을 하나로 합쳐도 된다.
 
 ## 2. 릴리스 티켓 맵
@@ -24,7 +28,7 @@
 | T-04   | 1     | FE    | US-02         | 크루 생성 폼과 입력 검증 UI 구현                | T-03        |
 | T-04A  | 2     | BE    | US-06A        | 방장 미션 시작 API와 lifecycle 전이 구현        | T-03, T-09  |
 | T-04B  | 2     | FE    | US-06A        | 방장 미션 시작 버튼과 상태 안내 UI 구현         | T-04A       |
-| T-05   | 1     | BE    | US-05         | 포인트 원장과 충전 콜백 처리 구현               | T-01        |
+| T-05   | 1     | BE    | US-05         | 포인트 원장과 Toss confirm-only 충전 처리 구현  | T-01        |
 | T-06   | 1     | FE    | US-05         | 포인트 충전/이력 화면 구현                      | T-05        |
 | T-07   | 2     | BE    | US-03, US-04  | 공개 목록/상세/참여코드 조회 API 구현           | T-03        |
 | T-08   | 2     | FE    | US-03, US-04  | 크루 탐색/상세/참여코드 입력 UI 구현            | T-07        |
@@ -50,7 +54,7 @@
 | T-28   | 4     | BE    | US-15         | AI 습관 리포트 생성/저장 구현                   | T-19        |
 | T-29   | 4     | FE    | US-15         | AI 습관 리포트 조회 UI 구현                     | T-28        |
 | T-30   | 4     | BE    | US-16         | 관리자 정산 상태 조회 API 구현                  | T-18        |
-| T-31   | 4     | FE    | US-16         | 관리자 정산 모니터링 화면 구현                  | T-30        |
+| T-31   | 4     | Ops   | US-16         | 관리자 정산 모니터링 화면 구현 — Deferred / MVP 제외 | T-30        |
 | T-32   | 4     | Infra | US-16         | 배치/정산 운영 모니터링과 알림 구성             | T-18, T-30  |
 | T-33   | 2     | BE    | US-17         | 인증 피드 조회 API 구현                         | T-13        |
 | T-34   | 2     | BE    | US-18         | 인증 피드 리액션 API 구현                       | T-33        |
@@ -184,20 +188,23 @@ host 전용 미션 시작 버튼, 최소 인원 충족 여부, `recruitment_dead
 - 최소 인원 미달, 모집 마감 전/후, 시작 만료 상태가 구분되어 표시된다.
 - 시작 성공 후 화면은 `ACTIVE`와 `activated_at` 기준 진행 상태를 보여준다.
 
-### T-05. 포인트 원장과 충전 콜백 처리 구현
+### T-05. 포인트 원장과 Toss confirm-only 충전 처리 구현
 
 **Why:**  
 보증금 예치와 환급은 모두 포인트 원장 위에서 움직인다. 원장과 충전 반영이 정확하지 않으면 정산 신뢰 자체가 무너진다.
 
 **What:**  
-포인트 잔액 모델, `Point_History`, 충전 성공/실패 반영, 중복 콜백 방지 로직을 구현한다. 토스페이먼츠 샌드박스와 연결 가능한 구조를 잡는다.
+포인트 잔액 모델, `Point_History`, TossPayments sandbox confirm-only 충전 성공/실패 반영, 중복 confirm 재시도 방지 로직을 구현한다. API의 `payment_id`는 Toss `paymentKey`이며, `orderId`는 confirm 검증과 로그 상관관계 추적용으로만 사용한다.
 
 **Acceptance Criteria:**
 
 - 충전 성공 시 포인트 잔액이 증가한다.
 - 충전 실패 또는 취소 시 잔액이 증가하지 않는다.
 - 모든 충전 결과가 `Point_History`에 기록된다.
-- 동일 결제 결과가 중복 반영되지 않는다.
+- `POINT_CHARGE` idempotency key는 `charge:{paymentKey}`를 사용한다.
+- 동일 `paymentKey` + 동일 payload confirm 재시도는 기존 `point_history`를 재사용한다.
+- 동일 `paymentKey` + 다른 payload는 idempotency conflict로 실패한다.
+- `orderId`는 `point_history.idempotency_key` 구성값으로 사용하지 않는다.
 
 ### T-06. 포인트 충전/이력 화면 구현
 
@@ -594,20 +601,24 @@ AI 추천이 있어도 사용자가 바로 고치고 채택할 수 없으면 가
 - 실패 원인 요약 또는 최근 오류 정보가 포함된다.
 - 운영 확인이 필요한 건을 구분해 반환한다.
 
-### T-31. 관리자 정산 모니터링 화면 구현
+### T-31. 관리자 정산 모니터링 화면 구현 — Deferred / MVP 제외
 
 **Why:**  
-운영용 API가 있어도 화면이 없으면 장애 대응 속도가 늦다. 실패 건을 우선순위로 보는 최소 운영 화면이 있어야 한다.
+MVP에서는 운영 복구를 관리자 API, CloudWatch 알람, structured log, runbook으로 수행한다. 별도 Admin UI는 FE 범위를 넓히므로 MVP 이후로 미룬다.
 
 **What:**  
-정산 상태 목록, 실패 필터, 최근 오류 요약, 상세 이동 UI를 구현한다. 일반 사용자 화면과 분리된 관리자 진입 경로를 둔다.
+MVP에서는 관리자 화면을 구현하지 않는다. 운영자는 아래 수단으로 정산 실패와 복구를 처리한다.
+
+- `GET /api/admin/settlements`
+- `POST /api/admin/settlements/{settlementId}/retry`
+- CloudWatch alarm/log
+- `docs/runbooks/settlement-recovery.md`
 
 **Acceptance Criteria:**
 
-- 관리자는 정산 상태 목록을 화면에서 볼 수 있다.
-- 실패 또는 확인 필요 건만 필터링할 수 있다.
-- 각 건의 재시도 횟수와 오류 요약을 확인할 수 있다.
-- 일반 사용자는 관리자 화면에 접근할 수 없다.
+- Admin UI 없이 실패 정산을 식별할 수 있다.
+- Admin UI 없이 특정 settlement를 재시도할 수 있다.
+- 운영자가 DB를 직접 수정하지 않아도 runbook과 관리자 API로 복구할 수 있다.
 
 ### T-32. 배치/정산 운영 모니터링과 알림 구성
 
@@ -622,7 +633,9 @@ AI 추천이 있어도 사용자가 바로 고치고 채택할 수 없으면 가
 - 정산 배치 상태를 메트릭 또는 로그로 추적할 수 있다.
 - 실패 또는 과도한 지연 시 운영 알림이 발생한다.
 - 재시도 횟수와 최종 실패 건을 구분해 볼 수 있다.
-- 운영자가 화면 또는 모니터링 도구에서 상태를 확인할 수 있다.
+- 운영자가 관리자 API, runbook, CloudWatch/log에서 상태를 확인할 수 있다.
+- CloudWatch 최소 알람은 `settlement batch failure`, `RUNNING timeout`, `RETRY_WAIT 증가`, `DB connection failure`, `Redis unavailable`, `payment confirm failure`, `idempotency conflict`, `reconciliation mismatch`, `disk usage`를 포함한다.
+- Kubernetes, MSA, full Terraform, blue-green/canary, full observability stack, full OpenTelemetry는 MVP 범위에 포함하지 않는다.
 
 ### T-33. 인증 피드 조회 API 구현
 

@@ -24,8 +24,8 @@
 
 비범위:
 
-- 외부 결제사 상세 연동 계약
-- S3 presigned upload URL 발급 API
+- 외부 결제사 webhook/callback 기반 충전 확정과 운영 결제 키 전환 상세
+- S3 public bucket 운영, object listing API, 클라이언트 임의 path/key 지정, 고급 upload metadata 관리 UI
 - 관리자 FK 보정 API 상세
 - AI 모델 비교, 토큰/비용 모니터링, 개인화 고도화, 장기 메모리, 복잡한 품질 평가 계약
 - 중도 참여 / 재참여
@@ -737,6 +737,43 @@ Error:
 
 ## 5.3 미션 인증
 
+### `POST /api/uploads/presigned-url`
+
+역할:
+
+- 인증 이미지와 프로필 이미지 업로드를 위한 private S3 presigned URL을 발급한다.
+- S3 object key는 클라이언트가 정하지 않고 서버가 생성한다.
+
+Request:
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `purpose` | `string` | Y | `MISSION_IMAGE` 또는 `PROFILE_IMAGE` |
+| `room_id` | `integer` | N | mission image 업로드 시 대상 방 |
+| `participant_id` | `integer` | N | mission image 업로드 시 대상 참여자 |
+| `content_type` | `string` | Y | 허용된 이미지 content type |
+| `content_length` | `integer` | Y | 업로드 예정 파일 크기 |
+
+Response `200 OK`:
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `upload_url` | `string` | 짧은 TTL의 presigned upload URL |
+| `s3_key` | `string` | 서버가 생성한 object key |
+| `expires_at` | `string` | 만료 시각 |
+
+정책:
+
+- S3 bucket/object는 private이다.
+- object key는 서버가 생성한다.
+- 사용자는 임의 S3 path/key를 지정할 수 없다.
+- mission 인증 이미지의 권장 key 형식은 `mission/{roomId}/{participantId}/{uuid}`다.
+- presigned URL은 upload delegation 수단이지 validation delegation 수단이 아니다.
+- 서버는 발급 시점에 사용자, room, participant 권한을 검증한다.
+- 클라이언트는 발급받은 URL로 S3에 직접 업로드한다.
+- 이후 클라이언트는 `image_s3_key`로 mission-log 생성 요청을 보낸다.
+- 서버는 mission-log 생성 시 S3 object를 직접 조회해 존재 여부, size, content-type, ownership, EXIF를 검증한다.
+
 ### `POST /api/mission-logs`
 
 역할:
@@ -745,11 +782,10 @@ Error:
 
 Request:
 
-| 필드            | 타입      | 필수 | 설명                    |
-| --------------- | --------- | ---- | ----------------------- |
-| `room_id`       | `integer` | Y    | 대상 방                 |
-| `image_s3_key`  | `string`  | Y    | 사전 업로드된 이미지 키 |
-| `exif_taken_at` | `string`  | N    | 사진 촬영 시각          |
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `room_id` | `integer` | Y | 대상 방 |
+| `image_s3_key` | `string` | Y | presigned upload API로 발급되고 업로드 완료된 이미지 key |
 
 Response `201 Created`:
 
@@ -810,8 +846,15 @@ Error:
 - 인증 시점에는 room 단위 Redisson 락을 기본으로 사용하지 않는다.
 - 인증은 `MissionLog` 원본 보존이 우선이다.
 - 이미지 업로드 자체는 별도 presigned upload 계약으로 처리하고, 이 API는 업로드 완료된 `image_s3_key`만 받는다.
+- Presigned URL은 upload delegation 수단이지 validation delegation 수단이 아니다.
+- 서버는 `image_s3_key`가 현재 사용자/participant/room 범위에 속하는지 검증한다.
+- 서버는 S3 object를 직접 조회해 존재 여부, size, content-type, ownership, EXIF를 검증한다.
+- 클라이언트는 `exif_taken_at`을 authoritative source로 제출하지 않는다.
+- 서버는 S3 object에서 EXIF를 추출하고 검증한다.
+- `MissionLog.exif_taken_at`은 서버 검증 결과 저장값이다.
+- EXIF가 없으면 `EXIF_MISSING`으로 실패 처리한다.
+- EXIF가 유효하지 않으면 `EXIF_TIME_INVALID`로 실패 처리한다.
 - 정산 인정 판단은 `server_time` 기준으로 수행한다.
-- `exif_taken_at`은 촬영 시각 검증을 위한 보조 정보이며, 정산 인정 횟수 계산의 기준 시간이 아니다.
 - `server_time`은 서버가 인증 요청을 수신한 시각이다.
 - `is_success`는 인증 요청이 유효성 검증을 통과했는지를 나타낸다.
 - 아래 조건을 통과하면 `is_success = true`로 기록한다.
@@ -862,7 +905,7 @@ Error:
 
 - 이 API는 원시 인증 기록 조회용이다.
 - 정산 인정 판단 기준 시간은 `MissionLog.server_time`이다.
-- `exif_taken_at`은 촬영 시각 검증용 보조 정보이며, 최종 정산 인정 시각 기준으로 사용하지 않는다.
+- `exif_taken_at`은 서버가 S3 object에서 추출/검증한 촬영 시각 보조 정보이며, 최종 정산 인정 시각 기준으로 사용하지 않는다.
 - `is_success`는 인증 요청의 유효성 통과 여부를 의미하며, 정산에서 인정된 횟수를 나타내는 값이 아니다.
 - FE는 이 값을 `최종 성공 횟수` 또는 `정산 인정 횟수`로 사용하면 안 된다.
 - 최종 인정 여부와 인정 횟수는 반드시 정산 결과 API `GET /api/settlements/{settlementId}`를 기준으로 판단해야 한다.
@@ -1568,8 +1611,9 @@ Request:
 
 | 필드         | 타입      | 필수 | 설명                           |
 | ------------ | --------- | ---- | ------------------------------ |
-| `payment_id` | `string`  | Y    | 외부 결제 시스템의 불변 식별자 |
-| `amount`     | `integer` | Y    | 충전 금액                      |
+| `payment_id` | `string`  | Y    | TossPayments `paymentKey`. 기존 API 필드명은 유지하지만 값의 의미는 Toss 결제 승인 키다. |
+| `order_id`   | `string`  | Y    | TossPayments `orderId`. confirm 검증과 로그 상관관계 추적용이며 멱등성 키로 사용하지 않는다. |
+| `amount`     | `integer` | Y    | 충전 금액 |
 
 Response `201 Created`:
 
@@ -1605,10 +1649,14 @@ Error:
 
 정책:
 
-- `POINT_CHARGE`는 `charge:{paymentId}` 규칙으로 멱등 처리한다.
-- `payment_id`는 외부 결제 시스템이 발급하는 불변 식별자여야 한다.
-- 동일 `payment_id`는 반드시 하나의 충전 이벤트만 의미해야 한다.
-- 동일 `payment_id`와 동일 `amount` 재시도는 기존 `point_history`를 반환하고, 동일 `payment_id`에 다른 `amount`가 들어오면 `PAYMENT_ID_REUSED_WITH_DIFFERENT_AMOUNT`를 반환한다.
+- MVP는 TossPayments sandbox confirm-only 흐름을 사용한다.
+- 서버는 Toss confirm 성공을 확인한 뒤에만 `POINT_CHARGE` 원장을 생성한다.
+- `payment_id`는 TossPayments `paymentKey`이며 하나의 충전 이벤트만 의미해야 한다.
+- `POINT_CHARGE` idempotency key는 `charge:{paymentKey}`다. API field 기준으로는 `charge:{payment_id}`다.
+- `order_id`는 Toss `orderId`이며 confirm 검증과 로그 상관관계 추적용이다. `point_history.idempotency_key` 구성값으로 사용하지 않는다.
+- 동일 `payment_id`와 동일 payload 재시도는 기존 `point_history`를 반환한다.
+- 동일 `payment_id`와 다른 payload는 idempotency conflict로 실패한다.
+- webhook/callback 기반 충전 확정과 별도 payment aggregate는 MVP 범위에서 제외한다.
 
 ### `GET /api/points`
 
@@ -1717,7 +1765,7 @@ Error:
 
 | 도메인 동작         | `transaction_type`       | `reference_type`   | `reference_id` 규칙                                                                                                 |
 | ------------------- | ------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| 포인트 충전         | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. 외부 결제 식별자는 `idempotency_key = charge:{paymentId}`에 남긴다. |
+| 포인트 충전         | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. |
 | 방 참여 보증금 잠금 | `ROOM_DEPOSIT_LOCK`      | `ROOM_PARTICIPANT` | `room_participant.id`                                                                                               |
 | 일반 정산 환급      | `ROOM_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                |
 | 시작 전 취소 환급   | `ROOM_CANCELLED_REFUND`  | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                |
@@ -1783,7 +1831,7 @@ RUNNING
 
 - 인증 시점에는 과도한 분산 락보다 `MissionLog append-only 저장 + 캐시 원자 연산 + 최종 재계산`을 우선한다.
 - `SUCCEEDED` 전 최종 정산 계산은 `MissionLog.server_time`과 room/participant 상태를 기준으로 수행한다.
-- `exif_taken_at`은 이미지 조작 또는 촬영 시각 이상 여부를 검증하는 보조 정보이며, 인정 횟수 계산 기준 시간으로 사용하지 않는다.
+- `exif_taken_at`은 서버가 S3 object에서 추출/검증한 이미지 조작 또는 촬영 시각 이상 여부 검증 보조 정보이며, 인정 횟수 계산 기준 시간으로 사용하지 않는다.
 - 정산 시점에는 DB 조건부 `Settlement(PENDING/RETRY_WAIT -> RUNNING)` claim을 1차 기준으로 사용하고, Redisson room lock은 보조 수단, DB unique 제약과 `point_history.idempotency_key`는 최종 방어선으로 사용한다.
 - `total_locked_amount`는 정산 시점의 `room_participant.deposit_amount` 합계 스냅샷이며, `point_account`나 `point_history`를 다시 합산하지 않는다.
 - 일반 정산 remainder는 `기여도 1위 -> 성공 횟수 비교 -> 재현 가능한 draw` 순서로 결정한다.

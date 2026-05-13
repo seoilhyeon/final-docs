@@ -61,7 +61,7 @@
 | 테이블명          | 역할                            | 포함 판단                                                             |
 | ----------------- | ------------------------------- | --------------------------------------------------------------------- |
 | `ai_habit_report` | 정산 이후 개인 회고 리포트 저장 | 첫 릴리스 필수. 단, 정산/환급/포인트 원장 source of truth는 아니다    |
-| 알림 전용 테이블  | SSE, 이메일 발송 이력 영속화    | MVP core에서는 제외 가능. 애플리케이션 이벤트와 배치 로그로 시작 가능 |
+| 알림 전용 테이블  | SSE, 이메일 발송 이력 영속화    | MVP core에서는 제외한다. 이메일은 SMTP 발송 structured log, bounded retry, 운영자 수동 재발송으로 시작한다. 비즈니스 필수 고지로 격상되면 notification log/outbox를 별도 ADR로 재검토한다 |
 
 ## 3. 테이블 상세
 
@@ -250,7 +250,7 @@ Unique / Index:
 
 | 도메인 동작         | `transaction_type`       | `reference_type`   | `reference_id` 규칙                                                                                                 |
 | ------------------- | ------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| 포인트 충전         | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. 외부 결제 식별자는 `idempotency_key = charge:{paymentId}`에 남긴다. |
+| 포인트 충전         | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. |
 | 방 참여 보증금 잠금 | `ROOM_DEPOSIT_LOCK`      | `ROOM_PARTICIPANT` | `room_participant.id`                                                                                               |
 | 일반 정산 환급      | `ROOM_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                |
 | 시작 전 취소 환급   | `ROOM_CANCELLED_REFUND`  | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                |
@@ -262,7 +262,7 @@ Unique / Index:
 - `ROOM_DEPOSIT_LOCK`는 자산 이동이 아니라 기존 포인트를 사용 불가 상태로 전환하는 이벤트이며 `balance`를 감소시킨다.
 - `ROOM_SETTLEMENT_REFUND`는 일반 정산 환급으로 `balance`를 증가시킨다.
 - `ROOM_CANCELLED_REFUND`는 취소형 정산 환급으로 `balance`를 증가시킨다.
-- 포인트 충전은 `reference_type = POINT_CHARGE`, `reference_id = point_history.id`로 추적하고, 결제 식별자는 `idempotency_key = charge:{paymentId}`에 남긴다.
+- 포인트 충전은 `reference_type = POINT_CHARGE`, `reference_id = point_history.id`로 추적하고, API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. `orderId`는 confirm 검증과 로그 상관관계 추적용이며 idempotency key 구성값으로 사용하지 않는다.
 - MVP에서는 별도 payment aggregate 없이 `point_history` 자체를 충전 ledger로 사용하므로, 충전 이벤트의 `reference_id`는 생성된 자기 `point_history.id`를 가리킨다.
 - 참여 시 보증금 잠금은 `reference_type = ROOM_PARTICIPANT`, `reference_id = room_participant.id`로 추적한다.
 - 정산 지급의 `reference_type = SETTLEMENT_ITEM`, `reference_id = settlement_item.id` 조합으로 어느 계산 결과가 원장에 반영됐는지 추적한다.
@@ -270,7 +270,7 @@ Unique / Index:
 - 동일 이벤트는 항상 동일한 `idempotency_key`를 사용하고, `settlement.id` 같은 런타임 값에 의존하지 않는다.
 - 동일 `idempotency_key`가 동일 payload로 다시 들어오면 기존 `point_history`를 재사용하거나 연결하고, 동일 키에 다른 payload가 들어오면 idempotency conflict로 처리한다.
 - 이벤트별 고정 규칙 예시는 아래와 같다.
-  - 포인트 충전: `charge:{paymentId}`
+  - 포인트 충전: `charge:{paymentKey}`
   - 보증금 잠금: `deposit:room:{roomId}:participant:{participantId}`
   - 일반 정산 환급: `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:refund`
   - 취소형 정산 환급: `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cancel_refund`
@@ -479,7 +479,7 @@ Unique / Index:
 | `image_url`      | `VARCHAR(500)` | Y        | 조회용 이미지 URL     |
 | `image_s3_key`   | `VARCHAR(255)` | N        | 저장소 키             |
 | `server_time`    | `DATETIME(6)`  | N        | 서버 수신 시각        |
-| `exif_taken_at`  | `DATETIME(6)`  | Y        | 이미지 Exif 촬영 시각 |
+| `exif_taken_at`  | `DATETIME(6)`  | Y        | 서버가 S3 object에서 추출/검증한 이미지 Exif 촬영 시각 |
 | `is_success`     | `TINYINT(1)`   | N        | 성공 여부             |
 | `failure_reason` | `VARCHAR(50)`  | Y        | 실패 사유 코드        |
 | `created_at`     | `DATETIME(6)`  | N        | 생성 시각             |
@@ -504,6 +504,9 @@ Unique / Index:
 주의사항:
 
 - `participant_id` 기준으로만 기록한다. 방과 회원은 참여 엔티티를 통해 역추적한다.
+- `exif_taken_at`은 클라이언트가 제출한 값을 신뢰해 저장하는 컬럼이 아니다. 서버가 S3에 업로드된 object에서 EXIF를 추출/검증한 결과를 저장한다.
+- EXIF가 없거나 유효하지 않으면 `failure_reason`은 `EXIF_MISSING` 또는 `EXIF_TIME_INVALID`가 된다.
+- 정산 인정 횟수 계산 기준 시간은 `exif_taken_at`이 아니라 `server_time`이다.
 - `withdrawn_at` 이후 인증 차단은 API에서 한 번, 정산 시 `server_time < withdrawn_at` 필터로 한 번 더 적용한다.
 - `DAILY` 중복, `SPECIFIC_DAYS` 제외, `WEEKLY_N` 상한 제외 같은 최종 인정 제외 근거는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`에 남긴다.
 - 실시간 성공 여부와 최종 인정 횟수는 다를 수 있으므로, 최종 결과는 `settlement_item`에서 설명한다.
@@ -779,7 +782,7 @@ Unique / Index:
 
 - `draw_key = SHA-256(room_id + ":" + settlement_type + ":" + member_id)`
 - `point_history.idempotency_key = settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:refund`
-- `point_history.idempotency_key`는 이벤트별 고정 규칙을 따른다. 예: `charge:{paymentId}`, `deposit:room:{roomId}:participant:{participantId}`, `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:refund`, `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cancel_refund`
+- `point_history.idempotency_key`는 이벤트별 고정 규칙을 따른다. 예: `charge:{paymentKey}`, `deposit:room:{roomId}:participant:{participantId}`, `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:refund`, `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cancel_refund`
 - `draw_key`와 `idempotency_key` 모두 런타임 PK가 아니라 입력 기반 식별자를 사용한다.
 - `point_history.idempotency_key`는 `NOT NULL`이며, 이벤트 종류마다 재현 가능한 규칙으로 생성한다.
 - 동일 키 + 동일 payload는 기존 원장 재사용/연결 대상이고, 동일 키 + 다른 payload는 멱등성 충돌로 저장하지 않는다.

@@ -22,12 +22,12 @@
 | Database | MySQL 8.0 | 확정 | `PRD-god-saving.md`, `ERD-god-saving.md` |
 | Cache / Lock | Redis, Redisson | 확정. 단, 최종 정합성 수단이 아니라 보조 락/캐시 | `PRD-god-saving.md`, `Settlement-design.md` |
 | Batch | Spring Batch 5.x | 확정 | `PRD-god-saving.md`, `Settlement-design.md` |
-| File Storage | AWS S3 | 확정. 세부 presigned upload 정책은 미정 | `PRD-god-saving.md`, `API-spec-god-saving.md` |
-| Frontend | React, Axios | 확정. 빌드 도구, CSS, 상태관리, 테스트 러너는 미정 | `PRD-god-saving.md` |
-| Notification | SSE, Email | 확정. 이메일 벤더와 발송 인프라 상세는 미정 | `PRD-god-saving.md`, `MVP-ticket-breakdown.md` |
-| Payment | 토스페이먼츠 샌드박스 | 확정. 결제 승인/콜백/실패 상세 계약은 미정 | `PRD-god-saving.md`, `API-spec-god-saving.md` |
+| File Storage | AWS S3 | 확정. MVP는 private bucket + server-generated key + presigned URL 업로드를 사용한다 | `PRD-god-saving.md`, `API-spec-god-saving.md` |
+| Frontend | React, Vite, Axios | 확정. CSS, 상태관리, 테스트 러너는 미정 | `PRD-god-saving.md`, `ADR-mvp-tech-architecture.md` |
+| Notification | SSE, Email | 확정. 이메일은 SMTP 기반 보조 알림이며 실패해도 인증/정산/포인트/결제 트랜잭션을 롤백하지 않는다 | `PRD-god-saving.md`, `Settlement-design.md` |
+| Payment | 토스페이먼츠 샌드박스 | 확정. MVP는 confirm-only 흐름이며 API의 `payment_id`는 Toss `paymentKey`를 의미한다 | `PRD-god-saving.md`, `API-spec-god-saving.md` |
 | AI | Claude API | 확정 | `PRD-god-saving.md`, `API-spec-god-saving.md` |
-| Infra | AWS EC2, Docker, Nginx, GitHub Actions, CloudWatch | 확정. IaC, 네트워크, 환경 분리, 배포 토폴로지는 미정 | `PRD-god-saving.md`, `MVP-ticket-breakdown.md` |
+| Infra | AWS EC2, Docker Compose, Nginx, GitHub Actions, CloudWatch | 확정. Docker Compose는 단일 서버 재현성과 배포 단순화를 위한 도구이며 orchestration platform이 아니다 | `PRD-god-saving.md`, `ADR-mvp-tech-architecture.md` |
 | API Contract | REST + JSON | 확정 | `API-spec-god-saving.md` |
 | Auth | JWT Bearer token | 확정 | `PRD-god-saving.md`, `API-spec-god-saving.md`, `ERD-god-saving.md` |
 
@@ -64,23 +64,41 @@
 - Claude API 기반 AI 미션 추천과 AI 습관 리포트는 첫 릴리스 기능 gate를 통과해야 하지만, 실패해도 수동 방 생성, 정산 완료, 환급, 포인트 원장 흐름을 차단하지 않는다.
 - AI 리포트는 정산 완료 데이터를 읽어 생성되는 후행 기능이며, 정산/환급/포인트 원장의 source of truth가 아니다.
 
-## 4. 문서 기준으로 아직 확정하지 않은 항목
+### 3.5 Persistence 경계
 
-아래 항목은 현재 문서에서 기술 선택이 확정되지 않았다. 구현 전에 별도 ADR 또는 source of truth 문서 업데이트로 결정해야 한다.
+- Spring Data JPA를 기본 persistence 방식으로 사용한다.
+- 단순 CRUD는 Spring Data JPA Repository로 처리한다.
+- QueryDSL은 복잡 조회, 운영 조회, 복구 조회, 동적 조건 조회에만 제한적으로 사용한다.
+- QueryDSL projection은 settlement correctness 또는 source of truth가 아니다.
+- 정산 금액 계산과 복구 판단 기준은 MySQL row, `settlement_item`, `point_history`, DB 제약, deterministic idempotency key다.
 
-| 영역 | 미정 항목 | 결정 위치 |
+### 3.6 Storage / Email / Payment 경계
+
+- Presigned URL은 upload delegation 수단이지 validation delegation 수단이 아니다.
+- S3 object key는 서버가 생성하며 사용자는 임의 path/key를 지정할 수 없다.
+- mission-log 생성 시 서버는 S3 object를 직접 조회해 존재 여부, size, content-type, ownership, EXIF를 검증한다.
+- EXIF는 서버가 S3 object에서 추출/검증한 값이 기준이다.
+- MVP 이메일은 SMTP 기반 보조 알림이며 structured log, bounded retry, 운영자 수동 재발송 수준으로 운영한다.
+- notification log/outbox는 MVP core 범위에서 제외한다.
+- TossPayments 충전 API의 `payment_id`는 Toss `paymentKey`를 의미한다.
+- `orderId`는 confirm 검증과 로그 상관관계 추적용이며 `point_history.idempotency_key` 구성값으로 사용하지 않는다.
+
+## 4. 문서 기준 확정 항목과 후속 보강 항목
+
+아래 항목은 deep-interview / ADR pressure-pass 이후 확정된 세부 결정과, 구현 전에 참조해야 할 소유 문서를 정리한다.
+
+| 영역 | 결정/보강 항목 | 기준 문서 |
 | --- | --- | --- |
-| Frontend | Vite/Next.js 같은 빌드 도구 | PRD 또는 별도 Frontend ADR |
 | Frontend | CSS/UI 라이브러리 | 별도 Frontend ADR |
 | Frontend | 상태관리 도구 | 별도 Frontend ADR |
 | Frontend | 테스트 러너와 E2E 도구 | 별도 QA/Frontend ADR |
-| Backend | JPA/MyBatis/QueryDSL 등 persistence 세부 기술 | Backend ADR 또는 ERD 연계 문서 |
-| Email | SES/SendGrid/SMTP 등 발송 벤더 | Infra 또는 Notification ADR |
-| Storage | S3 presigned URL 권한, 만료, 경로 정책 | API-spec 또는 Storage ADR |
-| Payment | 토스페이먼츠 승인, 콜백, 실패, 멱등 계약 상세 | API-spec 또는 Payment ADR |
-| Infra | IaC 도구, VPC/네트워크, blue-green 여부, 환경 분리 | Infra ADR |
+| Backend persistence | Spring Data JPA 기본 + QueryDSL 제한 도입 | `ADR-mvp-tech-architecture.md`, `Settlement-design.md` |
+| Email | SMTP 기반 보조 알림. notification log/outbox는 MVP 제외 | `docs/runbooks/settlement-recovery.md` |
+| Storage | S3 private bucket + server-generated key + presigned URL | `API-spec-god-saving.md` |
+| Payment | Toss confirm-only. `payment_id` = Toss `paymentKey`, idempotency key = `charge:{paymentKey}` | `API-spec-god-saving.md`, `ERD-god-saving.md`, `Settlement-design.md` |
+| Infra | EC2 단일 서버 + Docker Compose + Nginx + GitHub Actions + CloudWatch | `ADR-mvp-tech-architecture.md`, `docs/runbooks/settlement-recovery.md` |
 
-문서에 없는 항목을 구현자가 임의로 확정하면 이후 PRD/API/ERD/Settlement 설계와 어긋날 수 있다. 구현 전에는 미정 항목을 명시적으로 결정하고 관련 source of truth 문서에 반영한다.
+문서에 없는 항목을 구현자가 임의로 확정하면 이후 PRD/API/ERD/Settlement 설계와 어긋날 수 있다. 구현 전에는 관련 source of truth 문서에 반영된 결정만 따른다.
 
 ## 5. 구현 핸드오프 메모
 
@@ -93,16 +111,16 @@
 
 ### Frontend
 
-- React와 Axios를 기본 전제로 둔다.
+- React, Vite, Axios를 기본 전제로 둔다.
 - 화면 구현은 `API-spec-god-saving.md`의 응답 projection과 상태값 계약을 따른다.
 - Dashboard projection, feed success, settlement result의 의미를 혼동하지 않는다.
 - CSS, 상태관리, 테스트 도구는 아직 확정되지 않았으므로 구현 전에 별도 결정이 필요하다.
 
 ### Infra / DevOps
 
-- AWS EC2, Docker, Nginx, GitHub Actions, CloudWatch를 MVP 운영 기본값으로 둔다.
+- AWS EC2, Docker Compose, Nginx, GitHub Actions, CloudWatch를 MVP 운영 기본값으로 둔다.
 - 배치 지연, 실패율, 재시도, 알림은 CloudWatch와 로그 기반으로 관찰 가능해야 한다.
-- IaC, 네트워크, 환경 분리 전략은 아직 문서 기준으로 확정되지 않았다.
+- Docker Compose는 orchestration platform이 아니라 단일 서버 재현성과 배포 단순화를 위한 도구다. IaC, 네트워크, 환경 분리 전략은 MVP 이후 보강 대상으로 둔다.
 
 ## 6. ADR 요약
 

@@ -495,13 +495,14 @@ MVP `calculation_reason` vocabulary:
 - 모든 포인트 변경은 이벤트 타입별 `idempotency_key`를 반드시 가진다.
 - 동일 이벤트는 항상 동일한 `idempotency_key`를 생성해야 하며, `settlement.id` 같은 런타임 상태값에 의존하지 않는다.
 - 이벤트별 고정 규칙 예시는 아래와 같다.
-  - 포인트 충전: `charge:{paymentId}`
+  - 포인트 충전: `charge:{paymentKey}`
   - 보증금 잠금: `deposit:room:{roomId}:participant:{participantId}`
   - 일반 정산 환급: `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:refund`
   - 취소형 정산 환급: `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cancel_refund`
-- `POINT_CHARGE`에서 사용하는 `paymentId`는 외부 결제 시스템이 발급한 불변 식별자여야 한다.
-- 동일한 `paymentId`는 반드시 하나의 충전 이벤트만 의미해야 하며, 재사용되거나 중복 발급되어서는 안 된다.
-- `charge:{paymentId}`는 이 불변성을 전제로 한 설계다. 이 조건이 깨지면 충전 멱등성 보장이 함께 깨진다.
+- `POINT_CHARGE`의 API field `payment_id`는 TossPayments `paymentKey`를 의미한다.
+- `orderId`는 confirm 검증과 로그 상관관계 추적용이며 `point_history.idempotency_key`에 사용하지 않는다.
+- 동일한 `paymentKey`는 반드시 하나의 충전 이벤트만 의미해야 하며, 재사용되거나 중복 발급되어서는 안 된다.
+- `charge:{paymentKey}`는 이 불변성을 전제로 한 설계다. 이 조건이 깨지면 충전 멱등성 보장이 함께 깨진다.
 - 동일 `idempotency_key`와 동일 payload의 재시도는 기존 `point_history`를 반환/연결하고, 동일 키에 다른 payload가 확인되면 idempotency conflict로 처리해 새 원장을 만들지 않는다.
 
 제약:
@@ -711,7 +712,7 @@ draw_key = SHA-256(room_id + ":" + settlement_type + ":" + member_id)
 이벤트별 권장 키:
 
 ```text
-charge:{paymentId}
+charge:{paymentKey}
 deposit:room:{roomId}:participant:{participantId}
 settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:refund
 settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cancel_refund
@@ -725,8 +726,10 @@ settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cance
 - `participant`는 물리 삭제하지 않고 같은 방 재참여도 지원하지 않으므로, 같은 정산 대상에 대한 `participant_id`는 생명주기 동안 안정적으로 유지된다.
 - 이 규칙은 `draw_key`와 같은 철학을 따른다. 즉, 런타임 생성값이 아니라 동일 입력이면 동일 결과가 나와야 한다.
 - 동일 이벤트는 항상 동일한 `idempotency_key`를 사용한다.
-- `POINT_CHARGE`의 `paymentId`는 외부 결제 시스템이 발급하는 불변 식별자여야 하고, 하나의 충전 이벤트에만 1:1로 매핑되어야 한다.
-- 동일한 `paymentId`가 재사용되거나 중복 발급되면 `charge:{paymentId}` 기반 멱등성이 깨지므로, 결제 연동 계층에서 이를 허용하지 않아야 한다.
+- `POINT_CHARGE`의 API field `payment_id`는 TossPayments `paymentKey`를 의미하며, 하나의 충전 이벤트에만 1:1로 매핑되어야 한다.
+- `orderId`는 confirm 검증과 로그 상관관계 추적용이며 `point_history.idempotency_key`에 사용하지 않는다.
+- 동일한 `paymentKey`가 재사용되거나 중복 발급되면 `charge:{paymentKey}` 기반 멱등성이 깨지므로, 결제 연동 계층에서 이를 허용하지 않아야 한다.
+- provider success 이후 client timeout이 발생해도 같은 `paymentKey` 재시도는 중복 충전이 아니라 기존 원장 재사용으로 수렴해야 한다.
 - 재시도 중 중복 insert가 발생하면 unique 제약으로 차단된다.
 - 애플리케이션은 동일 키 충돌을 먼저 기존 `point_history`와 요청 payload가 같은 semantic event인지 검증한다. 동일 payload면 기존 원장을 재사용/연결하고, 다른 payload면 idempotency conflict로 실패 처리한다.
 - 애플리케이션은 이 충돌을 `이미 지급됨`으로 해석하고 무조건 성공 처리하지 말고, 현재 `Settlement.status`, `settlement_item.point_history_id`, `point_history` payload 일치 여부를 함께 검증해야 한다.
@@ -931,6 +934,11 @@ remainderPolicy
 
 - 후속 작업 실패는 정산 성공을 되돌리지 않는다.
 - 따라서 정산 트랜잭션 밖에서 `SettlementCompleted` 이벤트를 소비하게 한다.
+- 정산 완료 이메일 실패는 `Settlement.status`, `settlement_item`, `point_history`, 결제 충전 원장을 수정하거나 롤백하지 않는다.
+- 이메일 발송은 SMTP 기반 best-effort 후속 작업이다.
+- MVP에서는 notification log/outbox를 필수 테이블로 두지 않는다.
+- 이메일 실패는 structured log, bounded retry, 운영자 수동 재발송 대상으로만 다룬다.
+- structured log는 최소 `settlement_id`, `member_id`, `email_type`, `recipient_hash`, `attempt`, `result`, `smtp_error_code`, `created_at`을 포함한다.
 
 ## 16. 골든 데이터 예시
 

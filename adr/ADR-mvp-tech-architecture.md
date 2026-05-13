@@ -366,21 +366,22 @@ CloudWatch는 MVP 최소 운영 가시성 확보를 위해 사용한다. full ob
 - batch failure 감지
 - settlement delay 감지
 - Redis/DB 연결 실패 감지
-- payment callback duplicate/conflict 감지
+- payment confirm duplicate/conflict 감지
 - reconciliation mismatch 감지
 
 #### Allowed Use
 
 MVP 필수 알람 후보:
 
-- settlement batch failure count
-- `RUNNING` timeout count
-- `RETRY_WAIT` 누적 증가
-- idempotency conflict 발생
-- payment callback 처리 실패
-- reconciliation mismatch 발생
-- Redis unavailable
+- settlement batch failure
+- `RUNNING` timeout
+- `RETRY_WAIT` 증가
 - DB connection failure
+- Redis unavailable
+- payment confirm failure
+- idempotency conflict
+- reconciliation mismatch
+- disk usage
 
 #### Forbidden Use
 
@@ -417,7 +418,7 @@ QueryDSL은 복잡 조회/동적 검색/운영 조회에 제한적으로 사용�
 
 - settlement 상태별 조회
 - idempotency_key 기준 point_history 조회
-- payment callback 처리 이력 조회
+- payment confirm/idempotency 처리 이력 조회
 - reconciliation 대상 조회
 - 운영자 read-only diagnosis query
 
@@ -438,9 +439,103 @@ QueryDSL은 복잡 조회/동적 검색/운영 조회에 제한적으로 사용�
 
 QueryDSL은 조회 편의 도구다. 복구 기준은 QueryDSL 결과가 아니라 MySQL의 원본 row와 불변조건이다.
 
+정산 금액 계산, 지급 확정, partial recovery 판단은 QueryDSL projection이 아니라 MySQL row, 도메인 계산 로직, `settlement_item`, `point_history`, DB unique constraint, deterministic idempotency key를 기준으로 한다.
+
 #### Schedule Pressure Cut
 
 일정이 밀리면 단순 조회는 Spring Data JPA로 유지하고, QueryDSL은 운영/복구 핵심 조회에만 남긴다.
+
+---
+
+### 4.8 Email / SMTP
+
+#### Decision
+
+MVP 이메일은 SMTP 기반으로 발송한다. 이메일은 정산 완료 및 중요 알림의 보조 채널이며, 정산/포인트/결제 트랜잭션의 일부가 아니다.
+
+#### Required Structured Log Fields
+
+- `settlement_id`
+- `member_id`
+- `email_type`
+- `recipient_hash`
+- `attempt`
+- `result`
+- `smtp_error_code`
+- `created_at`
+
+#### Allowed Use
+
+- 정산 완료 이메일
+- 중요 안내성 이메일
+- bounded retry
+- 운영자 수동 재발송
+- structured log 기반 운영 확인
+
+#### Forbidden Use
+
+- 이메일 실패로 `Settlement.status` 롤백
+- 이메일 실패로 `point_history` 또는 결제 충전 원장 롤백
+- 이메일 발송을 정산 트랜잭션 내부 필수 단계로 결합
+- MVP에서 notification log/outbox를 필수 테이블로 도입
+
+#### Failure / Recovery Basis
+
+이메일 실패는 비금전성 후속 이벤트 실패다. 최종 정산 결과와 포인트 원장은 API와 DB 기준으로 유지되며, 이메일 실패는 structured log, bounded retry, 운영자 수동 재발송으로 처리한다.
+
+---
+
+### 4.9 Storage / S3 Presigned Upload
+
+#### Decision
+
+인증 이미지는 AWS S3 private bucket에 저장한다. 업로드는 서버가 생성한 object key에 대한 presigned URL로 수행한다.
+
+Presigned URL은 upload delegation 수단이지 validation delegation 수단이 아니다. 인증 검증은 mission-log 생성 시 서버가 S3 object를 직접 조회해 수행한다.
+
+#### Required Guardrails
+
+- object key는 서버가 생성한다.
+- 사용자는 임의 S3 path/key를 지정할 수 없다.
+- 권장 key 형식은 `mission/{roomId}/{participantId}/{uuid}`다.
+- presigned URL은 짧은 TTL을 가진다.
+- bucket/object는 public으로 열지 않는다.
+- mission-log 생성 시 서버는 object 존재 여부, size, content-type, key 소유 범위, EXIF를 검증한다.
+- EXIF는 클라이언트 입력이 아니라 서버가 업로드 객체에서 추출/검증한 값을 기준으로 한다.
+- orphan object는 MVP에서 lifecycle rule 또는 최소 cleanup job으로 정리한다.
+
+#### Forbidden Use
+
+- public bucket 기반 인증 이미지 제공
+- 클라이언트 임의 key/path 업로드
+- 클라이언트가 제출한 EXIF 값을 authoritative source로 취급
+- S3 object 검증 없이 `MissionLog` 생성
+
+---
+
+### 4.10 Payment / Toss Confirm-only Charge
+
+#### Decision
+
+MVP 포인트 충전은 TossPayments sandbox confirm-only 흐름을 사용한다. API의 `payment_id`는 Toss `paymentKey`를 의미한다.
+
+#### Required Guardrails
+
+- `payment_id` = Toss `paymentKey`
+- `orderId`는 confirm 검증과 로그 상관관계 추적용이다.
+- `orderId`는 `point_history.idempotency_key` 구성값으로 사용하지 않는다.
+- 충전 idempotency key는 `charge:{paymentKey}`다.
+- 동일 key + 동일 payload는 기존 `point_history`를 재사용한다.
+- 동일 key + 다른 payload는 conflict로 실패한다.
+- provider success + client timeout 상황에서도 같은 `paymentKey` 재조회/재시도로 중복 충전되지 않아야 한다.
+- MVP에서는 별도 payment aggregate 없이 `point_history`를 충전 ledger로 사용한다.
+
+#### Deferred
+
+- webhook/callback 기반 충전 확정
+- payment_event/payment_attempt 테이블
+- 결제 취소/환불 자동화
+- 운영 결제 키 전환
 
 ## 5. Redis/Redisson 운영 원칙
 
@@ -661,8 +756,8 @@ Direct DB mutation은 정상 복구 경로가 아니다. break-glass emergency�
 ### Idempotency
 
 1. 모든 금전성 이벤트는 deterministic `idempotency_key`를 가진다.
-2. 결제 충전은 외부 결제 시스템의 불변 `paymentId`를 사용해 `charge:{paymentId}`를 생성한다.
-3. 동일 `paymentId`는 하나의 충전 이벤트만 의미해야 한다.
+2. 결제 충전은 API field `payment_id`에 담긴 Toss `paymentKey`를 사용해 `charge:{paymentKey}`를 생성한다.
+3. 동일 `paymentKey`는 하나의 충전 이벤트만 의미해야 하며, `orderId`는 confirm 검증과 상관관계 추적용으로만 사용한다.
 4. 동일 idempotency key + 동일 payload는 기존 원장을 재사용/연결한다.
 5. 동일 idempotency key + 다른 payload는 conflict로 실패한다.
 
@@ -737,7 +832,7 @@ Direct DB mutation은 정상 복구 경로가 아니다. break-glass emergency�
 
 | Scenario                                 | Test level               | Setup                                  | Expected result                                               |
 | ---------------------------------------- | ------------------------ | -------------------------------------- | ------------------------------------------------------------- |
-| Duplicate payment callback               | Integration              | 같은 `paymentId` callback 2회 수신     | `charge:{paymentId}`로 `point_history` 1건만 생성/재사용      |
+| Duplicate payment confirm retry         | Integration              | 같은 Toss `paymentKey` confirm 재시도 2회 수신 | `charge:{paymentKey}`로 `point_history` 1건만 생성/재사용 |
 | Duplicate settlement run                 | Integration/batch        | 같은 room settlement 동시 실행         | DB claim 1개만 성공, 중복 지급 없음                           |
 | Redis unavailable during normal worker   | Integration              | Redis 연결 실패                        | worker fail-closed 또는 retry, unsafe payout 없음             |
 | Redis unavailable fallback recovery      | Batch/integration        | Redis off, DB-claim-only recovery 실행 | `Settlement.status` 조건부 claim으로 1개 실행권, 중복 없음    |
@@ -757,7 +852,7 @@ MVP에는 다음 문서를 함께 둔다.
 - settlement 상태 조회 SQL
 - `settlement_item` + `point_history` 연결 검증 SQL
 - idempotency key 기준 `point_history` 조회 SQL
-- payment callback 처리 이력 조회 SQL/API
+- payment confirm/idempotency 처리 이력 조회 SQL/API
 - `point_account.balance` reconciliation 실행 절차
 - Redis 장애 시 일반 worker fail-closed 확인 절차
 - Redis 장애 시 DB-claim-only fallback 실행 절차
@@ -782,10 +877,9 @@ MVP에는 다음 문서를 함께 둔다.
 
 ### Follow-ups
 
-- `docs/Tech-stack-god-saving.md`에서 미정으로 남은 React build tool, QueryDSL, Docker Compose 결정 상태 갱신
-- `Settlement-design.md`에 Redis degraded mode와 DB-claim-only fallback 절차 반영
-- `ERD-god-saving.md`에 derived item payout state validation 또는 향후 `payout_status` 도입 조건 주석 반영
-- 운영 Runbook 문서 작성
+- CSS/UI, 상태관리, 테스트 러너는 별도 Frontend/QA ADR에서 결정
+- Redis degraded mode와 DB-claim-only fallback의 실제 운영 SQL/API 예시는 runbook에 지속 보강
+- derived item payout state validation 또는 향후 `payout_status` 도입 조건은 ERD 후속 보강
 - 정산/멱등성/복구 테스트 시나리오 구현
 
 ## 14. 최종 기술 철학
