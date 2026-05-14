@@ -497,13 +497,14 @@ Exif 추출, 촬영 시각 비교, 성공/실패 사유 분류, 인증 결과 �
 인앱 알림은 실시간성이 중요하지만 핵심 로직을 막아서는 안 된다. 이벤트 발행 구조를 분리하면 실패 격리가 쉬워진다.
 
 **What:**  
-인증 결과, 지분 변화 등 알림 이벤트 스키마와 SSE 발행 엔드포인트, 사용자별 구독 인증을 구현한다.
+인증 결과, 지분 변화 등 알림 이벤트 스키마와 SSE 발행 엔드포인트, 사용자별 구독 인증을 구현한다. MVP 내부 routing key는 email을 사용할 수 있지만, email은 canonical identity가 아니며 `memberId`/UUID가 canonical identity라는 정책을 따른다.
 
 **Acceptance Criteria:**
 
 - 인증된 사용자만 자신의 알림 스트림에 연결할 수 있다.
 - 인증 결과와 지분 변화 이벤트가 발행된다.
-- 같은 이벤트가 중복 발행되지 않도록 제어한다.
+- 이벤트 payload는 최소 `eventId`, `eventType`, `occurredAt`, `resourceType`, `resourceId`, `message`, `severity`, `uiHint`를 포함한다.
+- 같은 이벤트가 중복 발행되지 않도록 제어하고, FE가 `eventId`로 동일 세션 duplicate toast를 방지할 수 있어야 한다.
 - SSE 실패가 핵심 도메인 트랜잭션을 롤백시키지 않는다.
 
 ### T-24. 인앱 알림 UI와 SSE 클라이언트 구현
@@ -512,14 +513,16 @@ Exif 추출, 촬영 시각 비교, 성공/실패 사유 분류, 인증 결과 �
 서버 이벤트만 있어서는 사용자가 변화를 체감하지 못한다. 이벤트를 실제 UI 신호로 연결해야 알림 기능이 의미를 가진다.
 
 **What:**  
-알림 수신 클라이언트, 알림 리스트 또는 토스트 UI, 읽지 않은 상태 표현을 구현한다. 연결 실패 시 재연결 전략도 최소 수준으로 넣는다.
+알림 수신 클라이언트와 toast UI를 구현하고, 이벤트 수신 시 관련 화면의 refetch/invalidate를 trigger한다. badge/count는 best-effort UX projection으로만 다룬다. 연결 실패 시 사용자를 방해하지 않는 조용한 재구독 전략을 최소 수준으로 넣는다.
 
 **Acceptance Criteria:**
 
-- 사용자는 인증 결과 알림을 UI에서 받을 수 있다.
-- 지분 변화 알림이 화면에 반영된다.
-- 연결이 끊겨도 최소 재연결을 시도한다.
-- 알림이 없어도 기존 화면 동작은 유지된다.
+- 사용자는 인증 결과 알림을 toast 등 UI에서 받을 수 있다.
+- 지분 변화 알림 수신 시 관련 화면이 refetch/invalidate되어 최신 상태 확인이 가능하다.
+- 같은 `eventId`에 대해 동일 브라우저 세션에서 duplicate toast가 반복 표시되지 않는다.
+- 연결이 끊겨도 사용자에게 불필요한 오류 알림 없이 조용히 재연결을 시도한다.
+- 여러 탭에서 duplicate toast가 발생할 수 있음은 known risk로 다루며, BroadcastChannel/localStorage 기반 완화는 선택 사항이다.
+- 알림이 없어도 기존 화면 동작은 유지되고 DB/API state로 같은 상태를 확인할 수 있다.
 
 ### T-25. 정산 완료 이메일 발송 구현
 

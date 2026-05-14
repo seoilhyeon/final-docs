@@ -24,7 +24,7 @@
 | Batch | Spring Batch 5.x | 확정 | `PRD-god-saving.md`, `Settlement-design.md` |
 | File Storage | AWS S3 | 확정. MVP는 private bucket + server-generated key + presigned URL 업로드를 사용한다 | `PRD-god-saving.md`, `API-spec-god-saving.md` |
 | Frontend | React, Vite, Axios | 확정. CSS, 상태관리, 테스트 러너는 미정 | `PRD-god-saving.md`, `ADR-mvp-tech-architecture.md` |
-| Notification | SSE, Email | 확정. 이메일은 SMTP 기반 보조 알림이며 실패해도 인증/정산/포인트/결제 트랜잭션을 롤백하지 않는다 | `PRD-god-saving.md`, `Settlement-design.md` |
+| Notification | SSE, Email | 확정. SSE는 best-effort realtime UX delivery이며 Email은 SMTP 기반 보조 알림이다. 둘 다 실패해도 인증/정산/포인트/결제 트랜잭션을 롤백하지 않는다 | `PRD-god-saving.md`, `API-spec-god-saving.md`, `Settlement-design.md` |
 | Payment | 토스페이먼츠 샌드박스 | 확정. MVP는 confirm-only 흐름이며 API의 `payment_id`는 Toss `paymentKey`를 의미한다 | `PRD-god-saving.md`, `API-spec-god-saving.md` |
 | AI | Claude API | 확정 | `PRD-god-saving.md`, `API-spec-god-saving.md` |
 | Infra | AWS EC2, Docker Compose, Nginx, GitHub Actions, CloudWatch | 확정. Docker Compose는 단일 서버 재현성과 배포 단순화를 위한 도구이며 orchestration platform이 아니다 | `PRD-god-saving.md`, `ADR-mvp-tech-architecture.md` |
@@ -60,7 +60,7 @@
 ### 3.4 파일, 알림, AI의 트랜잭션 경계
 
 - 인증 이미지는 AWS S3에 저장한다.
-- SSE와 Email은 사용자 알림 채널이며, 실패해도 인증/정산/포인트 원장 트랜잭션을 롤백시키지 않는다.
+- SSE와 Email은 사용자 알림 채널이며, 실패해도 인증/정산/포인트 원장 트랜잭션을 롤백시키지 않는다. SSE는 toast, 관련 화면 갱신, badge/count 같은 realtime UX 반응을 위한 best-effort delivery이고 DB/API state를 대체하지 않는다.
 - Claude API 기반 AI 미션 추천과 AI 습관 리포트는 첫 릴리스 기능 gate를 통과해야 하지만, 실패해도 수동 방 생성, 정산 완료, 환급, 포인트 원장 흐름을 차단하지 않는다.
 - AI 리포트는 정산 완료 데이터를 읽어 생성되는 후행 기능이며, 정산/환급/포인트 원장의 source of truth가 아니다.
 
@@ -79,7 +79,7 @@
 - mission-log 생성 시 서버는 S3 object를 직접 조회해 존재 여부, size, content-type, ownership, EXIF를 검증한다.
 - EXIF는 서버가 S3 object에서 추출/검증한 값이 기준이다.
 - MVP 이메일은 SMTP 기반 보조 알림이며 structured log, bounded retry, 운영자 수동 재발송 수준으로 운영한다.
-- notification log/outbox는 MVP core 범위에서 제외한다.
+- notification log/outbox, notification inbox, cross-device unread sync, broker replay/fan-out은 MVP core 범위에서 제외한다.
 - TossPayments 충전 API의 `payment_id`는 Toss `paymentKey`를 의미한다.
 - `orderId`는 confirm 검증과 로그 상관관계 추적용이며 `point_history.idempotency_key` 구성값으로 사용하지 않는다.
 

@@ -158,9 +158,17 @@
 
 | 기능             | 설명                                   | 핵심 요구사항               |
 | ---------------- | -------------------------------------- | --------------------------- |
-| SSE 인앱 알림    | 지분 변화와 성공/실패 상황을 즉시 전달 | 단방향 푸시로 충분해야 한다 |
+| SSE 인앱 알림    | 지분 변화와 성공/실패 상황을 즉시 전달 | backend domain event → SSE delivery → frontend realtime reaction → toast/refetch/badge UX로 이어지는 best-effort 흐름이어야 한다 |
 | 정산 완료 이메일 | 결과와 다음 미션 참여 동기를 전달      | 정산 직후 자동 발송         |
 | 운영 모니터링    | 배치, 리소스, 배포 상태를 본다         | CloudWatch, 로그, 알림 구성 |
+
+#### SSE 인앱 알림 MVP 경계
+
+- SSE 인앱 알림은 단순 transport가 아니라 `backend domain event -> SSE delivery -> frontend realtime reaction -> toast / refresh / badge UX`로 이어지는 realtime UX 기능이다.
+- MVP 필수 UX는 EventSource 기반 구독, 이벤트 수신 시 toast 표시, 관련 화면의 상태 재조회 또는 invalidate trigger, 동일 브라우저 세션 내 duplicate toast 방지, reconnect 시 조용한 재구독이다.
+- SSE는 best-effort realtime UX delivery이며, 알림 누락 또는 연결 끊김이 인증/정산/포인트 원장 흐름을 롤백하거나 차단하지 않는다.
+- DB/API state가 source of truth다. badge/count는 사용자의 주의를 돕는 UX projection이며, 정산/포인트/인증 상태의 authoritative state로 사용하지 않는다.
+- MVP에서는 notification inbox, cross-device unread sync, broker 기반 replay, Redis pub/sub fan-out, full multi-tab synchronization을 만들지 않는다. 여러 탭에서 duplicate toast가 발생할 수 있음은 알려진 제한이며, BroadcastChannel 또는 localStorage 기반 완화는 선택 사항이다.
 
 #### FR-Required / Non-transactional: 첫 릴리스 필수이되 비트랜잭션성 기능
 
@@ -246,7 +254,7 @@ AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조
 | File Storage | AWS S3                                             | 인증 이미지를 안정적으로 저장한다                          |
 | Batch        | Spring Batch 5.x                                   | 종료 시점 대량 정산 처리에 적합하다                        |
 | Frontend     | React, Axios                                       | 백엔드와 분리된 UI 개발에 적합하다                         |
-| Notification | SSE, Email                                         | 지분 변화와 정산 결과를 알리기 좋다                        |
+| Notification | SSE, Email                                         | SSE는 realtime UX 반응(toast/refetch/badge)을 위한 best-effort 채널이고, Email은 정산 결과 등 중요 안내의 보조 채널이다 |
 | Payment      | 토스페이먼츠 샌드박스                              | MVP에서도 실제와 유사한 충전 흐름을 보여줄 수 있다         |
 | AI           | Claude API                                         | 미션 추천과 습관 리포트 생성에 사용한다                    |
 | Infra        | AWS EC2, Docker, Nginx, GitHub Actions, CloudWatch | 배포, 자동화, 모니터링을 한 흐름으로 묶는다                |

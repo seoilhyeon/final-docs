@@ -222,6 +222,7 @@
 | AI          | `POST`   | `/api/rooms/{roomId}/ai-habit-report`           | 정산 완료 후 내 AI 습관 리포트 생성/조회 |
 | AI          | `GET`    | `/api/rooms/{roomId}/ai-habit-report/me`        | 내 AI 습관 리포트 상태/결과 조회         |
 | AI          | `GET`    | `/api/ai-habit-reports/{reportId}`              | AI 습관 리포트 단건 조회                 |
+| 알림        | `GET`    | `/api/notifications/stream`                  | 내 실시간 알림 SSE stream 구독             |
 | 포인트      | `POST`   | `/api/points/charges`                           | 포인트 충전 반영                         |
 | 포인트      | `GET`    | `/api/points`                                   | 사용 가능 잔액 조회                      |
 | 포인트      | `GET`    | `/api/points/history`                           | 포인트 내역 조회                         |
@@ -1770,6 +1771,93 @@ Error:
 | 일반 정산 환급      | `ROOM_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                |
 | 시작 전 취소 환급   | `ROOM_CANCELLED_REFUND`  | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                |
 
+
+## 5.9 알림 / SSE
+
+### `GET /api/notifications/stream`
+
+역할:
+
+- 현재 로그인한 사용자의 best-effort realtime notification stream을 SSE로 구독한다.
+- 이 endpoint는 notification inbox, unread sync, replay cursor를 제공하지 않는다.
+- Public API contract는 "현재 인증 사용자 stream"이다. MVP 내부 구현은 email을 routing key로 사용할 수 있지만, email은 canonical user identity가 아니며 MVP용 임시 routing identifier일 뿐이다. Canonical identity는 `memberId`/UUID다.
+
+Request:
+
+```http
+GET /api/notifications/stream
+Authorization: Bearer {accessToken}
+Accept: text/event-stream
+```
+
+Response:
+
+- `Content-Type: text/event-stream`
+- 서버는 연결 유지 중 사용자 대상 이벤트를 SSE data payload로 전달한다.
+- 연결이 끊기면 브라우저/EventSource 또는 클라이언트 wrapper가 조용히 재구독할 수 있다.
+
+Event payload contract:
+
+```json
+{
+  "eventId": "uuid-or-deterministic-id",
+  "eventType": "MISSION_LOG_VERIFICATION_RESULT",
+  "occurredAt": "2026-05-13T07:31:08+09:00",
+  "resourceType": "missionLog",
+  "resourceId": "1201",
+  "message": "인증 결과가 반영되었습니다.",
+  "severity": "success",
+  "uiHint": {
+    "toast": true,
+    "refreshTargets": ["missionLogs", "dashboard"],
+    "badgeDelta": 1
+  }
+}
+```
+
+Field policy:
+
+| 필드 | 설명 |
+| ---- | ---- |
+| `eventId` | 중복 toast 방지와 클라이언트 세션 내 deduplication에 사용하는 이벤트 식별자 |
+| `eventType` | FE가 반응을 결정하는 SSE event catalog 값. DB enum이 아니다 |
+| `occurredAt` | 이벤트 발생 시각. API 공통 시간 규칙을 따른다 |
+| `resourceType` | 이벤트가 가리키는 도메인 리소스 종류 |
+| `resourceId` | refetch, invalidate, route 이동 등에 사용할 리소스 식별자 |
+| `message` | 사용자 표시용 fallback 문구. FE 분기 조건의 유일한 기준으로 사용하지 않는다 |
+| `severity` | `info`, `success`, `warning`, `error` 중 하나의 표시 강도 |
+| `uiHint` | toast 표시 여부, refetch target, badge delta 같은 UX hint. source of truth가 아니다 |
+
+Initial event catalog:
+
+- `MISSION_LOG_VERIFICATION_RESULT` — 인증 성공/실패 결과 반영
+- `DASHBOARD_PROJECTION_CHANGED` — 예상 환급금, 지분율, 순위 같은 dashboard projection 변화
+- `SETTLEMENT_STATUS_CHANGED` — 정산 상태 또는 결과 조회 가능 상태 변화
+- `AI_MISSION_RECOMMENDATION_COMPLETED` — AI 미션 추천 초안 생성 완료
+
+이 catalog는 DB enum이나 notification persistence schema를 의미하지 않는다. 새 eventType은 기존 API 화면으로 source-of-truth 상태를 다시 조회할 수 있는 도메인 변화에만 추가한다.
+
+Reconnect / delivery semantics:
+
+- SSE delivery는 best-effort realtime UX delivery다.
+- 서버 재시작, 네트워크 단절, 브라우저 재연결 중 이벤트가 누락될 수 있다.
+- missed event 복구는 replay가 아니라 기존 API 화면 재조회로 처리한다.
+- 이벤트 순서, durable delivery, cross-device unread state를 보장하지 않는다.
+- 같은 `eventId`가 다시 수신될 수 있으므로 FE는 동일 세션 duplicate toast를 방지해야 한다.
+
+Frontend reaction expectations:
+
+- FE는 `message` 문자열만 해석하지 않고 `eventType`, `resourceType`, `resourceId`를 기준으로 반응한다.
+- 가능한 반응은 toast 표시, 관련 query/list invalidate, 화면 refetch, badge/count best-effort 갱신, 필요 시 특정 route 이동이다.
+- badge/count는 UX projection이며 DB/API state를 대체하지 않는다. DB/API state가 source of truth다.
+- 여러 브라우저 탭에서는 duplicate toast가 발생할 수 있다. BroadcastChannel 또는 localStorage lock으로 완화할 수 있지만, MVP 요구사항을 persistent unread synchronization으로 확장하지 않는다.
+
+Error / close policy:
+
+- 인증이 없거나 만료된 사용자는 stream에 연결할 수 없다.
+- logout 또는 token invalidation 시 FE는 EventSource 연결을 닫아야 한다.
+- SSE 연결 실패는 핵심 도메인 transaction 실패로 해석하지 않는다.
+
 ## 6. 상태 흐름 다이어그램
 
 ### 6.1 Room
@@ -1826,6 +1914,17 @@ RUNNING
 - Dashboard의 `my_expected_refund_amount`와 `GET /api/points`의 `locked_balance`, `available_balance`, `total_balance`를 조합해 최종 보유 포인트, 출금 가능 금액, 확정 환급금을 계산하면 안 된다.
 - Dashboard의 `projection_status = SETTLEMENT_SUCCEEDED`이면 `settlement_id`로 `GET /api/settlements/{settlementId}`를 호출해 최종 인정 성공 수, 최종 지분율, 최종 환급금을 표시한다.
 - Dashboard projection과 최종 settlement 결과가 달라도 시스템 오류로 간주하지 않고, 차이 설명은 Settlement API의 `settlement_item.calculation_reason`을 기준으로 한다.
+
+
+### SSE realtime UX handling
+
+- FE는 로그인 이후 `GET /api/notifications/stream`을 EventSource 기반으로 구독하고, logout 또는 token invalidation 시 연결을 닫는다.
+- SSE 수신은 toast 표시에서 끝나지 않는다. `eventType`, `resourceType`, `resourceId`, `uiHint.refreshTargets`를 기준으로 관련 화면 또는 query/list를 refetch/invalidate한다.
+- FE는 `message` 문자열만으로 비즈니스 분기를 결정하지 않는다. `message`는 사용자 표시용 fallback 문구다.
+- 같은 `eventId`에 대해 동일 브라우저 세션에서 duplicate toast를 반복 표시하지 않는다.
+- reconnect/re-subscribe는 사용자에게 불필요한 오류 toast를 띄우지 않고 조용히 수행한다.
+- badge/count는 best-effort UX projection이며, 알림 누락 여부나 정산/포인트/인증 상태의 source of truth가 아니다.
+- 여러 탭을 동시에 열면 탭별 duplicate toast가 발생할 수 있다. BroadcastChannel 또는 localStorage 기반 완화는 선택 사항이며, 이를 notification inbox나 cross-device unread sync 요구사항으로 확장하지 않는다.
 
 ## 8. 구현 메모
 

@@ -134,7 +134,7 @@ Redis/Redisson은 운영/성능/동시성 보조 계층으로 사용한다. Redi
 - rate limiting
 - dashboard/projection cache
 - idempotency cache 보조
-- SSE/event 보조
+- SSE/event 보조(best-effort realtime UX delivery)
 
 #### Allowed Use
 
@@ -143,7 +143,7 @@ Redis/Redisson은 운영/성능/동시성 보조 계층으로 사용한다. Redi
 - rate limiting
 - projection/dashboard cache
 - DB idempotency를 보조하는 Redis cache
-- SSE/event의 비최종 알림 보조
+- SSE/event의 비최종 알림 보조. Redis pub/sub fan-out이나 replay 보장은 MVP 필수 요구가 아니다
 
 #### Forbidden Use
 
@@ -175,6 +175,14 @@ Redis 장애 시에도 금전성 정합성은 다음 MySQL 기준으로 보존�
 4. 일부 rate limit 고도화
 
 단, DB-backed settlement duplicate/concurrency guard로서 Redisson 경험은 MVP 유지 우선순위가 높다. 다만 항상 DB fallback을 문서화해야 한다.
+
+#### SSE / Realtime UX Notification Boundary
+
+SSE notification은 `backend domain event -> SSE delivery -> frontend realtime reaction -> toast / refresh / badge UX`로 이어지는 best-effort UX delivery다. SSE 성공 여부는 인증, 정산, 포인트 원장, 결제 transaction의 성공 조건이 아니며, DB/API state가 source of truth다.
+
+MVP 내부 SSE routing key로 email을 사용할 수 있다. 단, email은 변경 가능한 identifier이므로 canonical user identity가 아니다. canonical identity는 `memberId`/UUID이며, email routing은 MVP 구현 단순화를 위한 임시 routing identifier로만 문서화한다. OAuth2, email 변경 정책, multi-provider login, account linking이 도입되면 SSE routing key를 memberId 기반으로 전환할 수 있어야 한다.
+
+Single-instance MVP에서는 in-memory emitter lifecycle을 허용한다. Emitter는 completion, timeout, error 시 정리되어야 하며, 서버 재시작 또는 연결 단절 시 client reconnect와 일반 API refetch로 UX를 복구한다. Multi-instance 환경에서는 event publisher와 사용자가 연결된 node가 다를 수 있으므로 Redis pub/sub 또는 broker fan-out을 검토할 수 있지만, 이는 MVP 필수 범위가 아니다. Broker 기반 replay, notification inbox, cross-device unread sync, full multi-tab synchronization은 후속 범위다.
 
 ---
 
@@ -668,6 +676,7 @@ Job/Step은 복구 경계가 명확할 정도로만 나눈다. 학습 목적으�
 - 실시간 ranking/share
 - feed성 데이터
 - read model cache
+- SSE realtime notification, toast, badge/count UX projection
 
 이 영역은 source of truth가 아니며, 사용자에게 최종 정산 기준이 아님을 명확히 할 수 있다.
 
@@ -768,6 +777,14 @@ Direct DB mutation은 정상 복구 경로가 아니다. break-glass emergency�
 2. Redis 부재가 직접 DB 수정 필요성을 만들면 안 된다.
 3. fallback recovery는 MySQL ownership semantics를 사용해야 한다.
 
+
+### SSE notification safety
+
+1. SSE 연결 실패, reconnect, 서버 재시작은 인증/정산/포인트 원장 transaction을 롤백하거나 차단하면 안 된다.
+2. Email은 MVP SSE routing identifier로 사용할 수 있지만 canonical identity로 취급하면 안 된다. canonical user identity는 `memberId`/UUID다.
+3. Badge/count와 toast는 UX projection이며 DB/API state를 대체하면 안 된다.
+4. MVP는 notification inbox, durable replay, cross-device unread sync, Redis pub/sub fan-out, full multi-tab synchronization을 필수 요구로 만들지 않는다.
+
 ### Operator recovery
 
 1. 운영자는 approved API/batch command를 통해서만 금전성 복구를 실행한다.
@@ -819,7 +836,7 @@ Blocker로 취급한다:
 
 | 축소 순서 | 축소 대상                     | 줄일 수 있는 이유                          | 유지해야 할 대체 기준                    |
 | --------: | ----------------------------- | ------------------------------------------ | ---------------------------------------- |
-|         1 | SSE/event Redis 보조 구조     | 알림은 최종 정산 기준이 아님               | DB 상태/API 조회, Email                  |
+|         1 | SSE/event Redis 보조 구조     | 알림은 최종 정산 기준이 아니며 replay/fan-out은 MVP 필수가 아님 | DB 상태/API 조회, Email                  |
 |         2 | dashboard/projection cache    | projection은 source of truth가 아님        | MySQL 조회 또는 stale 표시               |
 |         3 | Redis idempotency cache       | DB idempotency가 최종 방어선               | `point_history.idempotency_key` unique   |
 |         4 | Batch step/job 세분화         | 복구 경계만 명확하면 세분화는 줄일 수 있음 | settlement/retry/reconciliation job 유지 |
