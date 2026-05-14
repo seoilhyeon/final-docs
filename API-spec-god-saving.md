@@ -42,18 +42,33 @@
 - 로그인 이후 API는 `Authorization: Bearer {accessToken}` 헤더를 사용한다.
 - refresh token은 별도 API로 재발급한다.
 
-### 2.3 시간
+### 2.3 식별자 경계
+
+| Identifier | API/Auth/SSE 역할 |
+| ---------- | ----------------- |
+| `member.id` / `member_id` | DB 내부 FK / join / persistence identity다. 외부 API/JWT/SSE routing boundary의 canonical identifier로 사용하지 않는다. |
+| `member.uuid` / `member_uuid` | external canonical identifier다. JWT `sub`, 외부 사용자 식별자, SSE emitter registry key, notification/event routing key로 사용한다. |
+| `email` | 로그인 식별자, 연락처, 사용자 정보다. PII이고 변경 가능하므로 routing key, stream identifier, notification recipient key, JWT subject로 사용하지 않는다. |
+
+정책:
+
+- JWT access token subject(`sub`)는 `member.uuid`다.
+- Spring Security principal은 서버 내부 처리 편의를 위해 `memberId(Long)`와 `memberUuid(UUID)`를 모두 가질 수 있지만, external boundary에는 UUID를 canonical identifier로 사용한다.
+- DB 내부 command/query와 FK 관계는 Long PK를 유지한다. API 응답에서 사용자 식별자를 노출해야 하면 `member_uuid`를 사용한다.
+- 기존 email 기반 SSE routing 또는 notification routing 표현/구현은 fallback이 아니라 제거 대상 anti-pattern이다.
+
+### 2.4 시간
 
 - 모든 응답 시간은 offset을 포함한 `ISO-8601` 문자열을 사용한다.
 - 예시: `2026-05-07T00:05:00+09:00`
 - 미션 기간과 정산 판단 기준 시간대는 `Asia/Seoul`로 고정한다.
 
-### 2.4 금액
+### 2.5 금액
 
 - 금액 필드는 모두 `integer`다.
 - 예시: `100000`
 
-### 2.5 에러 응답
+### 2.6 에러 응답
 
 모든 4xx/5xx 응답은 아래 형식을 사용한다.
 
@@ -65,7 +80,7 @@
 }
 ```
 
-### 2.6 상태값 원칙
+### 2.7 상태값 원칙
 
 - `MissionRoom.status`는 방 상태다. MVP에서 `RECRUITING -> ACTIVE`는 host `StartRoom` command 성공으로만 발생한다.
 - `Participant.status`는 참여 상태다.
@@ -249,7 +264,7 @@ Response `201 Created`:
 
 ```json
 {
-  "member_id": 1,
+  "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "email": "user@example.com",
   "nickname": "갓세이빙러",
   "status": "ACTIVE",
@@ -287,7 +302,7 @@ Response `200 OK`:
   "access_token": "jwt-access-token",
   "refresh_token": "jwt-refresh-token",
   "member": {
-    "member_id": 1,
+    "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
     "email": "user@example.com",
     "nickname": "갓세이빙러",
     "status": "ACTIVE"
@@ -302,6 +317,7 @@ Error:
 
 정책:
 
+- access token JWT subject(`sub`)는 `member.uuid`다. `email`이나 Long `member.id`를 subject로 사용하지 않는다.
 - refresh token은 서버에 raw value가 아니라 hash로 저장한다.
 
 ### `POST /api/auth/refresh`
@@ -364,10 +380,10 @@ Response `200 OK`:
 
 ```json
 {
-  "member_id": 1,
+  "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "email": "user@example.com",
   "nickname": "갓세이빙러",
-  "profile_image_url": "https://cdn.example.com/profile/1/avatar.jpg",
+  "profile_image_url": "https://cdn.example.com/profile/018f4fd2-6d7a-7a41-9f58-6d07f5c3c901/avatar.jpg",
   "status": "ACTIVE",
   "created_at": "2026-05-01T12:00:00+09:00"
 }
@@ -400,10 +416,10 @@ Response `200 OK`:
 
 ```json
 {
-  "member_id": 1,
+  "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "email": "user@example.com",
   "nickname": "saving-cat",
-  "profile_image_url": "https://cdn.example.com/profile/1/avatar.jpg",
+  "profile_image_url": "https://cdn.example.com/profile/018f4fd2-6d7a-7a41-9f58-6d07f5c3c901/avatar.jpg",
   "status": "ACTIVE",
   "updated_at": "2026-05-01T12:10:00+09:00"
 }
@@ -541,7 +557,7 @@ Response `200 OK`:
 ```json
 {
   "room_id": 42,
-  "host_member_id": 1,
+  "host_member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "title": "새벽 기상 챌린지",
   "description": "매일 아침 6시 전에 인증",
   "visibility": "PUBLIC",
@@ -625,7 +641,7 @@ Response `201 Created`:
 {
   "participant_id": 101,
   "room_id": 42,
-  "member_id": 7,
+  "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
   "status": "JOINED",
   "deposit_locked_amount": 100000,
   "joined_at": "2026-05-08T13:00:00+09:00"
@@ -947,7 +963,7 @@ Response `200 OK`:
     {
       "mission_log_id": 9001,
       "participant_id": 101,
-      "member_id": 7,
+      "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
       "nickname": "saving-cat",
       "image_url": "https://cdn.example.com/mission/9001.jpg",
       "server_time": "2026-05-11T05:58:10+09:00",
@@ -977,14 +993,14 @@ Response `200 OK`:
   "participant_day_slots": [
     {
       "participant_id": 101,
-      "member_id": 7,
+      "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
       "date": "2026-05-11",
       "status": "SUCCESS",
       "representative_mission_log_id": 9001
     },
     {
       "participant_id": 102,
-      "member_id": 8,
+      "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c908",
       "date": "2026-05-11",
       "status": "FAILED",
       "representative_mission_log_id": null
@@ -1621,7 +1637,7 @@ Response `201 Created`:
 ```json
 {
   "point_history_id": 3001,
-  "member_id": 1,
+  "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "amount": 50000,
   "balance_after": 350000,
   "transaction_type": "POINT_CHARGE",
@@ -1634,7 +1650,7 @@ Response `201 Created`:
 ```json
 {
   "point_history_id": 3001,
-  "member_id": 1,
+  "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "amount": 50000,
   "balance_after": 350000,
   "transaction_type": "POINT_CHARGE",
@@ -1780,7 +1796,8 @@ Error:
 
 - 현재 로그인한 사용자의 best-effort realtime notification stream을 SSE로 구독한다.
 - 이 endpoint는 notification inbox, unread sync, replay cursor를 제공하지 않는다.
-- Public API contract는 "현재 인증 사용자 stream"이다. MVP 내부 구현은 email을 routing key로 사용할 수 있지만, email은 canonical user identity가 아니며 MVP용 임시 routing identifier일 뿐이다. Canonical identity는 `memberId`/UUID다.
+- Public API contract는 "현재 인증 사용자 stream"이다. 내부 SSE emitter registry와 notification/event routing key는 JWT `sub`에서 해석한 `member.uuid`를 사용한다.
+- `email`은 변경 가능하고 PII이므로 SSE routing key, stream identifier, notification recipient key로 사용하지 않는다.
 
 Request:
 
@@ -1793,7 +1810,7 @@ Accept: text/event-stream
 Response:
 
 - `Content-Type: text/event-stream`
-- 서버는 연결 유지 중 사용자 대상 이벤트를 SSE data payload로 전달한다.
+- 서버는 연결 유지 중 `member.uuid` 기준으로 routing된 사용자 대상 이벤트를 SSE data payload로 전달한다.
 - 연결이 끊기면 브라우저/EventSource 또는 클라이언트 wrapper가 조용히 재구독할 수 있다.
 
 Event payload contract:
@@ -1828,6 +1845,12 @@ Field policy:
 | `severity` | `info`, `success`, `warning`, `error` 중 하나의 표시 강도 |
 | `uiHint` | toast 표시 여부, refetch target, badge delta 같은 UX hint. source of truth가 아니다 |
 
+Payload 최소화 원칙:
+
+- SSE payload에는 email, Long `member.id`, 불필요한 사용자 PII를 넣지 않는다.
+- recipient 식별은 서버 내부 registry/routing에서 `member.uuid`로 처리하고, 클라이언트가 필요로 하는 도메인 refetch 단서만 payload에 포함한다.
+- SSE payload는 상태 snapshot이 아니라 REST refetch/invalidate를 유도하는 signal이다.
+
 Initial event catalog:
 
 - `MISSION_LOG_VERIFICATION_RESULT` — 인증 성공/실패 결과 반영
@@ -1835,13 +1858,13 @@ Initial event catalog:
 - `SETTLEMENT_STATUS_CHANGED` — 정산 상태 또는 결과 조회 가능 상태 변화
 - `AI_MISSION_RECOMMENDATION_COMPLETED` — AI 미션 추천 초안 생성 완료
 
-이 catalog는 DB enum이나 notification persistence schema를 의미하지 않는다. 새 eventType은 기존 API 화면으로 source-of-truth 상태를 다시 조회할 수 있는 도메인 변화에만 추가한다.
+이 catalog는 DB enum이나 notification persistence schema를 의미하지 않는다. 새 eventType은 기존 REST API 화면으로 source-of-truth 상태를 다시 조회할 수 있는 도메인 변화에만 추가한다.
 
 Reconnect / delivery semantics:
 
 - SSE delivery는 best-effort realtime UX delivery다.
 - 서버 재시작, 네트워크 단절, 브라우저 재연결 중 이벤트가 누락될 수 있다.
-- missed event 복구는 replay가 아니라 기존 API 화면 재조회로 처리한다.
+- missed event 복구는 replay가 아니라 기존 REST API 화면 재조회로 처리한다.
 - 이벤트 순서, durable delivery, cross-device unread state를 보장하지 않는다.
 - 같은 `eventId`가 다시 수신될 수 있으므로 FE는 동일 세션 duplicate toast를 방지해야 한다.
 
@@ -1850,7 +1873,8 @@ Frontend reaction expectations:
 - FE는 `message` 문자열만 해석하지 않고 `eventType`, `resourceType`, `resourceId`를 기준으로 반응한다.
 - 가능한 반응은 toast 표시, 관련 query/list invalidate, 화면 refetch, badge/count best-effort 갱신, 필요 시 특정 route 이동이다.
 - badge/count는 UX projection이며 DB/API state를 대체하지 않는다. DB/API state가 source of truth다.
-- 여러 브라우저 탭에서는 duplicate toast가 발생할 수 있다. BroadcastChannel 또는 localStorage lock으로 완화할 수 있지만, MVP 요구사항을 persistent unread synchronization으로 확장하지 않는다.
+- 하나의 `member.uuid`는 여러 브라우저 탭/디바이스에서 여러 emitter를 가질 수 있다. 여러 탭에서는 duplicate toast가 발생할 수 있다. BroadcastChannel 또는 localStorage lock으로 완화할 수 있지만, MVP 요구사항을 persistent unread synchronization으로 확장하지 않는다.
+- notification persistence/read-state가 도입되기 전까지 unread count의 source of truth는 존재하지 않는다. badge/count는 best-effort UX projection으로만 다룬다.
 
 Error / close policy:
 

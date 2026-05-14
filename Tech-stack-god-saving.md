@@ -72,7 +72,14 @@
 - QueryDSL projection은 settlement correctness 또는 source of truth가 아니다.
 - 정산 금액 계산과 복구 판단 기준은 MySQL row, `settlement_item`, `point_history`, DB 제약, deterministic idempotency key다.
 
-### 3.6 Storage / Email / Payment 경계
+### 3.6 Identity / Auth / Realtime boundary
+
+- `member.id`는 DB 내부 FK / join / persistence identity다.
+- `member.uuid`는 external canonical identifier이며 JWT `sub`, API 사용자 식별자, SSE emitter registry key, notification/event routing key로 사용한다.
+- `email`은 로그인 식별자와 연락처/사용자 정보이며, 변경 가능하고 PII이므로 routing key, stream identifier, notification recipient key, JWT subject로 사용하지 않는다.
+- SSE는 state source가 아니라 REST refetch/invalidate를 유도하는 best-effort realtime signal이다.
+
+### 3.7 Storage / Email / Payment 경계
 
 - Presigned URL은 upload delegation 수단이지 validation delegation 수단이 아니다.
 - S3 object key는 서버가 생성하며 사용자는 임의 path/key를 지정할 수 없다.

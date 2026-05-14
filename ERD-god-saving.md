@@ -70,14 +70,17 @@
 역할:
 
 - 실제 사용자 계정을 식별한다.
-- `member_id`는 포인트 지급과 원장 기록의 기준 키다.
+- `member.id`는 DB 내부 FK / join / persistence identity다.
+- `member.uuid`는 외부/API/JWT/SSE/notification boundary에서 사용하는 external canonical identifier다.
+- `email`은 로그인 식별자와 연락처/사용자 정보이며 routing key나 canonical identity로 사용하지 않는다.
 
 주요 컬럼:
 
 | 컬럼                   | 타입 제안      | nullable | 설명                              |
 | ---------------------- | -------------- | -------- | --------------------------------- |
-| `id`                   | `BIGINT`       | N        | 회원 PK                           |
-| `email`                | `VARCHAR(255)` | N        | 로그인 식별자                     |
+| `id`                   | `BIGINT`       | N        | 회원 PK. DB 내부 FK / join 기준   |
+| `uuid`                 | `BINARY(16)` 또는 `CHAR(36)` | N | 외부 canonical identifier. JWT subject / API / SSE / notification routing 기준 |
+| `email`                | `VARCHAR(255)` | N        | 로그인 식별자 및 연락처. routing key로 사용하지 않음 |
 | `password_hash`        | `VARCHAR(255)` | Y        | 일반 로그인 사용 시 비밀번호 해시 |
 | `nickname`             | `VARCHAR(50)`  | N        | 노출 이름                         |
 | `profile_image_s3_key` | `VARCHAR(255)` | Y        | 프로필 이미지 S3 key              |
@@ -95,6 +98,7 @@ FK:
 
 Unique / Index:
 
+- `unique(uuid)`
 - `unique(email)`
 - `index(status)`
 
@@ -104,12 +108,17 @@ Unique / Index:
 
 주의사항:
 
+- `member.id`는 내부 persistence identity이고 외부 API/JWT/SSE boundary에 노출하지 않는다.
+- `member.uuid`는 회원 생성 시 발급하고 변경하지 않는 immutable external canonical identifier다.
+- JWT `sub`, SSE emitter registry key, notification/event routing key, 외부 사용자 식별자는 `member.uuid`를 사용한다.
+- `email`은 변경 가능하고 PII이므로 SSE routing key, notification routing key, JWT subject, stream identifier로 사용하지 않는다. 기존 email routing 구현이 있으면 제거 대상 anti-pattern이다.
 - `member`는 계정의 기준 키고, 정산 계산 단위는 아니다.
 - `member`는 사용자 식별·인증·프로필 상태를 담당하며, 포인트 현재 잔액처럼 빈번히 변하는 금액 상태는 직접 보관하지 않는다.
 - 프로필은 닉네임 + 프로필 이미지로 제한된다.
 - 별도의 social profile 테이블은 도입하지 않는다.
 - 프로필 수정은 인증/JWT, 크루 참여, 포인트 원장, 정산, 환급, 상태 생명주기에 side effect를 만들지 않는다.
-- 정산 지급과 원장 기록은 항상 `member_id` 기준으로 연결한다.
+- 정산 지급과 원장 기록은 항상 내부 FK인 `member_id -> member.id` 기준으로 연결한다.
+- Spring Security principal은 내부 처리를 위해 `memberId`와 `memberUuid`를 함께 가질 수 있지만, external boundary에는 UUID만 canonical identifier로 사용한다.
 - MVP에서는 이메일/비밀번호 기반 가입만 지원하며, SMS 인증·이메일 인증·KYC 같은 별도 verification 상태는 도입하지 않는다.
 
 ### `member_refresh_token`
@@ -793,6 +802,7 @@ Unique / Index:
 erDiagram
     MEMBER {
         BIGINT id PK
+        UUID uuid UK
         VARCHAR email
         VARCHAR password_hash
         VARCHAR nickname

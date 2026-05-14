@@ -180,9 +180,9 @@ Redis 장애 시에도 금전성 정합성은 다음 MySQL 기준으로 보존�
 
 SSE notification은 `backend domain event -> SSE delivery -> frontend realtime reaction -> toast / refresh / badge UX`로 이어지는 best-effort UX delivery다. SSE 성공 여부는 인증, 정산, 포인트 원장, 결제 transaction의 성공 조건이 아니며, DB/API state가 source of truth다.
 
-MVP 내부 SSE routing key로 email을 사용할 수 있다. 단, email은 변경 가능한 identifier이므로 canonical user identity가 아니다. canonical identity는 `memberId`/UUID이며, email routing은 MVP 구현 단순화를 위한 임시 routing identifier로만 문서화한다. OAuth2, email 변경 정책, multi-provider login, account linking이 도입되면 SSE routing key를 memberId 기반으로 전환할 수 있어야 한다.
+MVP부터 external canonical identifier는 `member.uuid`다. `member.id`는 DB 내부 FK / join / persistence identity로 유지하고, JWT `sub`, SSE emitter registry key, notification/event routing key, 외부 사용자 식별자는 `member.uuid`를 사용한다. `email`은 로그인 식별자와 연락처/사용자 정보일 뿐이며, 변경 가능하고 PII이므로 SSE routing key, stream identifier, notification recipient key, JWT subject로 사용하지 않는다. 기존 email routing 구현/표현은 fallback이 아니라 제거 대상 anti-pattern이다.
 
-Single-instance MVP에서는 in-memory emitter lifecycle을 허용한다. Emitter는 completion, timeout, error 시 정리되어야 하며, 서버 재시작 또는 연결 단절 시 client reconnect와 일반 API refetch로 UX를 복구한다. Multi-instance 환경에서는 event publisher와 사용자가 연결된 node가 다를 수 있으므로 Redis pub/sub 또는 broker fan-out을 검토할 수 있지만, 이는 MVP 필수 범위가 아니다. Broker 기반 replay, notification inbox, cross-device unread sync, full multi-tab synchronization은 후속 범위다.
+Single-instance MVP에서는 `Map<member.uuid, emitters>` 형태의 in-memory emitter lifecycle을 허용한다. 하나의 UUID가 multi-tab/multi-device로 여러 emitter를 가질 수 있으며, emitter는 completion, timeout, error 시 정리되어야 한다. 서버 재시작 또는 연결 단절 시 client reconnect와 일반 REST API refetch로 UX를 복구한다. Multi-instance 환경에서는 event publisher와 사용자가 연결된 node가 다를 수 있으므로 Redis pub/sub 또는 broker fan-out을 검토할 수 있지만, 이는 MVP 필수 범위가 아니다. Broker 기반 replay, notification inbox, cross-device unread sync, full multi-tab synchronization은 후속 범위다.
 
 ---
 
@@ -781,7 +781,7 @@ Direct DB mutation은 정상 복구 경로가 아니다. break-glass emergency�
 ### SSE notification safety
 
 1. SSE 연결 실패, reconnect, 서버 재시작은 인증/정산/포인트 원장 transaction을 롤백하거나 차단하면 안 된다.
-2. Email은 MVP SSE routing identifier로 사용할 수 있지만 canonical identity로 취급하면 안 된다. canonical user identity는 `memberId`/UUID다.
+2. Email routing은 anti-pattern이다. JWT `sub`, SSE emitter registry key, notification/event routing key, 외부 사용자 식별자는 `member.uuid`를 사용하고, Long `member.id`는 DB 내부 FK / join / persistence identity로만 사용한다.
 3. Badge/count와 toast는 UX projection이며 DB/API state를 대체하면 안 된다.
 4. MVP는 notification inbox, durable replay, cross-device unread sync, Redis pub/sub fan-out, full multi-tab synchronization을 필수 요구로 만들지 않는다.
 

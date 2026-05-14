@@ -167,6 +167,7 @@
 - SSE 인앱 알림은 단순 transport가 아니라 `backend domain event -> SSE delivery -> frontend realtime reaction -> toast / refresh / badge UX`로 이어지는 realtime UX 기능이다.
 - MVP 필수 UX는 EventSource 기반 구독, 이벤트 수신 시 toast 표시, 관련 화면의 상태 재조회 또는 invalidate trigger, 동일 브라우저 세션 내 duplicate toast 방지, reconnect 시 조용한 재구독이다.
 - SSE는 best-effort realtime UX delivery이며, 알림 누락 또는 연결 끊김이 인증/정산/포인트 원장 흐름을 롤백하거나 차단하지 않는다.
+- MVP부터 사용자 external canonical identifier는 `member.uuid`다. JWT `sub`, SSE emitter registry key, notification/event routing key는 UUID를 사용하고, email routing은 사용하지 않는다.
 - DB/API state가 source of truth다. badge/count는 사용자의 주의를 돕는 UX projection이며, 정산/포인트/인증 상태의 authoritative state로 사용하지 않는다.
 - MVP에서는 notification inbox, cross-device unread sync, broker 기반 replay, Redis pub/sub fan-out, full multi-tab synchronization을 만들지 않는다. 여러 탭에서 duplicate toast가 발생할 수 있음은 알려진 제한이며, BroadcastChannel 또는 localStorage 기반 완화는 선택 사항이다.
 
