@@ -134,7 +134,7 @@ Redis/Redisson은 운영/성능/동시성 보조 계층으로 사용한다. Redi
 - rate limiting
 - dashboard/projection cache
 - idempotency cache 보조
-- SSE/event 보조(best-effort realtime UX delivery)
+- SSE/event 보조
 
 #### Allowed Use
 
@@ -143,7 +143,7 @@ Redis/Redisson은 운영/성능/동시성 보조 계층으로 사용한다. Redi
 - rate limiting
 - projection/dashboard cache
 - DB idempotency를 보조하는 Redis cache
-- SSE/event의 비최종 알림 보조. Redis pub/sub fan-out이나 replay 보장은 MVP 필수 요구가 아니다
+- SSE/event의 비최종 알림 보조
 
 #### Forbidden Use
 
@@ -178,11 +178,9 @@ Redis 장애 시에도 금전성 정합성은 다음 MySQL 기준으로 보존�
 
 #### SSE / Realtime UX Notification Boundary
 
-SSE notification은 `backend domain event -> SSE delivery -> frontend realtime reaction -> toast / refresh / badge UX`로 이어지는 best-effort UX delivery다. SSE 성공 여부는 인증, 정산, 포인트 원장, 결제 transaction의 성공 조건이 아니며, DB/API state가 source of truth다.
+SSE notification은 MVP에서 낮은 복잡도로 server-to-client realtime UX signal을 제공하기 위해 선택한다. SSE 성공 여부는 인증, 정산, 포인트 원장, 결제 transaction의 성공 조건이 아니며, REST/DB state가 source of truth다.
 
-MVP부터 external canonical identifier는 `member.uuid`다. `member.id`는 DB 내부 FK / join / persistence identity로 유지하고, JWT `sub`, SSE emitter registry key, notification/event routing key, 외부 사용자 식별자는 `member.uuid`를 사용한다. `email`은 로그인 식별자와 연락처/사용자 정보일 뿐이며, 변경 가능하고 PII이므로 SSE routing key, stream identifier, notification recipient key, JWT subject로 사용하지 않는다. 기존 email routing 구현/표현은 fallback이 아니라 제거 대상 anti-pattern이다.
-
-Single-instance MVP에서는 `Map<member.uuid, emitters>` 형태의 in-memory emitter lifecycle을 허용한다. 하나의 UUID가 multi-tab/multi-device로 여러 emitter를 가질 수 있으며, emitter는 completion, timeout, error 시 정리되어야 한다. 서버 재시작 또는 연결 단절 시 client reconnect와 일반 REST API refetch로 UX를 복구한다. Multi-instance 환경에서는 event publisher와 사용자가 연결된 node가 다를 수 있으므로 Redis pub/sub 또는 broker fan-out을 검토할 수 있지만, 이는 MVP 필수 범위가 아니다. Broker 기반 replay, notification inbox, cross-device unread sync, full multi-tab synchronization은 후속 범위다.
+Durable broker, outbox, replay, notification inbox, unread sync는 MVP에서 제외한다. 현재 제품 요구는 영속 알림 상태가 아니라 중요한 상태 변화의 best-effort 인지이며, 누락 복구는 API 조회로 충분하다. SSE 외부 계약과 identity 사용 방식은 `API-spec-god-saving.md`가 소유한다.
 
 ---
 
@@ -777,13 +775,12 @@ Direct DB mutation은 정상 복구 경로가 아니다. break-glass emergency�
 2. Redis 부재가 직접 DB 수정 필요성을 만들면 안 된다.
 3. fallback recovery는 MySQL ownership semantics를 사용해야 한다.
 
-
 ### SSE notification safety
 
 1. SSE 연결 실패, reconnect, 서버 재시작은 인증/정산/포인트 원장 transaction을 롤백하거나 차단하면 안 된다.
-2. Email routing은 anti-pattern이다. JWT `sub`, SSE emitter registry key, notification/event routing key, 외부 사용자 식별자는 `member.uuid`를 사용하고, Long `member.id`는 DB 내부 FK / join / persistence identity로만 사용한다.
-3. Badge/count와 toast는 UX projection이며 DB/API state를 대체하면 안 된다.
-4. MVP는 notification inbox, durable replay, cross-device unread sync, Redis pub/sub fan-out, full multi-tab synchronization을 필수 요구로 만들지 않는다.
+2. SSE는 source-of-truth state가 아니라 best-effort UX signal이다.
+3. Durable broker, outbox, replay, notification inbox, unread sync는 MVP 필수 요구가 아니다.
+4. SSE 외부 계약, identity, payload, reconnect semantics는 `API-spec-god-saving.md`의 알림/SSE 계약을 따른다.
 
 ### Operator recovery
 
@@ -834,15 +831,15 @@ Blocker로 취급한다:
 
 ### 9.2 일정이 밀릴 때 우선 축소할 기능
 
-| 축소 순서 | 축소 대상                     | 줄일 수 있는 이유                          | 유지해야 할 대체 기준                    |
-| --------: | ----------------------------- | ------------------------------------------ | ---------------------------------------- |
+| 축소 순서 | 축소 대상                     | 줄일 수 있는 이유                                               | 유지해야 할 대체 기준                    |
+| --------: | ----------------------------- | --------------------------------------------------------------- | ---------------------------------------- |
 |         1 | SSE/event Redis 보조 구조     | 알림은 최종 정산 기준이 아니며 replay/fan-out은 MVP 필수가 아님 | DB 상태/API 조회, Email                  |
-|         2 | dashboard/projection cache    | projection은 source of truth가 아님        | MySQL 조회 또는 stale 표시               |
-|         3 | Redis idempotency cache       | DB idempotency가 최종 방어선               | `point_history.idempotency_key` unique   |
-|         4 | Batch step/job 세분화         | 복구 경계만 명확하면 세분화는 줄일 수 있음 | settlement/retry/reconciliation job 유지 |
-|         5 | Advanced CloudWatch dashboard | 알람/로그가 먼저 중요                      | 핵심 error/metric alarm 유지             |
-|         6 | QueryDSL 사용 범위            | 단순 조회는 JPA로 가능                     | 운영/복구 핵심 조회만 QueryDSL           |
-|         7 | Admin API 편의 기능           | 편의 기능은 나중에 가능                    | 핵심 recovery command 유지               |
+|         2 | dashboard/projection cache    | projection은 source of truth가 아님                             | MySQL 조회 또는 stale 표시               |
+|         3 | Redis idempotency cache       | DB idempotency가 최종 방어선                                    | `point_history.idempotency_key` unique   |
+|         4 | Batch step/job 세분화         | 복구 경계만 명확하면 세분화는 줄일 수 있음                      | settlement/retry/reconciliation job 유지 |
+|         5 | Advanced CloudWatch dashboard | 알람/로그가 먼저 중요                                           | 핵심 error/metric alarm 유지             |
+|         6 | QueryDSL 사용 범위            | 단순 조회는 JPA로 가능                                          | 운영/복구 핵심 조회만 QueryDSL           |
+|         7 | Admin API 편의 기능           | 편의 기능은 나중에 가능                                         | 핵심 recovery command 유지               |
 
 ### 9.3 줄이면 안 되는 것
 
@@ -870,20 +867,20 @@ Blocker로 취급한다:
 
 ## 11. 검증 매트릭스
 
-| Scenario                                 | Test level               | Setup                                  | Expected result                                               |
-| ---------------------------------------- | ------------------------ | -------------------------------------- | ------------------------------------------------------------- |
-| Duplicate payment confirm retry         | Integration              | 같은 Toss `paymentKey` confirm 재시도 2회 수신 | `charge:{paymentKey}`로 `point_history` 1건만 생성/재사용 |
-| Duplicate settlement run                 | Integration/batch        | 같은 room settlement 동시 실행         | DB claim 1개만 성공, 중복 지급 없음                           |
-| Redis unavailable during normal worker   | Integration              | Redis 연결 실패                        | worker fail-closed 또는 retry, unsafe payout 없음             |
-| Redis unavailable fallback recovery      | Batch/integration        | Redis off, DB-claim-only recovery 실행 | `Settlement.status` 조건부 claim으로 1개 실행권, 중복 없음    |
-| Provider timeout after successful charge | Integration/recovery     | provider는 성공, client timeout        | 같은 idempotency key로 재조회/재시도, 중복 충전 없음          |
-| Partial batch failure and resume         | Batch/recovery           | 일부 participant 성공 후 job 실패      | 완료 item 유지, 미완료 item만 재시도                          |
-| Balance rebuild                          | Batch/reconciliation     | `point_account.balance` 불일치 fixture | `point_history` 합계 기준으로 재계산/복구                     |
-| Operator recovery without DB mutation    | Recovery                 | stuck settlement 대상 admin API 실행   | app/batch path로 복구, audit log 생성                         |
-| Parent `SUCCEEDED` with null item FK     | Unit/data validation     | inconsistent fixture                   | succeeded 취급 거부, recovery 필요                            |
-| Non-null item FK missing point_history   | Unit/data validation     | orphan fixture                         | `INVALID_INCONSISTENT`, investigation 필요                    |
-| Concurrent recovery workers              | Integration              | recovery worker 2개 동시 실행          | MySQL claim으로 item/settlement 중복 처리 없음                |
-| Break-glass validation                   | Operational test/runbook | 긴급 DB 수정 가정                      | incident record, audit, post-repair invariant validation 필요 |
+| Scenario                                 | Test level               | Setup                                          | Expected result                                               |
+| ---------------------------------------- | ------------------------ | ---------------------------------------------- | ------------------------------------------------------------- |
+| Duplicate payment confirm retry          | Integration              | 같은 Toss `paymentKey` confirm 재시도 2회 수신 | `charge:{paymentKey}`로 `point_history` 1건만 생성/재사용     |
+| Duplicate settlement run                 | Integration/batch        | 같은 room settlement 동시 실행                 | DB claim 1개만 성공, 중복 지급 없음                           |
+| Redis unavailable during normal worker   | Integration              | Redis 연결 실패                                | worker fail-closed 또는 retry, unsafe payout 없음             |
+| Redis unavailable fallback recovery      | Batch/integration        | Redis off, DB-claim-only recovery 실행         | `Settlement.status` 조건부 claim으로 1개 실행권, 중복 없음    |
+| Provider timeout after successful charge | Integration/recovery     | provider는 성공, client timeout                | 같은 idempotency key로 재조회/재시도, 중복 충전 없음          |
+| Partial batch failure and resume         | Batch/recovery           | 일부 participant 성공 후 job 실패              | 완료 item 유지, 미완료 item만 재시도                          |
+| Balance rebuild                          | Batch/reconciliation     | `point_account.balance` 불일치 fixture         | `point_history` 합계 기준으로 재계산/복구                     |
+| Operator recovery without DB mutation    | Recovery                 | stuck settlement 대상 admin API 실행           | app/batch path로 복구, audit log 생성                         |
+| Parent `SUCCEEDED` with null item FK     | Unit/data validation     | inconsistent fixture                           | succeeded 취급 거부, recovery 필요                            |
+| Non-null item FK missing point_history   | Unit/data validation     | orphan fixture                                 | `INVALID_INCONSISTENT`, investigation 필요                    |
+| Concurrent recovery workers              | Integration              | recovery worker 2개 동시 실행                  | MySQL claim으로 item/settlement 중복 처리 없음                |
+| Break-glass validation                   | Operational test/runbook | 긴급 DB 수정 가정                              | incident record, audit, post-repair invariant validation 필요 |
 
 ## 12. 운영 Runbook 최소 요구
 

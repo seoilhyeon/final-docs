@@ -300,18 +300,16 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 **Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
 
 **Conversation:**  
-이 story는 `SSE 인앱 알림` 자체에 집중한다. 알림은 서버 이벤트 수신에서 끝나지 않고 사용자가 체감하는 toast, 관련 화면 refetch/invalidate, badge/count best-effort 갱신 같은 realtime UX 반응으로 이어져야 한다. 알림은 중요한 상태 변화만 전달해야 하며, 같은 이벤트가 중복 발송되면 안 된다. 알림이 실패해도 인증 성공/실패 집계나 정산 흐름은 그대로 유지되어야 한다.
+이 story는 `SSE 인앱 알림` 자체에 집중한다. 알림은 사용자가 중요한 상태 변화를 빠르게 인지하도록 돕는 realtime UX signal이다. 상세 SSE 계약과 client reaction expectation은 `API-spec-god-saving.md`의 알림/SSE 섹션을 따른다. 알림이 실패해도 인증 성공/실패 집계나 정산 흐름은 그대로 유지되어야 한다.
 
 **Confirmation:**
 
 1. 내 인증이 성공 또는 실패하면 인앱 알림을 받을 수 있다.
 2. 내 예상 환급금이나 지분율에 중요한 변화가 생기면 관련 알림을 받을 수 있다.
-3. 같은 `eventId`에 대해 동일 브라우저 세션에서 duplicate toast가 반복 표시되지 않는다.
-4. 이벤트 수신 시 관련 화면은 refetch/invalidate되어 최신 상태를 확인할 수 있다.
-5. reconnect는 사용자에게 불필요한 오류 알림 없이 조용히 수행된다.
-6. 알림 전송 실패가 인증 집계나 정산 자체를 실패시키지 않는다.
-7. 사용자는 알림을 놓쳐도 앱 화면에서 DB/API 기준 같은 상태를 확인할 수 있다.
-8. 여러 탭에서 duplicate toast가 발생할 수 있음은 MVP known risk이며, 이를 persistent unread sync 요구로 확장하지 않는다.
+3. 이벤트 수신 시 관련 화면은 API 조회를 통해 최신 상태를 확인할 수 있다.
+4. 알림 전송 실패가 인증 집계나 정산 자체를 실패시키지 않는다.
+5. 사용자는 알림을 놓쳐도 앱 화면에서 DB/API 기준 같은 상태를 확인할 수 있다.
+6. 이 story는 API/ADR의 notification durability 제외 범위를 넘지 않는다.
 
 ### US-13. 정산 완료 이메일
 

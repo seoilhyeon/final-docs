@@ -42,7 +42,7 @@
 | [Tech-stack-god-saving.md](./Tech-stack-god-saving.md)          | 문서 기준 기술 스택, 운영 원칙, 미정 구현 항목을 요약한다.            | 온보딩, 구현 착수 전 기술 전제 확인 시          | 요약 문서. 세부 기준은 원문 문서 우선  |
 | [ERD-god-saving.md](./ERD-god-saving.md)                        | 핵심 테이블, 관계, 제약, 스냅샷 저장 구조를 정의한다.                 | DB 설계, 쿼리 설계, 영속성 모델 검토 시         | 데이터 구조와 DB 제약                  |
 | [Settlement-design.md](./Settlement-design.md)                  | 정산 계산, 상태 흐름, 멱등성, 동시성, 실패/재시도 정책을 정의한다.    | 정산/포인트/배치 구현 또는 운영 정책 검토 시    | 정산 도메인 규칙과 운영 안전성 정책    |
-| [API-spec-god-saving.md](./API-spec-god-saving.md)              | FE/BE가 공유하는 엔드포인트, 요청/응답, 에러, 상태값 계약을 정의한다. | 화면 연동, API 구현, QA 시나리오 작성 시        | 외부 API 계약                          |
+| [API-spec-god-saving.md](./API-spec-god-saving.md)              | FE/BE가 공유하는 엔드포인트, 요청/응답, 에러, 상태값 계약을 정의한다. | 화면 연동, API 구현, QA 시나리오 작성 시        | 외부 API 계약. SSE 외부 계약의 단일 owner |
 | [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md)    | MVP 기능을 사용자 가치 중심의 백로그와 스토리로 정리한다.             | 우선순위 검토, 스프린트 범위 설정 시            | 스토리 레벨 구현 대상과 우선순위       |
 | [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)            | 스토리를 구현 가능한 티켓과 의존성으로 분해한다.                      | 실제 작업 착수, 일정/병렬화 계획 수립 시        | 구현 단위, 선행 의존성, 실행 순서      |
 | [갓세이빙\_프로젝트기획안.docx](./갓세이빙_프로젝트기획안.docx) | 활성 제품/UX 참고 자료다.                                             | 배경, UX 의도, 제안서 표현 확인이 필요할 때     | 현재 source of truth 아님. 참고용 입력 |
@@ -53,6 +53,8 @@
 2. Settlement-design / ERD: 도메인 규칙과 데이터 구조
 3. API-spec: 외부 인터페이스 계약
 4. Backlog / Ticket: 실행 계획
+
+단, 외부 API/SSE 계약은 `API-spec`이 우선하고, identity persistence invariant는 `ERD`가 우선한다.
 5. 활성 기획안 docx: 참고 자료
 
 ## 4. 문서 간 관계 구조
@@ -93,12 +95,12 @@ MVP-ticket-breakdown
 - 비즈니스 목표, 사용자 가치, MVP 포함/제외 범위는 `PRD`에만 정의한다.
 - 정산 로직, 정산 상태 흐름, 재시도, 멱등성, 실패 코드 의미는 `Settlement-design`에만 상세 정의한다.
 - 테이블, 컬럼, FK, unique 제약, 스냅샷 저장 구조는 `ERD`에만 상세 정의한다.
-- 엔드포인트, 요청/응답 JSON, 에러 응답, API enum은 `API-spec`에만 상세 정의한다.
+- 엔드포인트, 요청/응답 JSON, 에러 응답, API enum, SSE 외부 계약은 `API-spec`에만 상세 정의한다.
 - 백로그 우선순위와 user story는 `MVP-backlog-user-stories`에만 정의한다.
 - 구현 티켓, 선행 의존성, 병렬 실행 순서는 `MVP-ticket-breakdown`에만 정의한다.
 - 활성 기획안(`docs/갓세이빙_프로젝트기획안.docx`)의 표현이 현재 Markdown 문서와 다르면 docx를 직접 구현 기준으로 사용하지 않는다. 필요한 내용은 먼저 소유 Markdown source of truth 문서로 승격한 뒤 구현한다. 기존 `갓세이빙_프로젝트기획서.docx`는 legacy/reference 입력으로만 취급한다.
 - AI 비트랜잭션 경계는 `PRD`, `API-spec`, `ERD`가 같은 정책을 유지해야 한다.
-- DB enum/constraint의 source of truth는 `ERD`가 소유하고, `API-spec`은 FE/BE 계약에 필요한 consumer-facing enum과 매핑만 반복한다. 예: `point_history.reference_type`, `settlement_status`, `settlement_type`, `frequency_type`, `transaction_type`.
+- DB enum/constraint와 `member.uuid` identity persistence invariant의 source of truth는 `ERD`가 소유하고, `API-spec`은 FE/BE 계약에 필요한 consumer-facing enum, auth subject, SSE contract만 반복한다. 예: `point_history.reference_type`, `settlement_status`, `settlement_type`, `frequency_type`, `transaction_type`.
 
 다른 문서에는 필요한 만큼만 요약하고, 상세 규칙은 source of truth 문서로 링크한다. 같은 표나 enum, 같은 계산식을 여러 문서에 복제하지 않는다.
 

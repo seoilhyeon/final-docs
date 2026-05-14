@@ -184,34 +184,22 @@ Minimum PR evidence:
 
 ## 6. Identity / Notification implementation gates
 
-Blocker invariant:
+이 섹션은 architecture policy를 재정의하지 않는다. PR은 아래 owner 문서와 테스트 증거로 정합성을 검증한다.
 
-- `member.uuid`는 회원 생성 시 발급되는 immutable external canonical identifier다.
-- JWT access token subject(`sub`)는 `member.uuid`다.
-- Spring Security principal은 내부 처리를 위해 `memberId(Long)`와 `memberUuid(UUID)`를 함께 보유할 수 있지만, external boundary에는 UUID를 사용한다.
-- `member.id` / `member_id`는 DB 내부 FK, join, persistence identity로 유지한다.
-- SSE emitter registry key와 notification/event routing key는 `member.uuid`다.
-- `email`은 로그인 식별자/연락처이며 routing key, stream identifier, notification recipient key, JWT subject가 아니다.
-- SSE는 state source가 아니라 invalidate/refetch signal이다. FE는 이벤트 수신 후 필요한 REST API를 refetch/invalidate한다.
-- notification persistence/read-state/unread count source of truth는 MVP 필수 범위가 아니다.
+Owner references:
 
-Forbidden patterns:
-
-- JWT `sub = email` 또는 `sub = member.id`.
-- SSE emitter registry key가 email.
-- notification recipient routing key가 email.
-- 외부 API 응답에서 사용자 canonical identifier로 Long `member_id`를 노출.
-- SSE payload에 email, Long `member.id`, 불필요한 PII를 포함.
-- SSE/badge/count를 unread/read source of truth로 취급.
-- notification inbox/read-state/read-all/mark-as-read 구현을 UUID migration의 MVP 필수 범위로 확장.
+- Identity persistence invariant: `ERD-god-saving.md`의 `member` 정의
+- Auth/SSE external contract: `API-spec-god-saving.md`의 인증 및 알림/SSE 계약
+- SSE architecture boundary: `ADR-mvp-tech-architecture.md`의 SSE 결정 사유
 
 Minimum PR evidence:
 
-- ERD에 `member.uuid unique not null`이 존재한다.
-- JWT 생성/검증 테스트가 `sub = member.uuid`를 확인한다.
-- 인증 principal에서 UUID로 외부 boundary를 구성하고 내부 DB 조회에는 Long PK를 사용한다.
-- SSE subscribe/publish 테스트가 `member.uuid` routing을 검증한다.
-- email 변경 또는 email 값 불일치가 SSE/notification routing identity를 깨지 않음을 service-level fixture로 확인한다.
+- ERD/member identity invariant에 맞는 schema 또는 migration 검증이 있다.
+- JWT subject contract 검증 테스트가 있다.
+- SSE subscribe/publish routing 통합 테스트가 있다.
+- email이 routing identity로 쓰이지 않음을 검증하는 service-level fixture가 있다.
+- SSE payload가 API Spec의 payload 최소화 원칙을 따른다는 contract test가 있다.
+- notification durability scope가 API/ADR 경계를 넘지 않았음을 PR 설명 또는 체크리스트에서 확인한다.
 
 ## 7. PR review checklist
 
@@ -262,11 +250,9 @@ Minimum PR evidence:
 
 ### Identity / Notification PR Gate
 
-- [ ] `member.uuid`가 생성되고 unique/not-null/immutable external identifier로 취급된다.
-- [ ] JWT `sub`가 `member.uuid`이며 email/Long PK가 아니다.
-- [ ] principal은 내부 `memberId`와 외부 `memberUuid` 경계를 분리한다.
-- [ ] SSE emitter registry와 notification routing이 UUID 기준이다.
-- [ ] email routing 구현 또는 문서 표현이 남아 있지 않다.
-- [ ] SSE payload가 최소 invalidate/refetch signal이며 PII/state snapshot을 포함하지 않는다.
-- [ ] FE는 SSE 수신 후 REST API를 refetch/invalidate한다.
-- [ ] notification persistence/read-state/unread sync가 MVP 필수 구현으로 scope creep 되지 않는다.
+- [ ] Identity implementation complies with `ERD-god-saving.md` member invariant.
+- [ ] Auth and SSE behavior complies with `API-spec-god-saving.md` auth/SSE contract.
+- [ ] SSE routing integration tests exist.
+- [ ] Tests prove email is not used as routing identity.
+- [ ] SSE payload contract tests cover PII/state-snapshot exclusion.
+- [ ] PR does not introduce notification durability scope beyond ADR/API boundaries.

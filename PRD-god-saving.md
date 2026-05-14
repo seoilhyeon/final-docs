@@ -32,7 +32,7 @@
 지금은 이 구조를 MVP로 만들 수 있는 조건이 갖춰져 있다.
 
 - 팀의 중심 역량이 백엔드에 있어 정산, 배치, 동시성, 보안 같은 핵심 로직에 집중할 수 있다.
-- 결제 샌드박스, S3, Redis, 배치, 클라우드 배포 같은 도구를 바로 붙일 수 있다.
+- 결제 샌드박스, 파일 저장, 배치, 클라우드 배포 같은 MVP 운영 도구를 바로 붙일 수 있다.
 - LLM을 활용해 프론트 구현 부담을 낮추고, AI 추천과 리포트 같은 차별 기능도 빠르게 넣을 수 있다.
 
 ### What Recently Became Possible
@@ -144,32 +144,31 @@
 
 | 기능                      | 설명                                             | 핵심 요구사항                                                                                                                                                      |
 | ------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 회원가입 / 로그인         | JWT 기반 인증                                    | 기본 회원 흐름과 권한 분리                                                                                                                                         |
+| 회원가입 / 로그인         | 사용자 인증                                      | 기본 회원 흐름과 권한 분리                                                                                                                                         |
 | 사용자 프로필             | 닉네임과 프로필 이미지를 관리한다                | 프로필은 사용자 식별을 위한 최소 정보이며, 소셜 그래프, 팔로우/친구, 공개 범위 설정은 포함하지 않는다                                                              |
 | 크루 생성 / 모집 / 입장   | 공개 모집과 비공개 참여 코드 및 host 수동 시작 지원 | 기간은 1주~3개월, host가 `min_participants`, `recruitment_deadline`, `start_at`을 설정한다. `min_participants`는 시작 전제 조건이고 자동 시작 트리거가 아니며, 비공개는 6자리 참여 코드 사용 |
-| 포인트 충전 / 예치 / 환급 | 포인트를 충전하고 보증금을 잠근 뒤 정산 후 환급  | 보증금은 1,000원~100만원, 1,000원 단위이며 모든 포인트 변화는 source of truth인 `point_history`에 남기고, `point_account.balance`는 재계산 가능한 현재값 캐시로만 사용한다 |
+| 포인트 충전 / 예치 / 환급 | 포인트를 충전하고 보증금을 잠근 뒤 정산 후 환급  | 사용자가 보증금과 환급 흐름을 신뢰할 수 있어야 하며, 원장/잔액 상세는 ERD와 정산 설계를 따른다 |
 | 이미지 인증 업로드        | 정해진 시간 안에 사진으로 미션 수행              | S3 업로드, 서버 수신 시간 기록                                                                                                                                     |
 | Exif 검증                 | 촬영 시각과 서버 기록을 비교                     | Exif 없음 또는 불일치 시 실패 처리                                                                                                                                 |
-| 실시간 지분율 계산        | 참여자의 현재 기여도를 보여줌                    | 예상 환급금과 순위 변화를 보여주며, `SUCCEEDED` 전 최종 금액 계산은 MissionLog와 참여자 상태 재계산으로 확정한다                                                    |
-| 정산 배치                 | 미션 종료 후 익일 새벽 자동 정산                 | 종료/취소 감지 시 `Settlement(PENDING)` 선생성, DB 조건부 claim 기반 실행, MissionLog 재계산 후 participant 단위 `settlement_item`/`point_history` 멱등 지급, 원 단위 절사, 잔액 처리 |
+| 실시간 지분율 계산        | 참여자의 현재 기여도를 보여줌                    | 예상 환급금과 순위 변화를 보여주되 최종 정산 결과와 구분되어야 한다                                                    |
+| 정산 배치                 | 미션 종료 후 익일 새벽 자동 정산                 | 종료/취소 이후 중복 지급 없이 재현 가능한 정산 결과로 수렴해야 하며, 상세 계산/복구 규칙은 정산 설계를 따른다 |
 | 인증 피드 / 리액션        | 성공 인증을 크루 피드로 보여주고 가볍게 반응한다 | 피드 게시 대상은 `mission_log.is_success = true` 인증 성공 로그로 한정하며, 리액션은 소셜 메타데이터일 뿐 정산/포인트/환급/AI/상태 흐름에 영향을 주지 않는다       |
 
 #### P1: 첫 릴리스에 넣되 안정성에 따라 조정 가능한 기능
 
 | 기능             | 설명                                   | 핵심 요구사항               |
 | ---------------- | -------------------------------------- | --------------------------- |
-| SSE 인앱 알림    | 지분 변화와 성공/실패 상황을 즉시 전달 | backend domain event → SSE delivery → frontend realtime reaction → toast/refetch/badge UX로 이어지는 best-effort 흐름이어야 한다 |
+| SSE 인앱 알림    | 지분 변화와 성공/실패 상황을 즉시 전달 | 중요한 상태 변화를 빠르게 인지시키는 best-effort realtime UX signal이어야 한다 |
 | 정산 완료 이메일 | 결과와 다음 미션 참여 동기를 전달      | 정산 직후 자동 발송         |
 | 운영 모니터링    | 배치, 리소스, 배포 상태를 본다         | CloudWatch, 로그, 알림 구성 |
 
 #### SSE 인앱 알림 MVP 경계
 
-- SSE 인앱 알림은 단순 transport가 아니라 `backend domain event -> SSE delivery -> frontend realtime reaction -> toast / refresh / badge UX`로 이어지는 realtime UX 기능이다.
-- MVP 필수 UX는 EventSource 기반 구독, 이벤트 수신 시 toast 표시, 관련 화면의 상태 재조회 또는 invalidate trigger, 동일 브라우저 세션 내 duplicate toast 방지, reconnect 시 조용한 재구독이다.
-- SSE는 best-effort realtime UX delivery이며, 알림 누락 또는 연결 끊김이 인증/정산/포인트 원장 흐름을 롤백하거나 차단하지 않는다.
-- MVP부터 사용자 external canonical identifier는 `member.uuid`다. JWT `sub`, SSE emitter registry key, notification/event routing key는 UUID를 사용하고, email routing은 사용하지 않는다.
-- DB/API state가 source of truth다. badge/count는 사용자의 주의를 돕는 UX projection이며, 정산/포인트/인증 상태의 authoritative state로 사용하지 않는다.
-- MVP에서는 notification inbox, cross-device unread sync, broker 기반 replay, Redis pub/sub fan-out, full multi-tab synchronization을 만들지 않는다. 여러 탭에서 duplicate toast가 발생할 수 있음은 알려진 제한이며, BroadcastChannel 또는 localStorage 기반 완화는 선택 사항이다.
+- SSE 인앱 알림은 중요한 상태 변화를 사용자가 빠르게 인지하도록 돕는 best-effort realtime UX signal이다.
+- SSE 실패, 알림 누락, 연결 끊김은 인증/정산/포인트 원장 같은 core flow를 롤백하거나 차단하지 않는다.
+- DB/API state가 source of truth이며, 알림 표시는 사용자의 주의를 돕는 UX 보조 신호다.
+- MVP에서는 notification inbox, replay, unread sync를 제공하지 않는다.
+- SSE 외부 계약, 인증, payload, reconnect/delivery semantics는 `API-spec-god-saving.md`의 알림/SSE 계약을 따른다.
 
 #### FR-Required / Non-transactional: 첫 릴리스 필수이되 비트랜잭션성 기능
 
@@ -180,7 +179,7 @@
 
 이 분류의 기능은 첫 릴리스 필수 사용자 기능이다. 다만 AI 실패, 무응답, 유효하지 않은 응답은 비트랜잭션성 기능 실패이지 시스템 실패가 아니다. 따라서 수동 방 생성, 정산 완료, 환급, 포인트 원장, `Settlement.status` 흐름을 차단하거나 롤백하거나 변경하지 않는다.
 
-AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조회하는 후행 기능이다. 이 리포트는 정산, 환급, 포인트 원장의 source of truth가 아니며 `Settlement.status`, `settlement_item`, 환급 상태, `point_history`를 생성하거나 수정하거나 롤백할 수 없다.
+AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조회하는 후행 기능이다. 이 리포트는 정산, 환급, 포인트 원장의 source of truth가 아니며 핵심 정산 상태를 생성하거나 수정하거나 롤백할 수 없다.
 
 #### 인증 피드 / 리액션 MVP 경계
 
@@ -218,18 +217,15 @@ AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조
 - 탈퇴 후 동일 크루 재참여는 MVP에서 지원하지 않는다.
 - 정산 계산은 크루 참여 단위(participant) 기준으로 이루어지며, 실제 포인트 환급은 사용자 계정(member) 기준으로 반영된다.
 - 실시간 지분율은 사용자 안내용 추정값이며, `Settlement.status = SUCCEEDED` 전 최종 정산 계산은 `MissionLog`와 참여자 상태를 다시 읽어 확정한다.
-- `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item` 계산 스냅샷과 이를 반영한 `point_history` 원장이다. 이후 `MissionLog` 재계산은 감사/디버깅용 검증에만 사용한다.
+- 정산 완료 이후 운영/분쟁/조회 기준은 정산 설계와 ERD의 authoritative 데이터를 따른다.
 - 크루 전체 인정 성공 횟수가 `0`이면 잠겨 있던 보증금을 전액 균등 환급한다.
 - 절사 과정에서 발생하는 소액 잔액은 재현 가능한 규칙에 따라 일부 참여자에게 분배된다.
 - 전체 성공 `0` 분기에서는 `equal_base = FLOOR(total_locked_amount / participant_count)`를 적용하고, 남은 잔액은 같은 재현 가능한 규칙에 따라 `1원씩` 분배한다.
 - 전체 성공 `0` 분기에는 추가 차감 규칙을 두지 않는다.
 - 일반 정산에서 절사 후 남은 잔액은 기여도 1위 참여자에게 지급한다. 기여도 1위가 동점인 경우 성공 횟수를 비교하고, 그래도 동일하면 같은 재현 가능한 규칙으로 1명을 결정한다.
 - 중도 참여, 재참여, 자동 시작, 예약 시작은 향후 별도 lifecycle/정산 규칙이 정의된 뒤 지원 여부를 검토한다. MVP에서는 host 수동 시작만 지원한다.
-- 정산 처리 상태의 원천은 `Settlement.status`이며, `MissionRoom.settlement_status`가 있더라도 조회 최적화용 비정규화 필드로만 본다.
-- 모든 포인트 변화는 source of truth인 `point_history`에 남기고, `point_account.balance`는 `point_history`에서 재계산 가능한 캐시로 취급한다.
-- 정산 환급은 participant 단위 지급 모델이다. 각 `settlement_item`은 deterministic `idempotency_key`로 하나의 `point_history`에만 연결되며, `SUCCEEDED`가 되려면 모든 item의 지급 원장 연결이 완료되어야 한다.
-- partial 상태는 복구 가능한 중간 상태다. 일부 participant만 지급되었거나 `point_history`는 있으나 `settlement_item.point_history_id` 연결이 누락된 경우 정산은 `RETRY_WAIT` 또는 `FAILED`에 머무르고, 재시도는 기존 원장을 재사용하거나 미지급 participant만 이어서 처리한다.
-- 동일 `idempotency_key`와 동일 payload의 중복 요청은 기존 원장을 재사용하고, 동일 키에 다른 payload가 들어오면 멱등성 충돌로 실패 처리한다.
+- 정산 결과와 포인트 변화는 사용자에게 신뢰 가능하고 재현 가능해야 하며, 중복 지급이나 누락 지급이 없어야 한다.
+- 정산 상태, 원장, 멱등성, partial recovery의 상세 규칙은 `Settlement-design.md`와 `ERD-god-saving.md`가 소유한다.
 
 #### 예외 처리 요구사항
 
@@ -238,27 +234,14 @@ AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조
 - 포인트 충전 실패: 보증금 잠금 미완료, 입장 실패
 - 중도 탈퇴: `ACTIVE` 상태에서도 가능하지만 즉시 환급은 없고, 탈퇴 후 인증은 차단하며 정산에서는 `withdrawn_at` 이전 성공만 인정
 - 전체 성공 횟수 `0`: 보증금은 균등 환급하고, 절사 후 잔액이 있으면 재현 가능한 규칙에 따라 `1원씩` 분배
-- 배치 실패: 실패 코드 저장, 3회 재시도 후 알림, 필요 시 어드민 수동 처리
-- 같은 방 동시 정산 요청: DB 조건부 `PENDING/RETRY_WAIT -> RUNNING` claim을 1차 기준으로 삼고, Redisson 락은 보조 수단, DB unique와 `point_history.idempotency_key`는 최종 방어선으로 삼는다
-- `StartRoom`과 시작 만료 취소 batch가 경합하면 둘 다 `RECRUITING` 조건부 전이로 처리한다. 하나만 `ACTIVE` 또는 `CANCELLED`로 성공하고, loser는 최종 상태를 재조회하며 취소형 settlement는 unique/idempotent하게 1회만 생성한다.
+- 배치 실패: 사용자가 결과를 잃지 않도록 복구 가능해야 하며, 상세 재시도/복구 정책은 `Settlement-design.md`가 소유한다.
+- 같은 방 동시 정산 요청: 중복 정산이나 중복 지급이 없어야 하며, 상세 동시성 방어선은 `Settlement-design.md`와 `ADR-mvp-tech-architecture.md`가 소유한다.
+- `StartRoom`과 시작 만료 취소 batch 경합: 하나의 최종 lifecycle 결과로 수렴해야 하며, 상세 전이 규칙은 `Settlement-design.md`가 소유한다.
 - 동시 인증 폭주: 인증 로그는 먼저 저장하고, 실시간 지표가 일부 지연되더라도 `SUCCEEDED` 전 정산 계산은 MissionLog 재계산으로 확정
 
 ### 7.3 Technology
 
-이 제품은 "습관 앱"이지만 실제로는 정산 신뢰성이 핵심이므로 기술 선택이 중요하다.
-
-| 영역         | 선택                                               | 이유                                                       |
-| ------------ | -------------------------------------------------- | ---------------------------------------------------------- |
-| Backend      | Java 17, Spring Boot 3.2                           | 정산, 배치, 보안 구조를 안정적으로 만들기 좋다             |
-| Data         | MySQL 8.0                                          | 트랜잭션과 정합성이 중요하다                               |
-| Cache / Lock | Redis, Redisson                                    | 실시간 지표 캐시와 정산 시점 분산 락, 멱등 처리에 필요하다 |
-| File Storage | AWS S3                                             | 인증 이미지를 안정적으로 저장한다                          |
-| Batch        | Spring Batch 5.x                                   | 종료 시점 대량 정산 처리에 적합하다                        |
-| Frontend     | React, Axios                                       | 백엔드와 분리된 UI 개발에 적합하다                         |
-| Notification | SSE, Email                                         | SSE는 realtime UX 반응(toast/refetch/badge)을 위한 best-effort 채널이고, Email은 정산 결과 등 중요 안내의 보조 채널이다 |
-| Payment      | 토스페이먼츠 샌드박스                              | MVP에서도 실제와 유사한 충전 흐름을 보여줄 수 있다         |
-| AI           | Claude API                                         | 미션 추천과 습관 리포트 생성에 사용한다                    |
-| Infra        | AWS EC2, Docker, Nginx, GitHub Actions, CloudWatch | 배포, 자동화, 모니터링을 한 흐름으로 묶는다                |
+PRD는 기술 선택의 상세 정책을 소유하지 않는다. MVP 기술 스택과 운영/아키텍처 결정 사유는 `Tech-stack-god-saving.md`와 `adr/ADR-mvp-tech-architecture.md`를 따른다.
 
 ### 7.4 Assumptions
 
@@ -269,7 +252,7 @@ AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조
 - MVP 단계에서는 포인트 환급까지만 있어도 제품 가치 검증이 가능하다.
 - AI 추천과 AI 리포트는 첫 릴리스 필수 기능 gate를 통과해야 한다. 다만 AI 실패, 무응답, 유효하지 않은 응답은 비트랜잭션성 기능 실패이지 시스템 실패가 아니며, 수동 방 생성, 정산 결과 조회, 환급, 포인트 원장, `Settlement.status` 흐름을 막거나 변경하지 않아야 한다.
 - 인증 피드와 리액션은 첫 릴리스 소셜 표현 기능이지만, 성공 인증 로그와 파생 표시 상태를 보여주는 projection일 뿐 정산/환급/포인트/AI/상태 생명주기 기준이 아니다.
-- 포인트 잔액 화면의 현재값은 캐시이며, 불일치가 발견되면 `point_history` 원장을 기준으로 재계산/보정한다.
+- 포인트 잔액 화면의 현재값은 사용자 표시용 현재값이며, 불일치 처리 기준은 ERD와 정산 설계를 따른다.
 - 공개 크루 운영은 초기에는 복잡한 신고/제재 시스템 없이도 가능하다.
 - 더 정교한 부정행위 탐지, 현금 인출, 대규모 크루 운영은 후속 버전 과제로 둔다.
 
@@ -311,7 +294,7 @@ AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조
 - AI 습관 리포트는 정산 완료 데이터를 기반으로 생성된다.
 - 생성된 AI 습관 리포트는 저장되고 재조회 가능하다.
 - AI 습관 리포트는 성공한 정산 데이터를 기반으로 저장/재조회되지만 정산/환급/포인트 원장의 source of truth가 아니다.
-- AI 습관 리포트 실패는 기존 정산 결과 조회, 환급, `Settlement.status`, `settlement_item`, 포인트 원장 상태를 변경하지 않는다.
+- AI 습관 리포트 실패는 기존 정산 결과 조회, 환급, 포인트 원장 상태를 변경하지 않는다.
 
 ### Release Phasing
 
@@ -335,7 +318,7 @@ AI 습관 리포트는 성공한 정산 데이터를 읽어 생성/저장/재조
 - 대규모 크루와 시즌제 운영
 - 추천 미션 개인화 고도화
 - 신고, 제재, 운영 정책 도구
-- 포인트 만료 정책과 만료 알림/소멸 처리는 별도 후속 범위로 검토한다. 이 PRD의 언급은 미래 정책 후보일 뿐 MVP API, ERD, 원장 이벤트, transaction type, `point_history.reference_type`, 정산/환급 규칙을 추가하지 않는다.
+- 포인트 만료 정책과 만료 알림/소멸 처리는 별도 후속 범위로 검토한다. 이 PRD의 언급은 미래 정책 후보일 뿐 MVP API, ERD, 원장, 정산/환급 규칙을 추가하지 않는다.
 
 ### Out of Scope for MVP
 

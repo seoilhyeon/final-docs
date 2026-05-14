@@ -46,15 +46,14 @@
 
 | Identifier | API/Auth/SSE 역할 |
 | ---------- | ----------------- |
-| `member.id` / `member_id` | DB 내부 FK / join / persistence identity다. 외부 API/JWT/SSE routing boundary의 canonical identifier로 사용하지 않는다. |
-| `member.uuid` / `member_uuid` | external canonical identifier다. JWT `sub`, 외부 사용자 식별자, SSE emitter registry key, notification/event routing key로 사용한다. |
-| `email` | 로그인 식별자, 연락처, 사용자 정보다. PII이고 변경 가능하므로 routing key, stream identifier, notification recipient key, JWT subject로 사용하지 않는다. |
+| `member.id` / `member_id` | DB 내부 FK / join / persistence identity다. 외부 API/JWT/SSE boundary의 canonical identifier로 사용하지 않는다. |
+| `member.uuid` / `member_uuid` | external canonical identifier다. JWT `sub`, 외부 사용자 식별자, SSE 사용자 routing 기준으로 사용한다. |
+| `email` | 로그인 식별자, 연락처, 사용자 정보다. PII이고 변경 가능하므로 routing identity, stream identifier, notification recipient key, JWT subject로 사용하지 않는다. |
 
 정책:
 
 - JWT access token subject(`sub`)는 `member.uuid`다.
-- Spring Security principal은 서버 내부 처리 편의를 위해 `memberId(Long)`와 `memberUuid(UUID)`를 모두 가질 수 있지만, external boundary에는 UUID를 canonical identifier로 사용한다.
-- DB 내부 command/query와 FK 관계는 Long PK를 유지한다. API 응답에서 사용자 식별자를 노출해야 하면 `member_uuid`를 사용한다.
+- API 응답에서 사용자 식별자를 노출해야 하면 `member_uuid`를 사용한다.
 - 기존 email 기반 SSE routing 또는 notification routing 표현/구현은 fallback이 아니라 제거 대상 anti-pattern이다.
 
 ### 2.4 시간
@@ -1796,8 +1795,8 @@ Error:
 
 - 현재 로그인한 사용자의 best-effort realtime notification stream을 SSE로 구독한다.
 - 이 endpoint는 notification inbox, unread sync, replay cursor를 제공하지 않는다.
-- Public API contract는 "현재 인증 사용자 stream"이다. 내부 SSE emitter registry와 notification/event routing key는 JWT `sub`에서 해석한 `member.uuid`를 사용한다.
-- `email`은 변경 가능하고 PII이므로 SSE routing key, stream identifier, notification recipient key로 사용하지 않는다.
+- Public API contract는 "현재 인증 사용자 stream"이다. 서버는 JWT `sub = member.uuid`로 인증 사용자를 식별하고 해당 사용자 대상 이벤트만 전달한다.
+- `email`은 변경 가능하고 PII이므로 SSE routing identity, stream identifier, notification recipient key로 사용하지 않는다.
 
 Request:
 
@@ -1810,8 +1809,8 @@ Accept: text/event-stream
 Response:
 
 - `Content-Type: text/event-stream`
-- 서버는 연결 유지 중 `member.uuid` 기준으로 routing된 사용자 대상 이벤트를 SSE data payload로 전달한다.
-- 연결이 끊기면 브라우저/EventSource 또는 클라이언트 wrapper가 조용히 재구독할 수 있다.
+- 서버는 연결 유지 중 인증된 현재 사용자 대상 이벤트를 SSE data payload로 전달한다.
+- 연결이 끊기면 클라이언트는 사용자에게 불필요한 오류를 노출하지 않고 재구독할 수 있다.
 
 Event payload contract:
 
@@ -1836,19 +1835,19 @@ Field policy:
 
 | 필드 | 설명 |
 | ---- | ---- |
-| `eventId` | 중복 toast 방지와 클라이언트 세션 내 deduplication에 사용하는 이벤트 식별자 |
-| `eventType` | FE가 반응을 결정하는 SSE event catalog 값. DB enum이 아니다 |
+| `eventId` | 클라이언트 세션 내 중복 이벤트 처리를 위한 이벤트 식별자 |
+| `eventType` | 클라이언트 반응을 결정하는 SSE event catalog 값. DB enum이 아니다 |
 | `occurredAt` | 이벤트 발생 시각. API 공통 시간 규칙을 따른다 |
 | `resourceType` | 이벤트가 가리키는 도메인 리소스 종류 |
 | `resourceId` | refetch, invalidate, route 이동 등에 사용할 리소스 식별자 |
-| `message` | 사용자 표시용 fallback 문구. FE 분기 조건의 유일한 기준으로 사용하지 않는다 |
+| `message` | 사용자 표시용 fallback 문구. 클라이언트 분기 조건의 유일한 기준으로 사용하지 않는다 |
 | `severity` | `info`, `success`, `warning`, `error` 중 하나의 표시 강도 |
-| `uiHint` | toast 표시 여부, refetch target, badge delta 같은 UX hint. source of truth가 아니다 |
+| `uiHint` | 클라이언트 갱신을 돕는 UX hint. source of truth가 아니다 |
 
 Payload 최소화 원칙:
 
 - SSE payload에는 email, Long `member.id`, 불필요한 사용자 PII를 넣지 않는다.
-- recipient 식별은 서버 내부 registry/routing에서 `member.uuid`로 처리하고, 클라이언트가 필요로 하는 도메인 refetch 단서만 payload에 포함한다.
+- recipient 식별은 인증된 현재 사용자 기준으로 처리하고, 클라이언트가 필요로 하는 도메인 refetch 단서만 payload에 포함한다.
 - SSE payload는 상태 snapshot이 아니라 REST refetch/invalidate를 유도하는 signal이다.
 
 Initial event catalog:
@@ -1866,20 +1865,18 @@ Reconnect / delivery semantics:
 - 서버 재시작, 네트워크 단절, 브라우저 재연결 중 이벤트가 누락될 수 있다.
 - missed event 복구는 replay가 아니라 기존 REST API 화면 재조회로 처리한다.
 - 이벤트 순서, durable delivery, cross-device unread state를 보장하지 않는다.
-- 같은 `eventId`가 다시 수신될 수 있으므로 FE는 동일 세션 duplicate toast를 방지해야 한다.
+- 같은 `eventId`가 다시 수신될 수 있으므로 클라이언트는 동일 세션에서 중복 이벤트를 idempotent하게 처리해야 한다.
 
-Frontend reaction expectations:
+Client reaction expectations:
 
-- FE는 `message` 문자열만 해석하지 않고 `eventType`, `resourceType`, `resourceId`를 기준으로 반응한다.
-- 가능한 반응은 toast 표시, 관련 query/list invalidate, 화면 refetch, badge/count best-effort 갱신, 필요 시 특정 route 이동이다.
-- badge/count는 UX projection이며 DB/API state를 대체하지 않는다. DB/API state가 source of truth다.
-- 하나의 `member.uuid`는 여러 브라우저 탭/디바이스에서 여러 emitter를 가질 수 있다. 여러 탭에서는 duplicate toast가 발생할 수 있다. BroadcastChannel 또는 localStorage lock으로 완화할 수 있지만, MVP 요구사항을 persistent unread synchronization으로 확장하지 않는다.
-- notification persistence/read-state가 도입되기 전까지 unread count의 source of truth는 존재하지 않는다. badge/count는 best-effort UX projection으로만 다룬다.
+- 클라이언트는 `message` 문자열만 해석하지 않고 `eventType`, `resourceType`, `resourceId`, `uiHint`를 기준으로 필요한 REST API를 다시 조회한다.
+- SSE payload와 `uiHint`는 상태 snapshot이나 source of truth가 아니다. DB/API state가 source of truth다.
+- notification persistence/read-state/unread sync는 MVP API 계약에 포함되지 않는다.
 
 Error / close policy:
 
 - 인증이 없거나 만료된 사용자는 stream에 연결할 수 없다.
-- logout 또는 token invalidation 시 FE는 EventSource 연결을 닫아야 한다.
+- logout 또는 token invalidation 시 클라이언트는 SSE 연결을 닫아야 한다.
 - SSE 연결 실패는 핵심 도메인 transaction 실패로 해석하지 않는다.
 
 ## 6. 상태 흐름 다이어그램
@@ -1942,13 +1939,7 @@ RUNNING
 
 ### SSE realtime UX handling
 
-- FE는 로그인 이후 `GET /api/notifications/stream`을 EventSource 기반으로 구독하고, logout 또는 token invalidation 시 연결을 닫는다.
-- SSE 수신은 toast 표시에서 끝나지 않는다. `eventType`, `resourceType`, `resourceId`, `uiHint.refreshTargets`를 기준으로 관련 화면 또는 query/list를 refetch/invalidate한다.
-- FE는 `message` 문자열만으로 비즈니스 분기를 결정하지 않는다. `message`는 사용자 표시용 fallback 문구다.
-- 같은 `eventId`에 대해 동일 브라우저 세션에서 duplicate toast를 반복 표시하지 않는다.
-- reconnect/re-subscribe는 사용자에게 불필요한 오류 toast를 띄우지 않고 조용히 수행한다.
-- badge/count는 best-effort UX projection이며, 알림 누락 여부나 정산/포인트/인증 상태의 source of truth가 아니다.
-- 여러 탭을 동시에 열면 탭별 duplicate toast가 발생할 수 있다. BroadcastChannel 또는 localStorage 기반 완화는 선택 사항이며, 이를 notification inbox나 cross-device unread sync 요구사항으로 확장하지 않는다.
+SSE realtime UX handling은 `GET /api/notifications/stream` 계약의 client reaction expectations와 reconnect / delivery semantics를 따른다.
 
 ## 8. 구현 메모
 
