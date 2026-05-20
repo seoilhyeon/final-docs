@@ -2,9 +2,9 @@
 
 기준 문서:
 
-- [PRD-god-saving.md](/Users/ilhyeon/Documents/projects/god-saving/docs/PRD-god-saving.md)
-- [Settlement-design.md](/Users/ilhyeon/Documents/projects/god-saving/docs/Settlement-design.md)
-- [ERD-god-saving.md](/Users/ilhyeon/Documents/projects/god-saving/docs/ERD-god-saving.md)
+- [PRD-god-saving.md](/Users/ilhyeon/Documents/projects/dondok/docs/PRD-god-saving.md)
+- [Settlement-design.md](/Users/ilhyeon/Documents/projects/dondok/docs/Settlement-design.md)
+- [ERD-god-saving.md](/Users/ilhyeon/Documents/projects/dondok/docs/ERD-god-saving.md)
 
 ## 1. 목적
 
