@@ -55,11 +55,16 @@ Downstream 문서는 이 문서를 다음 방식으로 소비해야 한다.
 
 이 문서 전체에서 다음 제약은 authoritative하다.
 
-- Host has moderation authority only.
-- Host is NOT lifecycle, settlement, or ledger authority.
+- Emotional priority is `계약 신뢰 > 상호 책임 기반 성장 > 경쟁 긴장감`.
+- Dondok is not a punitive elimination game, gambling-like reward loop, or adversarial leaderboard app.
+- Host has certification input moderation authority only.
+- Host is NOT lifecycle, settlement amount, ledger, final settlement, participant baseline, replay/retry/correction authority.
+- Projection is a current-basis estimate for anxiety reduction, state visibility, and settlement explanation.
 - Projection != final settlement.
+- All-fail settlement = equal principal refund; prior zero-refund wording is rejected/brownfield drift only.
 - Retry != correction.
 - Replay != recalculation.
+- Correction after final settlement is a separate support/operations adjustment semantic, not hidden mutation.
 - Moderation history is append-only.
 - Final settlement must be deterministic, explainable, replayable, and auditable.
 - Notifications are non-authoritative hints.
@@ -72,6 +77,8 @@ Downstream 문서는 이 문서를 다음 방식으로 소비해야 한다.
 ### 2.1 Trust loop first
 
 Dondok의 핵심은 “기능 풍성함”이 아니라 돈이 걸린 습관 계약의 신뢰 루프다.
+
+제품 감정의 우선순위는 계약 신뢰, 상호 책임 기반 성장, 경쟁 긴장감 순서다. 상대적 결과 차이는 존재할 수 있지만, 행동 의미의 중심은 금전적 우열이 아니라 “누가 얼마나 꾸준히 함께 버텼는가”여야 한다.
 
 ```text
 crew creation
@@ -90,18 +97,20 @@ crew creation
 
 ### 2.2 Authority separation
 
-- Host: crew 설정, 모집 맥락, 인증 moderation actor다.
+- Host: crew 설정, 모집 맥락, 인증 입력(certification input) moderation actor다.
 - System lifecycle: activation/cancellation/freeze 전이를 결정한다.
 - Settlement engine: final settlement snapshot을 결정한다.
 - Ledger: `point_history`가 금액 변화의 source of truth다.
 - Dashboard/feed/notification/support: 설명 및 접근 surface이며 권한 원천이 아니다.
 
+Host는 accepted/rejected certification input과 contextual review만 판단한다. Host는 settlement amount, ledger, final settlement, participant baseline, replay, retry, correction을 결정하지 않는다.
+
 ### 2.3 Projection vs settlement
 
-Projection은 사용자의 불확실성을 줄이는 UX estimate다. Projection은 감정적으로 중요하지만 최종 정산 권한은 없다.
+Projection은 사용자의 불안을 낮추고 최종 정산을 설명 가능하게 만드는 current-basis UX estimate다. Projection은 감정적으로 중요하지만 최종 정산 권한은 없고, profit/dopamine loop가 아니다.
 
 - Live projection: 현재 입력 기준 예상.
-- Cutoff/frozen projection: 마감 기준 예상. 최종 아님.
+- Cutoff/frozen projection: 마감 기준 예상. 최종 아님. “frozen” 표현은 finality를 암시할 수 있으므로 downstream copy에서는 `마감 기준 예상`처럼 설명형 표현을 우선한다.
 - Final settlement: settlement snapshot + settlement item + point history.
 
 ### 2.4 Append-only philosophy
@@ -144,11 +153,14 @@ Notification은 canonical state가 아니라 hint/deep-link다. 사용자는 알
 Dondok에서 UX copy는 단순 polish가 아니다. 다음 오해를 만들면 semantic risk다.
 
 - projection이 보장 환급처럼 보임
+- projection이 `예상 손익`, `실시간 수익 증가`, `더 벌었다`처럼 profit loop로 보임
 - host rejection이 몰수처럼 보임
 - retry가 지급 재작성처럼 보임
 - correction이 몰래 과거 수정처럼 보임
 - frozen projection이 final settlement처럼 보임
+- all-fail이 전원 0원/house edge/처벌처럼 보임
 - ranking/profit 화면이 도박성 경쟁처럼 보임
+- 실패자/1위 수익자/공격적 leaderboard가 상대 실패를 기대하게 만듦
 
 원칙은 legalistic warning spam이 아니라 trust-through-visibility다.
 
@@ -159,14 +171,14 @@ Dondok에서 UX copy는 단순 polish가 아니다. 다음 오해를 만들면 s
 | Lifecycle | System lifecycle rules | create/recruiting/baseline/activation/closed/cancelled | host lifecycle authority leakage; activation anchor drift | UC-A01, UC-A04, UC-A05 |
 | Recruitment / Activation | System + deposit/participant constraints | recruitment deadline, approval, deposit lock, baseline, automatic activation | `StartRoom` and `/start` brownfield conflict; JOINED vs pending confusion | UC-A02, UC-A03, UC-A04 |
 | Certification / Upload | MissionLog + server validation | upload object, mission-log creation, server_time, validation, risk signal | upload success treated as certification; EXIF/hash treated as final authority | UC-A06, UC-A07, UC-A08, UC-A09 |
-| Moderation | Host contextual review only | moderation event, correction-before-freeze, post-freeze no host mutation | host rejection perceived as confiscation; append-only hidden by latest-only UI | UC-A10, UC-A11, UC-A12 |
-| Projection | Query-time UX calculation | live estimate, cutoff/frozen estimate, final settlement handoff | estimate treated as guaranteed payout; frozen treated as final | UC-A13, UC-A14, UC-A15 |
-| Settlement | Settlement engine + settlement snapshot | input freeze, deterministic calculation, item snapshot, ledger link, succeeded | all-fail mismatch; host remainder as authority; duplicate payout | UC-A15, UC-A16, UC-A17 |
+| Moderation | Host contextual review only | moderation event, correction-before-freeze, post-freeze no host mutation | host rejection perceived as confiscation; append-only hidden by latest-only UI; host treated as payout approver | UC-A10, UC-A11, UC-A12 |
+| Projection | Query-time UX calculation | live estimate, cutoff/frozen estimate, final settlement handoff | estimate treated as guaranteed payout/profit loop; frozen treated as final | UC-A13, UC-A14, UC-A15 |
+| Settlement | Settlement engine + settlement snapshot | input freeze, deterministic calculation, item snapshot, ledger link, succeeded | all-fail zero-refund brownfield drift; host remainder as authority; duplicate payout | UC-A15, UC-A16, UC-A17 |
 | Replay / Audit | Audit/reconciliation process | replay inputs, version/snapshot, comparison result | replay confused with recalculation; version drift breaks reproducibility | UC-A18 |
 | Retry / Recovery | Admin recovery + idempotent system constraints | failed/retry-wait, partial point_history, missing item link | retry treated as correction or rerun payout | UC-A17, UC-A18 |
 | Notification / State Drift | Non-authoritative delivery | send, receive, stale payload, reconnect, canonical refresh | notification implies final state; failure triggers settlement retry | UC-A19 |
 | Support / Explanation | Support follows source-of-truth hierarchy | pre-settlement explanation vs post-settlement explanation | support cites projection as final; correction/replay promises too much | UC-A20 |
-| Emotional / Trust UX | Product semantics / UX | estimate changes, rejection, rank, tie, shame, warning density | deceptive certainty or punitive/legalistic product feel | PF-001, PF-004, PF-015–PF-017 |
+| Emotional / Trust UX | Product semantics / UX | estimate changes, rejection, contribution visibility, tie, shame, warning density | deceptive certainty, punitive/legalistic product feel, or adversarial ranking | PF-001, PF-004, PF-015–PF-017 |
 | Brownfield Conflicts | Canonical semantic register until resolved | manual start, old enums, deferred endpoints, mismatched examples | legacy wording silently becomes active semantics | UC-A04, UC-A12, UC-A16 |
 
 ## 4. Core Usecase Inventory
@@ -285,12 +297,12 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 
 - **Actors**: Host, participant, system
 - **Preconditions**: Certification log exists and is eligible for review.
-- **Main Flow**: Host appends contextual review decision with actor, reason, and time.
+- **Main Flow**: Host appends contextual certification input review decision with actor, reason category, and time.
 - **Failure Flow**: Host decision overwrites prior history or directly mutates settlement/ledger.
-- **Authority Boundary**: Host can affect certification input before freeze; host cannot determine settlement or ledger output.
-- **Projection Impact**: Projection may change when effective moderation input changes.
+- **Authority Boundary**: Host can affect certification input before freeze; host cannot determine settlement amount, ledger output, final settlement, participant baseline, replay, retry, or correction.
+- **Projection Impact**: Current-basis projection may update when effective moderation input changes, with explanation of the changed input state.
 - **Settlement Impact**: Settlement consumes the resolved moderation state at freeze.
-- **UX Risk**: Participant interprets rejection as host confiscating money.
+- **UX Risk**: Participant interprets rejection as host confiscating money or personally judging the participant.
 - **Related Domain Objects**: `mission_log`, moderation history.
 
 ### UC-A11 — Moderation Correction Before Freeze
@@ -300,9 +312,9 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Main Flow**: New moderation event is appended; current-effective interpretation may change.
 - **Failure Flow**: Prior decision is deleted or silently changed.
 - **Authority Boundary**: Correction is append-only and only affects settlement input if before freeze.
-- **Projection Impact**: Estimated refund/rank may change with explanation.
+- **Projection Impact**: Current-basis expected settlement state and contribution/progress visibility may update with explanation.
 - **Settlement Impact**: Settlement input changes only before freeze.
-- **UX Risk**: User sees estimate change as arbitrary money removal.
+- **UX Risk**: User sees estimate change as arbitrary money removal rather than a visible input-state update.
 - **Related Domain Objects**: moderation event history, `mission_log`.
 
 ### UC-A12 — Post-Freeze / Post-Success Correction Boundary
@@ -311,7 +323,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Preconditions**: Settlement input is frozen or settlement succeeded.
 - **Main Flow**: Host correction cannot mutate final settlement input. Any post-success correction lifecycle remains unresolved/defer-as-unsafe unless separately frozen by L1 authority.
 - **Failure Flow**: Retry or host correction is used to change final payout.
-- **Authority Boundary**: Post-freeze correction is not host moderation and not retry.
+- **Authority Boundary**: Post-freeze correction is not host moderation, not retry, and not replay. After final settlement, any correction must be separate support/operations adjustment semantics, not hidden mutation.
 - **Projection Impact**: Projection should not imply final can still be changed by host action.
 - **Settlement Impact**: Final settlement remains authoritative unless a future compensating correction process is explicitly defined.
 - **UX Risk**: Users may expect support/host to “fix” payout by editing history.
@@ -321,12 +333,12 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 
 - **Actors**: Participant, host, system
 - **Preconditions**: Mission active and enough inputs exist.
-- **Main Flow**: Dashboard calculates current-basis estimated progress/refund/rank.
-- **Failure Flow**: Estimate is displayed as guaranteed payout.
+- **Main Flow**: Dashboard calculates current-basis estimated progress, expected settlement state, and contribution visibility.
+- **Failure Flow**: Estimate is displayed as guaranteed payout, expected profit/loss, or adversarial rank loop.
 - **Authority Boundary**: Projection is UX estimate only.
 - **Projection Impact**: Core behavior.
 - **Settlement Impact**: None directly.
-- **UX Risk**: Estimate decrease feels like money being taken away.
+- **UX Risk**: Estimate decrease feels like money being taken away, or increase feels like profiting from someone else's failure.
 - **Related Domain Objects**: `mission_log`, dashboard projection response.
 
 ### UC-A14 — Cutoff/Frozen Projection Before Final Settlement
@@ -334,7 +346,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Participant, system
 - **Preconditions**: Mission ended; settlement not yet succeeded.
 - **Main Flow**: System shows cutoff-basis estimate using end cutoff.
-- **Failure Flow**: “Frozen” is interpreted as final settlement.
+- **Failure Flow**: “Frozen” is interpreted as final settlement or payout certainty.
 - **Authority Boundary**: Cutoff-basis estimate remains non-authoritative.
 - **Projection Impact**: Projection no longer moves with current time but may still differ from final.
 - **Settlement Impact**: Final settlement may differ due to authoritative rules and frozen inputs.
@@ -357,11 +369,11 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 
 - **Actors**: System, participants, host
 - **Preconditions**: Settlement input has no recognized successes, or rounding/remainder exists.
-- **Main Flow**: All-fail and remainder rules must be deterministic, replayable, and not host-discretionary.
-- **Failure Flow**: “전원 0원 환급” or host discretionary remainder wording conflicts with canonical settlement semantics.
+- **Main Flow**: All-fail settles by equal principal refund so that nobody's failure becomes another participant's profit. Any separate rounding/remainder rule must be deterministic, replayable, and not host-discretionary.
+- **Failure Flow**: “전원 0원 환급”, “환급 없음”, house-edge wording, or host discretionary remainder wording conflicts with canonical settlement semantics.
 - **Authority Boundary**: Host receiving deterministic remainder is not host authority.
-- **Projection Impact**: Estimate must not imply discretionary host benefit.
-- **Settlement Impact**: P0 semantic blocker because payout differs.
+- **Projection Impact**: Estimate must not imply discretionary host benefit, punitive pool loss, or failure-profit upside.
+- **Settlement Impact**: All-fail equal principal refund is canonical; prior zero-refund wording remains brownfield drift only.
 - **UX Risk**: Users see unfair host favoritism or gambling-like pool behavior.
 - **Related Domain Objects**: `settlement_item`, settlement calculation reason.
 
@@ -370,7 +382,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Admin, system
 - **Preconditions**: Settlement failed or retry-wait with existing snapshot and possibly partial ledger effects.
 - **Main Flow**: Retry resumes existing settlement work, reuses existing idempotent point history, or links missing `point_history_id`.
-- **Failure Flow**: Retry recalculates new payout or creates duplicate point history.
+- **Failure Flow**: Retry recalculates new payout, rewrites final settlement, or creates duplicate point history.
 - **Authority Boundary**: Retry is operational recovery, not correction.
 - **Projection Impact**: User may see settlement pending/retry state.
 - **Settlement Impact**: Snapshot remains same; missing work is completed.
@@ -381,9 +393,9 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 
 - **Actors**: Admin/support, system
 - **Preconditions**: Settlement result exists and audit/reconciliation is requested.
-- **Main Flow**: System reproduces result using settlement-time inputs/version/snapshot for verification.
+- **Main Flow**: System reproduces/verifies result using settlement-time inputs/version/snapshot for audit explanation.
 - **Failure Flow**: Replay uses current algorithm and produces different result, or mutates final payout.
-- **Authority Boundary**: Replay is audit verification only.
+- **Authority Boundary**: Replay is audit verification only; it is not retry, correction, recalculation, or payout rewrite.
 - **Projection Impact**: None except explanation.
 - **Settlement Impact**: No mutation unless a separately defined correction process exists.
 - **UX Risk**: User thinks replay can change final result.
@@ -406,9 +418,9 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Participant, support/admin, system
 - **Preconditions**: User disputes estimate, moderation, notification, retry, or final settlement.
 - **Main Flow**: Support explains using the correct source-of-truth layer for the lifecycle state.
-- **Failure Flow**: Support cites dashboard estimate as final or describes retry as correction.
+- **Failure Flow**: Support cites dashboard estimate as final, describes retry as correction, or promises support override of immutable settlement.
 - **Authority Boundary**: Support explanation cannot create new authority.
-- **Projection Impact**: Pre-settlement support explains projection formula and current inputs.
+- **Projection Impact**: Pre-settlement support explains current-basis projection formula, current inputs, and why it can change before final settlement.
 - **Settlement Impact**: Post-settlement support explains settlement item + point history.
 - **UX Risk**: Conflicting support answers destroy trust.
 - **Related Domain Objects**: projection response, `settlement_item`, `point_history`, moderation timeline.
@@ -417,8 +429,8 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 
 | PF Ref | Finding | Semantic Danger | Canonical Direction | Downstream Impact |
 |---|---|---|---|---|
-| PF-001 | Projection as promised payout | Money-shaped estimates feel contractual | Always frame as current/cutoff-basis estimate; final settlement has separate source | PRD, API, Wireframe, QA, Support |
-| PF-002 | Frozen projection wording | “Frozen” sounds final | Use “마감 기준 예상” or equivalent; show settlement status beside it | API, Wireframe, QA |
+| PF-001 | Projection as promised payout or profit loop | Money-shaped estimates feel contractual or gambling-like | Always frame as current/cutoff-basis estimate for anxiety reduction and settlement explanation; final settlement has separate source | PRD, API, Wireframe, QA, Support |
+| PF-002 | Frozen projection wording | “Frozen” sounds final | Use “마감 기준 예상” or equivalent; show settlement status and 변동 가능성 beside it | API, Wireframe, QA |
 | PF-003 | Final differs from last estimate | User sees final delta as arbitrary | Provide explanation drivers: moderation, cadence cap, server-time cutoff, withdrawal/defer rule, tie/remainder | Settlement, API, Support, QA |
 | PF-004 | Host rejection as confiscation | Moderation feels like money authority | Copy must state certification review input, not deposit/ledger decision | PRD, Wireframe, Support |
 | PF-005 | Append-only hidden by latest-only UI | Users suspect tampering | Show timeline/progressive audit visibility where relevant | ERD, API, Wireframe |
@@ -427,13 +439,13 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 | PF-008 | Late/stale notifications | Notification becomes pseudo-state | Notification deep-links to canonical refresh; avoid final wording unless final is verified | API, Wireframe, QA |
 | PF-009 | Upload success misunderstanding | Storage upload treated as certification | Separate upload object from MissionLog authority | API, Wireframe, QA |
 | PF-010 | EXIF/hash over-authority | Risk signal becomes accusation/final failure | Treat as risk signal unless canonical rule resolves it | PRD, API, QA |
-| PF-011 | Point history exists but item link missing | Wallet and settlement detail diverge | Retry recovers linkage; do not create duplicate ledger | Settlement, Runbook, QA |
-| PF-012 | Replay version drift | Audit produces different answer later | Store/use settlement-time version/snapshot requirements | ERD, Settlement, QA |
-| PF-013 | Retry/correction confusion | Admin retry becomes payout editor | Retry resumes existing snapshot; correction unresolved/deferred unless frozen | API, Runbook, Support |
-| PF-014 | Correction as hidden history mutation | Users believe history can be edited | Do not design here; preserve unresolved hard blocker and append-only prohibition | PRD, ERD, Settlement |
-| PF-015 | Live rank toxicity | Users hope others fail | Prefer progress/share framing over adversarial leaderboard | PRD, Wireframe |
-| PF-016 | Failure visibility shame | Accountability becomes humiliation | Avoid public shame mechanics; use private/supportive cues | Wireframe, QA |
-| PF-017 | Tie/remainder fairness | Deterministic can still feel unfair | Explain as replayable rule, not host discretion | Settlement detail, Support |
+| PF-011 | Point history exists but item link missing | Wallet and settlement detail diverge | Retry recovers linkage within existing snapshot; do not recalculate or duplicate ledger | Settlement, Runbook, QA |
+| PF-012 | Replay version drift | Audit produces different answer later | Store/use settlement-time version/snapshot requirements; replay verifies 당시 기준 result | ERD, Settlement, QA |
+| PF-013 | Retry/correction confusion | Admin retry becomes payout editor | Retry resumes failed settlement processing; correction remains separate/deferred unless frozen | API, Runbook, Support |
+| PF-014 | Correction as hidden history mutation | Users believe history can be edited | Do not design here; preserve unresolved hard blocker, separate support semantics, and append-only prohibition | PRD, ERD, Settlement |
+| PF-015 | Live rank toxicity | Users hope others fail | Prefer contribution/progress/share framing over adversarial leaderboard or “1위 수익자” framing | PRD, Wireframe |
+| PF-016 | Failure visibility shame | Accountability becomes humiliation | Avoid public shame mechanics and “실패자” labels; use private/supportive cues | Wireframe, QA |
+| PF-017 | All-fail / tie / remainder fairness | Deterministic can still feel unfair or house-like | All-fail = equal principal refund; remainder must be replayable rule, not host discretion | Settlement detail, Support |
 | PF-018 | Brownfield host-start drift | Host lifecycle authority contradicts canonical model | Label/remove/reframe as Drift Candidate | PRD, API, Settlement, QA |
 | PF-019 | Support source confusion | Support answers become semantic authority drift | Lifecycle-specific support source hierarchy | Runbook, Support QA |
 
@@ -473,8 +485,8 @@ The following inventory consolidates the raw usecase corpus into normalized beha
    risk: moderation perceived as settlement/ledger authority
 
 9. Live projection
-   authority: non-authoritative query-time estimate
-   risk: estimate treated as contract
+   authority: non-authoritative query-time current-basis estimate
+   risk: estimate treated as contract, profit/loss, or failure-profit loop
 
 10. End cutoff / cutoff-basis projection
     authority: timing cutoff for estimate
@@ -486,7 +498,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 
 12. Deterministic settlement batch
     authority: settlement engine
-    risk: non-replayable algorithm or brownfield payout mismatch
+    risk: non-replayable algorithm, all-fail zero-refund drift, or brownfield payout mismatch
 
 13. Settlement item snapshot
     authority: participant-level calculation result
@@ -502,7 +514,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 
 16. Replay/audit/support explanation
     authority: audit verification and explanation only
-    risk: replay/correction/retry conflation
+    risk: replay/correction/retry conflation or support override authority
 ```
 
 ### Timing and freeze boundaries
@@ -524,7 +536,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 | Settlement eligibility anchors | Hard Blocker | `start_at`, `activated_at`, `server_time`, withdrawal/deferred semantics can drift | Authoritative lifecycle interpretation splits | Two valid replay paths | PRD/API/Settlement mismatch |
 | Replay/version snapshot requirements | Hard Blocker | Minimum data for settlement-time replay not fully frozen | Replay can become current-rule recalculation | Audit reproduction can differ | ERD/Settlement cannot prove replayability |
 | Post-success correction lifecycle | Hard Blocker / Deferred Semantic | Formal correction/dispute workflow is not MVP-frozen | Hidden mutation or admin payout editing risk | Final settlement could be overwritten without append-only model | Do not design in API/ERD until L1 freezes it |
-| All-fail refund mismatch | Hard Blocker / Brownfield Conflict | Prior docs may say all fail => 0 refund while stabilization plan requires equal-principal correction | Settlement constitution conflict | Direct payout difference | PRD must be corrected before downstream propagation |
+| All-fail refund mismatch | Resolved upstream / Brownfield Conflict | PRD now requires all-fail equal principal refund, but prior docs may still say all fail => 0 refund | Settlement constitution conflict if old wording propagates | Direct payout difference | Settlement/ERD/API/backlog must remove or label zero-refund wording before propagation |
 | Deterministic host remainder | Hard Blocker / UX Warning | Host receives deterministic remainder but must not look discretionary | Host authority leakage | Remainder replay rule misunderstood as host privilege | PRD/Settlement/API/Support wording drift |
 | Host manual start / `/start` | Brownfield Conflict | Existing docs/API may imply host lifecycle authority | Host becomes activation authority | Eligibility and projection anchors drift | Must be removed, deferred, or labeled before propagation |
 | Moderation timeout / inactive host | Propagation Warning, possibly blocker if it affects freeze | What happens when host does not moderate before freeze? | Participant may feel hostage to host | If unresolved input affects final settlement, can become hard blocker | PRD/API/QA need label; no invented workflow here |
@@ -533,6 +545,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 | Notification stale-state reconciliation | Propagation Warning | Reconnect/late notification behavior wording incomplete | Notification becomes pseudo-authority | No direct settlement change | Client/QA/support drift |
 | Support explanation hierarchy | Propagation Warning | Support may cite wrong source depending on lifecycle | Support becomes informal authority | Disputes handled from projection instead of settlement item | Runbook/support QA drift |
 | Emotional trust framing | Propagation Warning | Ranking, rejection, warnings can feel punitive/gambling-like | Product trust erodes | No direct payout change | Wireframe/PRD/backlog may drop as polish |
+| Competitive mechanics vs emotional framing | Propagation Warning | Relative contribution visibility may be copied as adversarial leaderboard | Users start hoping others fail | No direct payout change | Wireframe/API/backlog may encode “1위 수익자” or failure-profit copy |
 
 ## 8. Downstream Propagation Guidance
 
@@ -550,43 +563,51 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 
 | Separation | Required Meaning |
 |---|---|
-| projection vs final settlement | Projection is estimate. Final is settlement snapshot + point history. |
+| projection vs final settlement | Projection is current-basis estimate for explanation/visibility. Final is settlement snapshot + point history. |
 | retry vs correction | Retry recovers existing settlement work. Correction is unresolved/deferred unless separately frozen. |
 | replay vs recalculation | Replay verifies past result. Recalculation must not mutate final payout. |
 | upload object vs mission-log authority | Upload object is evidence. MissionLog/server validation is certification event boundary. |
 | moderation vs settlement authority | Host review can affect input before freeze; host cannot decide money. |
 | notification vs canonical API state | Notification hints. Canonical API/state records decide current truth. |
 | append-only history vs visible latest state | Latest state may be summarized, but history must remain auditable. |
+| competitive mechanics vs competitive framing | Contribution/progress visibility is allowed; adversarial “winner/profit from failure” framing is not. |
+| all-fail refund vs punishment | All-fail equal principal refund prevents monetizing everyone’s failure; zero-refund/punitive wording is brownfield drift only. |
 
 ### 8.3 Dangerous wording patterns
 
 - “Host starts/activates mission” without Drift Candidate label.
 - “Expected refund” without current-basis/cutoff-basis qualifier.
+- “예상 손익”, “실시간 수익 증가”, “더 벌었다”, or “수익률” as projection framing.
+- “누군가 실패해서 상승”, “1위 수익자”, “지분왕”, or other failure-profit leaderboard copy.
 - “Frozen” without “not final settlement.”
 - “Approved” implying payout approval.
-- “Rejected” implying confiscation.
+- “Rejected” implying confiscation, punishment, or person-level judgment.
+- “전원 0원”, “환급 없음”, “몰수”, “처벌”, or house-edge all-fail wording as canonical settlement.
 - “Retry settlement” implying recalculation.
 - “Replay settlement” implying payout can change.
+- “Correction” implying hidden mutation of final settlement.
 - “Upload complete” implying certification complete.
 - “Notification success” implying canonical final state.
 
 ### 8.4 Propagation order
 
-1. PRD P0 semantic correction and authority synthesis.
-2. Lifecycle/timing hard-blocker freeze.
-3. Settlement Design alignment.
-4. API contract alignment.
-5. ERD support for frozen append-only/replay semantics.
-6. QA semantic matrix.
-7. Wireframe/copy guidance.
-8. Support runbook scripts.
-9. Backlog tagging and dependency cleanup.
+1. PRD semantic patch and authority synthesis.
+2. Usecase semantic bridge alignment.
+3. Settlement semantic patch.
+4. ERD propagation.
+5. API wording/contract propagation.
+6. Backlog/ticket cleanup.
+7. QA semantic matrix.
+8. Wireframe/copy guidance.
+9. Support runbook scripts.
 
 ## 9. UX Semantics Guidance
 
 ### 9.1 Philosophy
 
 Dondok should not hide uncertainty, but it also should not make every screen feel like a legal disclaimer. The desired tone is calm, explanatory, and state-aware.
+
+Safe competition is allowed only when it reinforces persistence, contribution, and shared progress. It must not become an emotional loop where users feel rewarded by another participant's failure.
 
 Preferred:
 
@@ -596,6 +617,7 @@ Preferred:
 - trust-through-visibility
 - context-specific explanations
 - non-punitive state labels
+- contribution/progress/cooperative achievement framing
 
 Avoid:
 
@@ -605,6 +627,8 @@ Avoid:
 - host-dictator framing
 - leaderboard toxicity
 - public shame mechanics
+- failure-profit dopamine framing
+- adversarial winner/loser or first-place earner framing
 
 ### 9.2 Safer wording examples
 
@@ -612,25 +636,34 @@ Avoid:
 |---|---|---|
 | Live estimate | “현재 기준 예상 환급입니다. 최종 정산 전 변동될 수 있어요.” | “받을 환급금” |
 | Cutoff projection | “마감 기준 예상입니다. 정산 확정 전 참고값입니다.” | “Frozen / 확정 금액” |
+| Projection update | “현재 인증 결과가 반영되었습니다. 크루 전체 진행 상황이 업데이트되었습니다.” | “누군가 실패해서 상승 / 더 벌었습니다” |
 | Host moderation accepted | “방장이 인증 내용을 검토했어요. 정산 입력에 반영될 수 있습니다.” | “환급 승인 완료” |
-| Host moderation rejected | “인증 검토 결과 정산 입력에서 제외될 수 있어요. 사유와 이력을 확인할 수 있습니다.” | “몰수 / 실패 확정” |
+| Host moderation rejected | “인증 검토 결과 정산 입력에서 제외될 수 있어요. 사유와 이력을 확인할 수 있습니다.” | “몰수 / 실패 확정 / 문제 사용자” |
 | Upload success | “이미지가 업로드되었습니다. 인증 제출 처리를 완료해야 합니다.” | “인증 성공” |
 | EXIF/hash issue | “추가 확인이 필요한 이미지 신호가 있습니다.” | “부정행위 확정” |
 | Retry | “기존 정산 복구를 이어서 처리 중입니다.” | “정산을 다시 계산합니다.” |
 | Replay | “감사용으로 당시 기준 결과를 재현합니다.” | “결과를 다시 산정합니다.” |
+| Correction | “최종 정산 이후 별도 운영 기준으로 진행되는 보정/지원 처리입니다.” | “정산 결과를 수정했습니다 / 몰래 보정했습니다” |
 | Notification | “알림을 눌러 최신 상태를 확인하세요.” | “이 알림이 최종 상태입니다.” |
+| All-fail | “이번 미션에서는 인정된 성공 기록이 없어, 누군가의 실패가 다른 참여자의 수익으로 이어지지 않도록 원금을 기준으로 정산되었습니다.” | “전원 0원 / 환급 없음 / 실패자 몰수” |
 | Tie/remainder | “정해진 deterministic rule에 따라 처리됩니다.” | “방장에게 임의 지급됩니다.” |
+| Contribution visibility | “현재 상위 기여 그룹입니다 / 크루 평균 이상 달성 중입니다.” | “1위 수익자 / 지분왕 / 실패자 덕분에 상승” |
+| Result share card | “이번 크루를 끝까지 버텼습니다 / 함께 인증을 쌓았습니다.” | “남들을 이겨서 벌었습니다” |
 
 ### 9.3 Emotional trust checks
 
 A UX state/copy is semantically risky if it causes users to believe any of the following.
 
 - Projection is a contract.
+- Projection is expected profit/loss.
+- Projection increase means somebody else's failure was monetized.
 - Host can take money.
 - Retry rewrites payout.
 - Correction hides history mutation.
 - Frozen estimate is final settlement.
 - Ranking rewards other people’s failure.
+- All-fail means punishment, house edge, or zero-refund elimination.
+- Reject reason is a moral judgment about the person.
 - Missing notification means no state change.
 - Support can override ledger history by promise.
 
