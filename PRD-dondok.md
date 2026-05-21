@@ -12,15 +12,18 @@ ERD/API/Settlement/Test 문서는 이 PRD synthesis를 기준으로 후속 propa
 
 - Dondok은 남의 실패를 벌주는 서비스가 아니라, 각자가 약속을 얼마나 꾸준히 지켰는지에 따라 공동 보증금을 투명하고 공정하게 다시 배분받는 상호 책임형 습관 계약 플랫폼이다.
 - 참여도 차이에 따라 환급금은 달라질 수 있다. 다만 핵심은 타인의 실패를 유도하는 경쟁이 아니라 함께 성실함을 지속하게 만드는 구조에 있다.
+- Dondok의 emotional priority는 `계약 신뢰 > 상호 책임 기반 성장 > 경쟁 긴장감`이다. 경쟁 긴장감과 상대적 환급 차이는 허용 가능하지만, 제품의 emotional center는 환급 경쟁이 아니라 “누가 얼마나 꾸준히 함께 버텼는가”에 둔다.
 - 정산 UX 우선순위는 `설명 가능성/감정적 수용성 > authoritative 정확성 > 예상값 고정성`이다.
-- 예상 환급금은 projection이며 최종 정산금이 아니다. 최종 정산은 authoritative batch 결과로 확정된다.
+- 예상 환급금은 anxiety reduction과 settlement explanation을 위한 현재 기준 projection이며 최종 정산금이 아니다. 최종 정산은 authoritative batch 결과로 확정된다.
 - 정산은 deterministic, explainable, replayable 해야 한다.
+- 전체 인정 성공 기록이 없는 all-fail 상황에서는 누군가의 실패가 다른 참여자의 수익으로 이어지지 않도록 equal principal refund를 적용한다.
 - 사용자 화면에서 도딘(Dodin)은 보증금·환급 UX를 표현하는 user-facing app-money branding이며, authoritative accounting은 point ledger/history가 담당한다. 도딘은 별도 coin, 외부 현금, 인출 가능 자산, 또는 별도 ledger가 아니다.
 - 원단위 절사 잔액은 deterministic하게 방장에게 귀속할 수 있다. 이는 host authority가 아니라 replayable remainder rule이다.
 - 모집 마감까지 최소 인원 충족 + 승인 + 예치 Lock 완료 + host disband 없음이면 미션은 start_at 기준 자동 ACTIVE가 되며, MVP에서 activated_at = start_at이다. Host는 activation authority가 아니다.
 - 인증 검증은 layered trust model을 따른다: `server_time`은 timing 기준, EXIF/hash는 fraud/risk signal, moderation은 contextual review, final batch는 authoritative settlement snapshot이다.
 - 방장은 인증 moderation authority를 가지며 이 결정은 정산 입력에 영향을 줄 수 있다. 단, 방장은 정산 엔진, 정산 금액, 포인트 원장을 직접 조작할 수 없다.
 - moderation history는 append-only/auditable 해야 한다.
+- final settlement 이후 결과는 immutable finality를 가진다. replay는 당시 기준 검증/재현, retry는 실패한 정산 복구, correction은 별도 운영 보정 흐름이며 hidden mutation이나 payout rewrite가 아니다.
 - MVP에는 별도 제품 내 dispute/central judgment workflow를 두지 않는다. 예외 상황은 이메일 또는 오픈카톡 등 외부 운영 문의 fallback으로 처리한다.
 - P0의 목적은 재미있는 습관 앱 전체가 아니라, 사용자가 실제 돈이 걸린 계약 구조를 신뢰할 수 있게 만드는 trust loop 완성이다.
 
@@ -35,6 +38,8 @@ ERD/API/Settlement/Test 문서는 이 PRD synthesis를 기준으로 후속 propa
 - moderation log 기본 공개 범위
 - 운영 문의 SLA와 담당자
 - 약관/법무 wording
+- role-based moderation history visibility matrix
+- post-final correction/support workflow 세부 운영
 
 ### Downstream alignment rule
 
@@ -45,6 +50,8 @@ ERD/API/Settlement/Test 문서는 이 PRD synthesis를 기준으로 후속 propa
 Dondok은 소규모 크루가 함께 보증금을 걸고 습관 미션을 수행한 뒤, 각자의 약속 이행 정도에 따라 공동 보증금을 투명하게 다시 배분받는 지분 기반 습관 형성 플랫폼이다. 이 문서는 최신 기획안과 accepted semantic freeze 결과를 바탕으로 제품 철학, MVP 범위, 정산/인증/운영 trust boundary, 그리고 downstream 문서가 참조할 canonical synthesis를 정리한다.
 
 Dondok의 MVP는 기능 풍성함이 아니라 “돈이 걸린 습관 계약의 신뢰 루프”를 증명하는 데 집중한다. 신뢰 루프는 방 생성/참여, 포인트(사용자 화면의 도딘) 예치, 인증 제출, 검증 signal 기록, 방장 moderation, 예상 환급금 projection 설명, final batch 정산, 포인트 환급, 정산 결과 설명까지 끊기지 않고 동작하는 흐름이다.
+
+이 PRD의 emotional constitution은 `계약 신뢰 > 상호 책임 기반 성장 > 경쟁 긴장감`이다. Dondok은 gambling-like reward loop, punitive elimination game, adversarial leaderboard app이 아니며, 경쟁 요소는 사용자가 함께 약속을 버티는 구조를 이해하고 지속하게 만드는 범위에서만 보조적으로 허용한다.
 
 ## 2. Contacts
 
@@ -85,12 +92,13 @@ Dondok은 이 문제를 다르게 푼다. 사용자는 크루를 만들거나 �
 
 ## 4. Objective
 
-Dondok의 목표는 “혼자서는 오래 못 가는 습관”을 “작은 팀과 공정하고 설명 가능한 보증금 재분배 구조”로 오래 가게 만드는 것이다. 사용자는 매일의 성실함이 기록과 예상 보상으로 보이는 경험을 얻고, 운영자는 재현 가능하고 감사 가능한 정산 구조를 바탕으로 신뢰 가능한 습관 계약 서비스를 만들 수 있다.
+Dondok의 목표는 “혼자서는 오래 못 가는 습관”을 “작은 팀과 공정하고 설명 가능한 보증금 재분배 구조”로 오래 가게 만드는 것이다. 사용자는 매일의 성실함이 기록, 현재 기준 예상, 진행 설명으로 보이는 경험을 얻고, 운영자는 재현 가능하고 감사 가능한 정산 구조를 바탕으로 신뢰 가능한 습관 계약 서비스를 만들 수 있다.
 
 이 제품은 아래 원칙에 맞춰 설계한다.
 
 - 상호 책임: 크루는 서로의 습관 지속을 돕는 작은 계약 단위다.
 - 투명한 상대성: 참여도 차이에 따라 환급금은 달라질 수 있으나, 그 이유를 사용자가 이해할 수 있어야 한다.
+- 협력적 경쟁: 상대적 위치나 기여도는 보여줄 수 있지만, 환급 경쟁보다 “누가 얼마나 꾸준히 함께 버텼는가”를 중심으로 설명해야 한다.
 - 설명 가능성: 사용자는 왜 이 인증이 인정/반려되었고 왜 이 환급금이 나왔는지 확인할 수 있어야 한다.
 - 재현 가능성: 정산은 동일 입력에 대해 동일 결과를 반환하고, 장애 후에도 다시 검증할 수 있어야 한다.
 - 감사 가능성: moderation과 운영자 개입은 기록으로 남아야 하며 임의 변경처럼 보이면 안 된다.
@@ -133,7 +141,7 @@ Dondok의 목표는 “혼자서는 오래 못 가는 습관”을 “작은 팀
 | 가치 제안                   | 사용자가 얻는 것                                  | 줄어드는 불편                                             | 경쟁 대비 차별점                                                      |
 | --------------------------- | ------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------- |
 | 참여도에 따라 달라지는 환급 | 내가 약속을 얼마나 지켰는지 환급 결과로 확인한다. | “열심히 해도 똑같다”는 허탈감이 줄어든다.                 | 단순 벌금제가 아니라 상대적 지분 기반 재분배다.                       |
-| 예상 환급금 projection      | 현재까지 기준의 예상 흐름을 확인한다.             | 결과를 마지막 날까지 전혀 모르는 답답함이 줄어든다.       | 예상값과 최종 정산을 구분해 투명하게 안내한다.                        |
+| 예상 환급금 projection      | 현재까지 기준의 예상 흐름과 계산 이유를 확인한다. | 결과를 마지막 날까지 전혀 모르는 답답함이 줄어든다.       | projection을 최종 정산과 구분해 불안 완화와 정산 설명 UX로 안내한다.  |
 | 설명 가능한 인증과 정산     | 왜 인정/반려되었고 왜 이 금액인지 이해한다.       | 사진 재사용, 시간 조작, 계산 오차에 대한 불신이 줄어든다. | server_time, EXIF/hash signal, moderation, batch snapshot을 분리한다. |
 | 소규모 크루 기반 상호 책임  | 혼자보다 오래 지속할 사회적 긴장감을 얻는다.      | 개인 의지만으로 버티는 부담이 줄어든다.                   | 돈이 걸린 신뢰 기반 습관 계약이라는 차별점이 있다.                    |
 
@@ -146,6 +154,7 @@ Dondok은 아래 항목에서 기존 습관 앱보다 높은 가치를 주려 �
 - 진행 상황의 가시성
 - 인증과 moderation의 감사 가능성
 - 소규모 크루 기반의 사회적 압박
+- 완주/기록/공동 성취 중심의 결과 framing
 
 AI, 인증 피드/리액션, 알림, 운영 탭, 반응형 UX는 제품 경험에 중요하며 P0 Engagement UX로 둘 수 있다. 단, 정산/원장/state authority를 흔드는 blocker가 되어서는 안 된다.
 
@@ -195,11 +204,13 @@ P1 이후 프로토타입 후보:
 - 모집 상태 영역에는 아래 문구를 노출한다.
   `모집 마감까지 최소 인원이 모이고 예치가 완료되면 미션 시작일에 자동으로 시작됩니다. 모집 마감 전 방장이 크루를 해체하거나 최소 인원이 충족되지 않으면 미션은 시작되지 않고 예치 도딘이 환급됩니다.`
 - 예상 환급금 영역에는 아래 문구를 노출한다.
-  `예상 환급금 projection은 현재까지의 인증 결과를 기반으로 계산된 참고용 금액입니다. 최종 정산은 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 실행되는 final settlement batch 결과로 확정됩니다.`
+  `예상 환급금 projection은 현재까지의 인증 결과를 기반으로 계산된 현재 기준 예상입니다. 최종 정산 전까지 변동될 수 있으며, 최종 정산은 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 실행되는 final settlement batch 결과로 확정됩니다.`
 - 정산 결과 화면에서 전체 성공 횟수가 `0`인 경우 아래 문구를 노출한다.
-  `이번 미션에서는 모든 참여자의 인정된 성공 기록이 없어, 정산 규칙에 따라 환급 도딘이 없을 수 있습니다.`
+  `이번 미션에서는 인정된 성공 기록이 없어, 누군가의 실패가 다른 참여자의 수익으로 이어지지 않도록 원금을 기준으로 정산되었습니다.`
 - 알림 UX에는 아래 문구를 적용한다.
   `알림은 놓치지 않도록 돕는 best-effort 안내이며, 인증 제출과 정산 기준은 앱 내 기록과 final batch를 따릅니다.`
+- 결과 카드/공유 UX에는 아래 문구 방향을 적용한다.
+  `이번 크루에서 꾸준히 참여한 기록입니다. 함께 목표를 향해 버틴 과정을 확인해보세요.`
 
 ### 7.2 Key Features
 
@@ -217,9 +228,9 @@ P1 이후 프로토타입 후보:
 | Host moderation                     | Host가 인증 로그를 contextual review하여 accepted/rejected 등 인증 입력 상태를 정한다.                                                                                                              | Moderation affects certification input only, not settlement/ledger authority.                       |
 | Moderation history / 운영 탭        | 인증 검토 이력, 처리 상태, 운영상 주의가 필요한 로그를 사용자에게 설명한다.                                                                                                                         | Visibility/audit UX이며 host ledger 권한이 아니다.                                                  |
 | 일일 정산 state                     | 인증 주기별 성공/실패 상태와 예상 지분율을 계산한다.                                                                                                                                                | Projection과 final settlement를 분리한다.                                                           |
-| Projection dashboard                | 예상 도딘/예상 환급금, 지분율, 성공률을 보여준다.                                                                                                                                                   | 예상값은 authoritative settlement가 아니며 final batch 전 고정값처럼 표현하지 않는다.               |
+| Projection dashboard                | 현재 기준 예상 도딘/예상 환급금, 기여도/진행률, 성공률을 보여준다.                                                                                                                                  | 예상값은 authoritative settlement가 아니며 final batch 전 고정값처럼 표현하지 않는다. 수익/순위 dopamine loop로 표현하지 않는다. |
 | Final settlement batch              | 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 authoritative settlement snapshot을 생성한다.                                                                                                    | Deterministic / explainable / replayable.                                                           |
-| 결과 설명                           | 최종 성공/실패, 도딘 환급, 대표 성공 로그를 설명한다.                                                                                                                                               | 대표 성공 로그는 created_at asc, mission_log.id asc tie-break로 deterministic하게 선정한다.         |
+| 결과 설명                           | 최종 인증 상태, 도딘 환급, 대표 성공 로그, 공동 성취/완주 기록을 설명한다.                                                                                                                          | 대표 성공 로그는 created_at asc, mission_log.id asc tie-break로 deterministic하게 선정한다. 낙인/승리 framing을 피한다. |
 
 #### P0 Engagement UX: Phase 1 경험 보조 기능
 
@@ -259,13 +270,14 @@ Authority P0와 Engagement UX P0는 서로 다른 실패 경계를 가진다. Au
 
 #### Projection / Dashboard Boundary
 
-Dashboard는 운영 중 사용자에게 예상 상태를 설명하지만, authoritative settlement가 아니다.
+Dashboard는 운영 중 사용자에게 예상 상태와 그 이유를 설명하지만, authoritative settlement가 아니다. Projection의 1차 역할은 anxiety reduction과 settlement explanation이며, 실시간 수익 변화나 상대 실패 기반 dopamine feedback을 만드는 것이 아니다.
 
 - Projection input: current participant baseline, accepted/rejected/missing certification input, cadence, elapsed cycles.
-- Projection output: 예상 성공률, 예상 지분율, 예상 도딘/예상 환급금.
-- Forbidden wording: “실시간 최종 정산”, “확정 환급금”, “환급금 실시간 상승”.
-- Required wording: “예상”, “projection”, “최종 정산 전 변동 가능”.
+- Projection output: 예상 성공률, 예상 기여도/지분율, 현재 기준 예상 도딘/예상 환급금.
+- Forbidden wording: “실시간 최종 정산”, “확정 환급금”, “환급금 실시간 상승”, “누군가 실패해서 상승”, “더 벌었다”, “수익”, “예상 손익”, “1위 수익자”.
+- Required wording: “현재 기준 예상”, “projection”, “최종 정산 전 변동 가능”, “현재 인증 결과 반영”, “크루 진행 상황 업데이트”.
 - Final settlement batch 이전 dashboard value는 replay/debug용 설명값이지 ledger snapshot이 아니다.
+- 상대적 위치를 표현해야 할 때는 금지 표현인 “1위 수익자”가 아니라 “현재 상위 기여 그룹”, “크루 평균 이상 달성 중”, “이번 크루에서 꾸준히 참여했어요”처럼 cooperative persistence framing을 사용한다.
 
 #### 핵심 비즈니스 규칙
 
@@ -291,7 +303,7 @@ Dashboard는 운영 중 사용자에게 예상 상태를 설명하지만, author
 - Grace period는 일반 인증 주기에 72시간을 적용하되, 마지막 3일은 grace 없이 즉시 terminal 상태로 처리한다.
 - Projection cutoff는 final settlement batch 직전까지이며, batch 이후 값이 authoritative snapshot이다.
 - 단순 성공 횟수만으로 고정 환급금을 배분하지 않는다. 전체 상대 성공률/지분율 기반으로 정산한다.
-- 성공자가 없으면 전원 0원 환급이 가능하다.
+- 전체 인정 성공 기록이 없으면 누군가의 실패가 다른 참여자의 수익으로 이어지지 않도록 equal principal refund를 적용한다.
 - 정산 중 소수점/절사 잔액은 deterministic하게 host에게 귀속될 수 있다. 이는 host authority가 아니라 replayable remainder rule이다.
 - 최대 15명 기준에서 remainder 설명은 1~14원 범위를 초과하지 않도록 유지한다.
 
@@ -301,9 +313,18 @@ Dashboard는 운영 중 사용자에게 예상 상태를 설명하지만, author
 - EXIF timestamp, GPS, device metadata, image hash는 fraud/risk signal이다.
 - EXIF/hash 실패 또는 부재는 곧바로 최종 실패 판정이 아니다.
 - Host moderation은 인증 맥락 검토이며 certification input 상태를 바꿀 수 있다.
-- Host moderation은 point ledger, settlement engine, final batch를 직접 수정하지 못한다.
+- Host moderation은 point ledger, settlement engine, final batch, settlement amount, participant baseline, replay/retry/correction을 직접 수정하지 못한다.
+- Host 승인/반려는 payout approval 또는 deposit confiscation이 아니다. Reject reason은 사람에 대한 판결이 아니라 정산 입력에서 제외될 수 있는 인증 상태와 사유를 설명해야 한다.
 - 운영자 개입은 audit-backed exceptional recovery boundary에 제한된다.
 - 모든 moderation 결정과 변경은 actor, action, reason, time을 추적할 수 있는 append-only history로 남아야 한다.
+
+#### Finality / Replay / Retry / Correction Boundary
+
+- Final settlement batch가 `SUCCEEDED` authoritative snapshot을 만들면 final settlement 자체는 immutable하다.
+- Pre-freeze/cutoff 이전에는 moderation/certification correction으로 인증 입력 상태를 바로잡을 수 있다.
+- Replay는 당시 기준 입력과 규칙으로 결과를 검증/재현하는 audit 동작이며 payout rewrite가 아니다.
+- Retry는 `PENDING`/`FAILED`/`RETRY_WAIT` 등 완료되지 않은 정산 처리를 이어서 복구하는 동작이며 succeeded settlement recalculation이 아니다.
+- Correction은 final settlement 이후 별도 운영 기준으로 진행되는 보정/지원 흐름이다. MVP PRD는 correction workflow를 새로 설계하지 않으며, 기존 settlement snapshot을 hidden mutation으로 덮어쓰지 않는다.
 
 #### 예외 처리 원칙
 
@@ -388,7 +409,7 @@ Phase 2 후보는 아래와 같다.
 - complex fraud scoring / advanced anti-cheat
 - WebSocket chat / SSE realtime sync / iOS Web Push reliability guarantees
 - 대규모 공개 크루와 시즌제 운영
-- sophisticated ranking/gamification
+- cooperative contribution visibility / non-adversarial progress framing
 - 포인트 만료 구현, 만료 원장 이벤트, 만료 API, 만료 DB 스키마, 만료 transaction type
 
 ### Release Phasing
@@ -452,7 +473,7 @@ Phase 2 후보는 아래와 같다.
 | 환급 / refund                            | 정산 후 돌려받는 포인트/도딘                   | final settlement 결과로 발생하는 point movement                                                                      | 예상 환급금 projection과 다름                                      | final batch, point ledger/history                  | settlement               |
 | 인증 제출 / upload                       | 미션 수행 사진을 올리는 행동                   | server_time과 file signal을 남기는 event                                                                             | 최종 인정과 동일하지 않음                                          | certification record                               | layered trust            |
 | 인정 인증 / final certification state    | 최종 정산에 반영되는 인증 상태                 | signal + rule + moderation이 반영된 resolved state                                                                   | raw EXIF/hash 결과와 동일하지 않음                                 | final certification state                          | layered trust            |
-| 예상 환급금 / expected refund projection | 현재까지 기준으로 예상되는 환급 금액           | projection 계산 결과                                                                                                 | 최종 settlement/refund와 동일 개념 아님                            | dashboard projection                               | projection != settlement |
+| 예상 환급금 / expected refund projection | 현재까지 기준으로 예상되는 환급 금액           | anxiety reduction과 settlement explanation을 위한 projection 계산 결과                                                | 최종 settlement/refund, 수익, 손익, 실시간 payout certainty와 동일 개념 아님 | dashboard projection                               | projection != settlement |
 | 대시보드 / projection polling            | 현재 상황을 확인하는 화면                      | 주기적 또는 요청 시 계산된 projection                                                                                | final settlement 또는 perfect realtime 아님                        | dashboard response                                 | projection boundary      |
 | 최종 정산 / settlement                   | 최종 환급 결과                                 | final batch가 만든 settlement snapshot                                                                               | 예상 환급금 아님                                                   | authoritative batch                                | final settlement         |
 | authoritative batch                      | 최종 결과를 확정하는 처리                      | 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 실행되는 batch                                                    | 실시간 대시보드 계산 아님                                          | batch result                                       | batch authority          |
@@ -465,7 +486,7 @@ Phase 2 후보는 아래와 같다.
 | override                                 | signal 이상이나 예외를 승인하는 결정           | moderation action의 한 종류                                                                                          | 운영자 임의 정산 수정 아님                                         | moderation history                                 | contextual review        |
 | grace period / 유예기간                  | 인증 상태 불확실성을 흡수하는 안정화 구간      | 일반 인증 주기 72시간 지연 허용 window                                                                               | 마지막 3일은 grace 없이 terminal 처리, batch 이후 무제한 수정 아님 | PRD lifecycle                                      | layered trust            |
 | trust loop                               | 돈이 걸린 계약을 신뢰하게 만드는 핵심 흐름     | 예치→인증→moderation→projection→정산→환급                                                                            | 재미 기능 전체 아님                                                | PRD P0                                             | MVP cutline              |
-| replayability                            | 나중에 다시 계산해도 검증 가능한 성질          | same input → same output 검증 가능성                                                                                 | 수동 감으로 조정하는 운영 아님                                     | settlement inputs/snapshot                         | deterministic            |
+| replayability                            | 나중에 당시 기준으로 다시 검증 가능한 성질     | same input → same output 검증 가능성                                                                                 | 수동 감으로 조정하거나 지급 결과를 다시 쓰는 운영 아님             | settlement inputs/snapshot                         | deterministic            |
 | deterministic settlement                 | 항상 같은 입력에 같은 결과를 내는 정산         | random 없는 계산                                                                                                     | 룰렛/랜덤 보상 아님                                                | settlement formula                                 | no random                |
 | append-only                              | 이력이 덮어써지지 않음                         | audit trail 누적                                                                                                     | 수정/삭제 가능한 임시 상태 아님                                    | history/audit log                                  | auditability             |
 | auditability                             | 사후 검증 가능성                               | actor/action/reason/time 추적                                                                                        | 운영자 임의 처리 아님                                              | audit log                                          | operator boundary        |
@@ -473,15 +494,22 @@ Phase 2 후보는 아래와 같다.
 | authoritative source                     | 최종 판단 기준                                 | 제품 intent는 최신 기획안과 accepted semantic freeze, PRD는 그 canonical synthesis, 정산 결과는 final batch snapshot | PRD가 L1 intent source를 override하는 constitution이 아님          | L1 intent / PRD synthesis / final batch by context | source hierarchy         |
 | 운영자 개입                              | 예외 문의/복구                                 | 장애·오류·악용 대응                                                                                                  | 일반 dispute system 아님                                           | audit-backed ops                                   | limited intervention     |
 | settlement snapshot                      | 정산 확정 시점 기록                            | final result freeze                                                                                                  | 이후 projection 재계산 아님                                        | final batch output                                 | batch authority          |
+| retry                                    | 완료되지 않은 정산 처리 복구                   | 실패/중단된 settlement processing continuation                                                                       | `SUCCEEDED` 정산 상태를 다시 산정하거나 지급 결과를 덮어쓰는 동작 아님 | settlement status                                  | recovery boundary        |
+| replay                                   | 당시 기준 결과 검증/재현                       | settlement-time input/rule/snapshot으로 동일 결과 확인                                                              | payout mutation 또는 결과 재산정 아님                              | settlement snapshot                                | audit boundary           |
+| correction                               | 별도 운영 보정/지원 흐름                       | final settlement 이후 별도 append-only 대응                                                                          | hidden mutation 또는 settlement overwrite 아님                     | audit-backed ops                                   | support boundary         |
 | layered trust model                      | 여러 신뢰 신호를 조합                          | time/signal/moderation/batch 분리                                                                                    | 단일 hard truth 아님                                               | PRD synthesis                                      | certification policy     |
 | downstream propagation                   | PRD synthesis를 ERD/API/Settlement/Test에 반영 | L1-aligned PRD wording을 derived docs로 정렬하는 후속 작업                                                           | downstream이 L1 intent나 PRD synthesis를 역으로 결정하는 것 아님   | PRD synthesis after L1 alignment                   | source hierarchy         |
 
 ### 제거하거나 주의할 혼용 표현
 
 - realtime projection을 최종 정산금처럼 표현하지 않는다. 현재 기준 값은 “예상 환급금 projection”으로 표기한다.
+- projection을 수익/손익/실시간 상승/타인 실패 기반 상승처럼 표현하지 않는다. “현재 기준 예상”, “최종 정산 전 변동 가능”, “현재 인증 결과 반영”으로 설명한다.
+- 상대 비교를 “1위 수익자”, “실패자”, “누가 돈을 가장 많이 벌었는가”처럼 표현하지 않는다. 필요하면 “기여 구간”, “크루 평균 이상”, “함께 달성한 인증 수”처럼 협력적 진행 표현을 사용한다.
 - EXIF/hash signal 이상을 최종 불인정으로 단정하지 않는다. “review/유예기간 대상이 될 수 있다”로 설명한다.
 - host가 돈을 나누거나 정산한다는 표현을 쓰지 않는다. “방장은 인증 상태를 moderation하고, final batch가 정산한다”로 설명한다.
 - 방장 승인/반려가 원장 수정 권한처럼 읽히는 표현을 금지한다.
+- 반려/거절을 “몰수”, “처벌”, “수익 박탈”, “문제 사용자”, “부정행위 확정”처럼 표현하지 않는다. 정산 입력에 반영될 인증 상태와 사유로 설명한다.
+- retry/replay/correction을 “정산을 다시 계산”, “결과를 다시 산정”, “몰래 수정”처럼 표현하지 않는다.
 - AI 크루 생성 도우미는 P0 Engagement UX로 둘 수 있지만, manual fallback 없는 mandatory flow나 policy/settlement authority처럼 표현하지 않는다.
 - 도딘은 보증금·환급 UX를 표현하는 user-facing app-money branding으로 설명하되, 외부 교환·인출 가능 자산이나 별도 ledger처럼 표현하지 않는다.
 
@@ -489,8 +517,12 @@ Phase 2 후보는 아래와 같다.
 
 - “남의 실패로 돈 번다” 금지.
 - “예상 환급금은 확정 금액”처럼 표현 금지.
+- “예상 손익”, “실시간 수익 증가”, “더 벌었다”, “1위 수익자” 금지.
+- “인증 실패자”, “문제 사용자”, “몰수”, “처벌”, “수익 박탈” 금지.
 - “EXIF가 없으면 무조건 끝” 금지.
 - “방장이 돈을 나눠준다” 금지.
+- “방장 승인으로 환급 확정” 금지.
+- “retry/replay로 정산을 다시 계산한다” 금지.
 - 현재 기준 projection을 최종 환급금 확인처럼 표현 금지.
 
 ### 비개발 직군 설명용 단순화
@@ -498,8 +530,11 @@ Phase 2 후보는 아래와 같다.
 - Projection: “현재까지 기준으로 보여주는 예상값.”
 - Settlement: “최종 검토 후 확정된 결과.”
 - Moderation: “방장이 인증이 규칙에 맞는지 확인하는 과정.”
+- Retry: “완료되지 않은 정산 처리를 이어서 복구하는 과정.”
+- Replay: “당시 기준으로 결과를 다시 검증하는 과정.”
+- Correction: “최종 정산 이후 별도 운영 기준으로 진행되는 보정/지원 처리.”
 - Layered trust: “사진 정보, 제출 시간, 방장 확인을 함께 보는 구조.”
-- Replayability: “나중에 다시 계산해도 같은 결과가 나오는 구조.”
+- Replayability: “당시 기준 입력으로 다시 검증해도 같은 결과가 확인되는 구조.”
 
 ### 외부 노출 금지 또는 주의할 backend-only jargon
 
@@ -538,22 +573,26 @@ Phase 2 후보는 아래와 같다.
 ### High-risk contamination sources
 
 1. EXIF hard-fail assumption
-2. realtime projection certainty
+2. realtime projection certainty / profit-like projection wording
 3. AI/social/notification mandatory-authority wording
 4. downstream docs as intent/policy authority wording
 5. remainder recipient conflict
 6. unrestricted admin/operator mutation wording
+7. all-fail punitive or zero-refund wording
+8. host approval/rejection as payout approval/confiscation wording
+9. retry/replay/correction as hidden mutation wording
+10. adversarial ranking / winner payout framing
 
 ### Propagation dependency order
 
 1. L1 intent authority 확인
 2. PRD synthesis wording stabilization
 3. Glossary authority wording alignment
-4. Settlement semantics wording confirmation
-5. ERD impact mapping
-6. API contract patch
-7. Settlement design patch
-8. Test spec / QA scenario update
+4. Usecase semantic bridge alignment
+5. Settlement semantics wording confirmation
+6. ERD impact mapping
+7. API contract patch
+8. Backlog/ticket and QA scenario cleanup
 
 ### Freeze-before-propagation areas
 
@@ -563,3 +602,5 @@ Phase 2 후보는 아래와 같다.
 - moderation log 공개 범위
 - 운영 문의 SLA
 - 약관/법무 wording
+- role-based moderation history visibility matrix
+- post-final correction/support workflow 세부 운영
