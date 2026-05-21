@@ -1,0 +1,250 @@
+# Usecase Diagram: Dondok
+
+> Dondok 행동 의미(Behavioral Semantics) 한눈에 보는 지도. 누가(액터) → 무엇을(유스케이스) → 어떤 순서/권한 경계로 흐르는지 표현. Canonical 출처는 [`Usecase-dondok.md`](./Usecase-dondok.md). 본 문서는 그 4장 Usecase Inventory의 시각화 레이어이며 의미 권한을 추가/축소하지 않는다.
+>
+> 우선순위: **strict UML purity < behavioral semantic readability < authority boundary preservation**. UML 표준 stereotype을 일부 양보하더라도 "누가 무엇을 어디까지 결정하는가"를 drift 없이 보여주는 것이 더 중요하다.
+
+## 1. 액터
+
+| 액터 | 역할 | 권한 경계 |
+|---|---|---|
+| 👑 방장 (Host) | 크루 설정, 인증 입력 검토 | 돈/원장/라이프사이클 권한 없음 |
+| 🙋 참여자 (Participant) | 가입, 예치, 인증 업로드 | 정산 결과 수신·분쟁 주체 |
+| ⚙️ 시스템 (System) | Lifecycle 전이, Settlement 엔진, Ledger | 라이프사이클/정산/원장 권한 단일 보유 |
+| 🛠️ 운영자 (Admin/Support) | 재시도, 리플레이, 지원 설명 | 결과 변경 권한 없음 (보정은 별도 정의 후) |
+
+## 2. 다이어그램
+
+```mermaid
+flowchart TB
+    %% ===== Legend (authority invariants) =====
+    LEGEND["🟦 Authority Invariants<br/>━━━━━━━━━━━━━━━━━━━<br/>• Settlement / Ledger / Lifecycle = ⚙️ System only<br/>• 👑 Host = 인증 검토만 (돈/시작 결정 ❌)<br/>• 🛠️ Admin: retry = resume (recalc ❌) · replay = audit (mutation ❌)<br/>• Correction = post-final 별도 보정 (hidden mutation ❌)<br/>• Projection · Notification = non-authoritative<br/>• Moderation history = append-only"]
+    style LEGEND fill:#FFF8DC,stroke:#888,stroke-width:1px,color:#000
+
+    %% ===== Actors =====
+    Host(["👑 Host"])
+    Participant(["🙋 Participant"])
+    System(["⚙️ System"])
+    Admin(["🛠️ Admin / Support"])
+
+    subgraph Dondok["🟦 Dondok System Boundary"]
+        direction TB
+
+        %% ===== PRE-FREEZE BAND =====
+        subgraph PRE["Pre-Freeze · moderation mutable"]
+            direction LR
+            subgraph LC["① 모집 · 시작"]
+                UC01(("UC-A01<br/>크루 만들기"))
+                UC02(("UC-A02<br/>참가 · 예치 Lock"))
+                UC03["«extend»<br/>UC-A03<br/>동시 가입 race"]
+                UC04(("UC-A04<br/>자동 시작<br/>baseline freeze"))
+                UC05(("UC-A05<br/>자동 취소<br/>· 예치 환급"))
+                UC01 --> UC02
+                UC02 -.- UC03
+                UC02 --> UC04
+                UC02 --> UC05
+            end
+            subgraph CERT["② 인증 (server_time 기준 인정)"]
+                UC06(("UC-A06<br/>인증 업로드<br/>= MissionLog +<br/>server_time"))
+                UC08["«extend»<br/>UC-A08 EXIF · hash<br/>= signal only"]
+                UC06 -.- UC08
+            end
+            subgraph MOD["③ 방장 검토 «append-only»"]
+                UC10(("UC-A10<br/>인증 검토"))
+                UC11(("UC-A11<br/>검토 정정"))
+                UC10 --> UC11
+            end
+            UC04 -. phase .-> UC06
+            UC06 -. phase .-> UC10
+        end
+
+        %% ===== FREEZE BOUNDARY =====
+        FREEZE{{"⛔ Settlement Input Freeze<br/>post-freeze moderation은 settlement 입력에 영향 없음"}}
+        style FREEZE fill:#FFB6B6,stroke:#C00,stroke-width:3px,color:#000
+        UC11 ==> FREEZE
+
+        %% ===== CROSS-CUTTING SHARED RULE (floating, no edges) =====
+        UC09["«shared input rule»<br/>UC-A09 cadence cap<br/>→ ④ projection · ⑤ settlement<br/>동일 적용"]
+
+        %% ===== POST-FREEZE BAND =====
+        subgraph POST["Post-Freeze · settlement authoritative"]
+            direction LR
+            subgraph PROJ["④ 예상 «non-authoritative»"]
+                UC13(("UC-A13<br/>실시간 예상"))
+                UC14(("UC-A14<br/>마감 기준 예상<br/>(최종 ❌)"))
+                UC13 -.선행.-> UC14
+            end
+            subgraph SETL["⑤ 최종 정산 «authoritative»"]
+                UC15(("UC-A15<br/>Final Settlement<br/>(settlement snapshot →<br/>point_history ledger)"))
+                UC16["«variant»<br/>UC-A16 all-fail<br/>= 원금 환급"]
+                UC15 -.- UC16
+            end
+            subgraph REC["⑥ 복구"]
+                UC17(("UC-A17<br/>Retry<br/>«resume, no recalc»"))
+            end
+            subgraph AUD["⑦ 감사"]
+                UC18(("UC-A18<br/>Replay<br/>«audit, no mutation»"))
+            end
+            UC14 ==> UC15
+        end
+
+        FREEZE ==> UC14
+        UC05 -. 취소 환급 .-> UC15
+
+        %% ===== OPS LANE =====
+        subgraph OPS["⑧ 안내 «non-authoritative» (모든 phase 외곽)"]
+            UC19(("UC-A19<br/>알림 = hint<br/>(상태 = API 기준)"))
+            UC20(("UC-A20<br/>지원 설명<br/>(상태별 정답 출처)"))
+        end
+    end
+
+    %% ===== Actor associations (strong = 실선, weak = 점선) =====
+    Host --- UC01
+    Host --- UC10
+    Host --- UC11
+    Host -. "approval context" .- UC02
+    Host -. "recruitment context" .- UC04
+
+    Participant --- UC02
+    Participant --- UC06
+    Participant --- UC20
+    Participant -. "결과 수신" .- UC15
+
+    System --- UC04
+    System --- UC05
+    System --- UC13
+    System --- UC14
+    System --- UC15
+    System --- UC19
+
+    Admin --- UC17
+    Admin --- UC18
+    Admin --- UC20
+
+    classDef actor fill:#FFE4B5,stroke:#333,stroke-width:1px,color:#000
+    classDef usecase fill:#E6F3FF,stroke:#333,stroke-width:1px,color:#000
+    classDef nonauth fill:#F0F0F0,stroke:#999,stroke-width:1px,color:#555,stroke-dasharray:5 5
+    classDef authoritative fill:#D4EDDA,stroke:#155724,stroke-width:3px,color:#000
+    classDef recovery fill:#FFF3CD,stroke:#856404,stroke-width:1px,color:#000
+    classDef audit fill:#E2E3F0,stroke:#5A5F88,stroke-width:1px,color:#000
+    classDef ext fill:#FFFACD,stroke:#888,stroke-width:1px,color:#444
+
+    class Host,Participant,Admin,System actor
+    class UC01,UC02,UC04,UC05,UC06,UC10,UC11,UC20 usecase
+    class UC13,UC14,UC19 nonauth
+    class UC15 authoritative
+    class UC17 recovery
+    class UC18 audit
+    class UC03,UC08,UC09,UC16 ext
+```
+
+> 렌더 verification: ⑧ OPS lane 위치는 Mermaid renderer 의존적이다. 과도하게 아래로 밀리면 fallback으로 OPS를 `subgraph Dondok` 밖 별도 swimlane으로 이동한다.
+
+## 3. 다이어그램 읽는 법
+
+### Layer · 색상 규칙
+
+| 색상 | 의미 | 적용 노드 |
+|---|---|---|
+| 🟦 light blue | 표준 UC (액터가 직접 수행) | UC-A01, A02, A04, A05, A06, A10, A11, A20 |
+| 🟢 strong green | «authoritative» (최종 권한) | UC-A15 |
+| ⬜ gray dashed | «non-authoritative» (참고값/hint) | UC-A13, A14, A19 |
+| 🟡 yellow | «recovery» (재시도, 결과 변경 없음) | UC-A17 |
+| 🟪 lilac | «audit» (감사 재현, 결과 변경 없음) | UC-A18 |
+| 🟨 cream | «extend» / «variant» / «shared input rule» (semantic modifier) | UC-A03, A08, A09, A16 |
+| 🟥 red boundary | «invariant» — settlement input freeze | FREEZE block |
+
+### Edge / Stereotype 기호
+
+| 기호 | 의미 |
+|---|---|
+| `───` 실선 | 액터가 직접 수행/책임 보유 (strong association) |
+| `┄┄ "context"` 점선 + 라벨 | 약한 컨텍스트 관계 (host approval/recruitment, participant 결과 수신 등) |
+| `==>` 굵은 실선 | lifecycle 진행 (freeze 경계 통과 포함) |
+| `-. phase .->` 점선 | phase 진행 (실행 순서 시사, 권한 아님) |
+| «extend» | 기본 UC의 특수/edge 동작 (UC-A03, A08) |
+| «variant» | 기본 결과의 분기 (UC-A16 all-fail = 원금 환급) |
+| «shared input rule» | projection·settlement 동일 적용 rule (UC-A09) |
+| «append-only» | history 누적, 덮어쓰기 금지 (③ MOD) |
+| «authoritative» / «non-authoritative» | 권한 layer 명시 |
+| «resume, no recalc» / «audit, no mutation» | retry/replay invariant |
+| «invariant» | settlement input freeze boundary (FREEZE block) |
+
+### Phase 진행
+
+```
+[Pre-Freeze · moderation mutable]
+   ① 모집·시작 → ② 인증 → ③ 방장 검토 (append-only)
+                                  ↓
+                       ⛔ Settlement Input Freeze
+                                  ↓
+[Post-Freeze · settlement authoritative]
+   ④ 예상 (non-auth) → ⑤ 최종 정산 (auth)
+                       ⑥ 복구 (no recalc) · ⑦ 감사 (no mutation)
+
+[모든 phase 외곽] ⑧ 안내 (non-auth)
+[cross-cutting]   UC-A09 cadence cap = ④ · ⑤ 동일 적용
+```
+
+## 4. 권한 경계 cheat sheet
+
+| 오해 | 사실 | 근거 |
+|---|---|---|
+| 방장이 환급 결정 | ❌ 방장은 인증 입력 검토만. 돈은 System | Usecase-dondok §1.5, §2.6 / PRD §7.2 |
+| 사진 업로드 = 인증 성공 | ❌ MissionLog 생성·서버 검증까지 필요 | UC-A06, PF-009 |
+| 예상 환급금 = 받을 돈 | ❌ 참고값. 최종은 settlement snapshot + point_history | UC-A13/14/15, §2.3 |
+| 재시도 = 다시 계산 | ❌ 재시도는 끊긴 정산 작업 이어 처리. 금액 불변 | UC-A17, §2.5, PF-013 |
+| 리플레이 = 결과 수정 | ❌ 당시 기준 재현(감사용). 결과 불변 | UC-A18, §2.5 |
+| 알림 = 최종 상태 | ❌ 알림은 hint. 진짜 상태는 canonical API 응답 | UC-A19, §2.8 |
+| 전원 실패 = 0원 환급 | ❌ 원금 환급. 누군가의 실패가 다른 수익으로 가지 않음 | UC-A16, §1.5, PF-017 |
+| Frozen projection = 최종 | ❌ 마감 기준 예상. settlement와 다를 수 있음 | UC-A14, PF-002 |
+| 방장 승인 = 가입 권한 | ❌ host approval = contextual. 가입/예치 = Participant + System | UC-A02 actor list, §2.6 |
+| Correction = 결과 덮어쓰기 | ❌ post-final 별도 보정 흐름. hidden mutation 금지 | UC-A12, §1.5, §2.4 |
+
+## 5. 정합성 체크리스트
+
+다이어그램 수정 시 canonical semantic이 깨지지 않았는지 확인:
+
+**Authority boundary**
+- [ ] Host 실선이 UC-A15(Final Settlement), UC-A16, UC-A17, UC-A18에 없음
+- [ ] Host → UC-A02는 점선 `approval context` 약화 유지 (실선 금지)
+- [ ] Host → UC-A04는 점선 `recruitment context` 약화 유지 (실선 금지)
+- [ ] System 실선은 lifecycle/settlement/notification dispatch UC에만 (UC-A04, A05, A13, A14, A15, A19)
+- [ ] Admin 실선은 UC-A17(retry), UC-A18(replay), UC-A20(지원)에만
+- [ ] Participant → UC-A15는 점선 `결과 수신` 유지 (실선 금지)
+
+**Boundary · invariant 시각화**
+- [ ] FREEZE block이 PRE/POST band 사이 굵은 빨간 separator로 존재
+- [ ] PRE wrapper 라벨 `Pre-Freeze · moderation mutable` 유지
+- [ ] POST wrapper 라벨 `Post-Freeze · settlement authoritative` 유지
+- [ ] ③ MOD subgraph 라벨에 «append-only» 유지
+- [ ] ④ PROJ subgraph 라벨에 «non-authoritative» 유지
+- [ ] ⑤ SETL subgraph 라벨에 «authoritative» 유지
+
+**Semantic modifier**
+- [ ] UC-A09는 floating «shared input rule», ④↔⑤ 직접 화살표 없음 (causal read 차단)
+- [ ] UC-A03, UC-A08, UC-A09, UC-A16 모두 `ext` classDef 단일 적용 (스타일 통일)
+- [ ] UC-A16 라벨이 `원금 환급` 유지 (0원/몰수 wording 금지)
+- [ ] UC-A08 라벨에 `signal only` 유지
+
+**Retry · Replay · Correction 분리**
+- [ ] UC-A17 라벨에 «resume, no recalc» 유지
+- [ ] UC-A18 라벨에 «audit, no mutation» 유지
+- [ ] UC-A17 → UC-A18 직접 화살표 없음 (sequential interpretation 차단)
+- [ ] ⑥ Recovery / ⑦ Audit lane 분리 유지
+- [ ] Legend에 retry/replay/correction invariant 4줄 모두 유지
+
+**Authoritative source 명시**
+- [ ] UC-A15 라벨에 `settlement snapshot → point_history ledger` 유지
+
+**제거되어야 할 노드 (재도입 금지)**
+- [ ] UC-A07 단독 노드 없음 (UC-A06 라벨에 흡수됨)
+- [ ] UC-A12 단독 노드 없음 (FREEZE invariant block으로 승격됨)
+
+## 6. 참조
+
+- [`docs/Usecase-dondok.md`](./Usecase-dondok.md) — canonical behavioral semantics (4장 Usecase Inventory, 5장 Pressure-Test Findings, 7장 Unresolved Semantic Registry)
+- [`docs/PRD-dondok.md`](./PRD-dondok.md) — canonical synthesis layer
+- [`docs/Settlement-design.md`](./Settlement-design.md) — settlement 권한/리플레이/재시도 상세
+- [`docs/ERD-dondok.md`](./ERD-dondok.md) — append-only history 데이터 모델
+- [`docs/API-spec-dondok.md`](./API-spec-dondok.md) — 외부 계약/wording
