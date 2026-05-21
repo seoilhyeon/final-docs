@@ -16,7 +16,7 @@
 - 비즈니스 시간대는 `Asia/Seoul`이고, API 시각 값은 timezone offset이 포함된 `ISO-8601` 문자열로 주고받는다.
 - 금액은 모두 `integer` 원 단위다.
 - 보증금은 별도 자산 이동이 아니라 `lock` 모델이다.
-- `Settlement.status = SUCCEEDED` 전 정산 계산 입력은 `MissionLog`와 참여자 상태 재계산 결과다.
+- `Settlement.status = SUCCEEDED` 전 정산 계산 입력은 `MissionLog`, frozen `JOINED` participant baseline, resolved certification state 재계산 결과다.
 - `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item` 계산 스냅샷과 연결된 `point_history` 원장이다. 이후 `MissionLog` 재계산은 감사/디버깅용 검증에만 사용한다.
 - `point_history`는 포인트 금액의 source of truth이고, `point_account.balance`는 재계산 가능한 현재값 캐시다.
 - `Settlement.status = SUCCEEDED`는 모든 `settlement_item.point_history_id` 연결과 대응 `point_history` 존재 검증까지 완료된 경우에만 가능하다.
@@ -81,7 +81,7 @@
 
 ### 2.7 상태값 원칙
 
-- `MissionRoom.status`는 방 상태다. MVP에서 `RECRUITING -> ACTIVE`는 host `StartRoom` command 성공으로만 발생한다.
+- `MissionRoom.status`는 방 상태다. MVP에서 `RECRUITING -> ACTIVE`는 host command가 아니라 시스템 lifecycle 규칙으로 발생하며, `activated_at = start_at`이다.
 - `Participant.status`는 참여 상태다.
 - `Settlement.status`는 정산 처리 상태의 원천이다.
 - `NONE`은 `Settlement` row가 아직 없는 상태를 보여주기 위한 API 응답용 값이다. DB `settlement.status`에는 저장하지 않는다.
@@ -92,10 +92,10 @@
 
 ### 3.1 RoomStatus
 
-- `RECRUITING`: 모집 중. `recruitment_deadline` 전에는 신규 참여 가능, 이후에는 신규 참여 불가.
-- `ACTIVE`: host `StartRoom` command가 성공해 `activated_at`이 기록된 진행 중 상태.
+- `RECRUITING`: 모집 중. `recruitment_deadline` 전에는 신청/승인/예치 Lock 흐름이 가능하고, 이후에는 신규 참여 불가.
+- `ACTIVE`: 시스템 lifecycle 규칙이 `start_at`에 frozen eligibility를 만족한다고 판단해 `activated_at = start_at`을 기록한 진행 중 상태.
 - `CLOSED`: 계획된 `end_at` 이후 정상 종료 상태.
-- `CANCELLED`: 시작 전 취소 상태. `start_at`까지 미시작이면 batch가 취소형 정산 대상으로 전이할 수 있다.
+- `CANCELLED`: 시작 전 취소 상태. `start_at` 자동 activation eligibility를 만족하지 못하면 batch가 취소형 정산 대상으로 전이할 수 있다.
 
 ### 3.2 RoomVisibility
 
@@ -104,14 +104,16 @@
 
 ### 3.3 ParticipantStatus
 
-- `JOINED`
-- `WITHDRAWN`
+- `APPLIED`: 신청 상태. capacity, activation eligibility, frozen participant baseline에 포함하지 않는다.
+- `APPROVED_LOCK_PENDING`: 승인 후 예치 Lock 완료 전 상태. capacity reservation만 의미하며 activation/minimum/frozen baseline에는 포함하지 않는다.
+- `JOINED`: 승인과 예치 Lock이 모두 완료된 상태. activation eligibility, minimum baseline, frozen participant baseline, settlement eligibility의 participant anchor다.
+- `WITHDRAWN`: brownfield/deferred 상태. ACTIVE withdrawal/재참여 semantics는 MVP active contract가 아니다.
 
 ### 3.4 FrequencyType
 
 - `DAILY`
 - `SPECIFIC_DAYS`
-- `WEEKLY_N`
+- `WEEKLY_N` (Phase 2 / deferred; MVP active cadence 아님)
 
 ### 3.5 SettlementType
 
@@ -136,11 +138,11 @@
 
 ### 3.8 MissionLogFailureReason
 
-- `EXIF_MISSING`
-- `EXIF_TIME_INVALID`
+- `EXIF_MISSING` (risk/review signal only; automatic final failure 아님)
+- `EXIF_TIME_INVALID` (risk/review signal only; automatic final failure 아님)
 - `BEFORE_START`
 - `AFTER_END`
-- `AFTER_WITHDRAWN`
+- `AFTER_WITHDRAWN` (brownfield/deferred; MVP ACTIVE withdrawal 정산 규칙으로 사용하지 않음)
 
 ### 3.9 SettlementFailureCode
 
@@ -220,8 +222,8 @@
 | 크루/참여   | `GET`    | `/api/rooms/{roomId}`                           | 방 상세 조회                             |
 | 크루/참여   | `GET`    | `/api/rooms/join-code/{joinCode}`               | 참여 코드로 방 조회                      |
 | 크루/참여   | `POST`   | `/api/rooms/{roomId}/participants`              | 방 참여 및 보증금 lock                   |
-| 크루/참여   | `POST`   | `/api/rooms/{roomId}/withdraw`                  | 방 탈퇴                                  |
-| 크루/참여   | `POST`   | `/api/rooms/{roomId}/start`                     | host 수동 미션 시작                      |
+| 크루/참여   | `POST`   | `/api/rooms/{roomId}/withdraw`                  | Brownfield/deferred withdrawal           |
+| 크루/참여   | `POST`   | `/api/rooms/{roomId}/start`                     | Brownfield/removed manual start          |
 | 미션 인증   | `POST`   | `/api/mission-logs`                             | 인증 제출                                |
 | 미션 인증   | `GET`    | `/api/rooms/{roomId}/mission-logs/me`           | 내 인증 기록 조회                        |
 | 피드/리액션 | `GET`    | `/api/rooms/{roomId}/feed`                      | 방 인증 피드와 파생 일자 상태 조회       |
@@ -500,8 +502,8 @@ Request:
 | `deposit_amount`        | `integer`  | Y    | 기본 보증금                                             |
 | `min_participants`      | `integer`  | N    | 기본값 `2`                                              |
 | `max_participants`      | `integer`  | Y    | 최대 인원                                               |
-| `frequency_type`        | `string`   | Y    | `DAILY` / `SPECIFIC_DAYS` / `WEEKLY_N`                  |
-| `frequency_count`       | `integer`  | N    | `WEEKLY_N`일 때 필수                                    |
+| `frequency_type`        | `string`   | Y    | MVP: `DAILY` / `SPECIFIC_DAYS`; `WEEKLY_N`은 Phase 2/deferred |
+| `frequency_count`       | `integer`  | N    | Phase 2 `WEEKLY_N` reference 전용                       |
 | `mission_schedule_days` | `string[]` | N    | `SPECIFIC_DAYS`일 때 필수. 예: `["MONDAY","WEDNESDAY"]` |
 | `recruitment_deadline`  | `string`   | Y    | ISO-8601. 신규 참여 마감 시각                           |
 | `start_date`            | `string`   | Y    | `YYYY-MM-DD`. 예정 시작일                               |
@@ -538,11 +540,11 @@ Error:
 
 정책:
 
-- `deposit_amount`는 `1,000원 ~ 1,000,000원`, `1,000원 단위`를 만족해야 한다.
-- `min_participants`는 기본값 `2`고, `2 <= min_participants <= max_participants <= 10`을 만족해야 한다.
+- `deposit_amount`는 PRD synthesis 기준 `1,000원 ~ 100,000원`, `1,000원 단위`를 만족해야 한다.
+- `min_participants`는 기본값 `2`고, `2 <= min_participants <= max_participants <= 15`를 만족해야 한다.
 - `SPECIFIC_DAYS`는 특정 날짜가 아니라 반복 요일 규칙이며 `mission_schedule_day` 원본으로 저장한다.
 - `recruitment_deadline`은 신규 참여 마감 시각이며 activation/settlement 기준이 아니다.
-- `start_date`, `end_date`는 서버에서 `Asia/Seoul` 기준 `start_at`, `end_at`으로 정규화한다. `start_at`은 예정 시작 및 MVP 수동 시작 가능 만료 시각이고, 실제 ACTIVE 전이 시각은 `activated_at`이다.
+- `start_date`, `end_date`는 서버에서 `Asia/Seoul` 기준 `start_at`, `end_at`으로 정규화한다. `start_at`은 시스템 자동 activation anchor이며 MVP에서 `activated_at = start_at`이다.
 - `end_at`은 계획된 미션 종료 cutoff이며 activation 지연으로 자동 이동하지 않는다.
 
 ### `GET /api/rooms/{roomId}`
@@ -570,7 +572,7 @@ Response `200 OK`:
   "mission_schedule_days": [],
   "recruitment_deadline": "2026-05-09T23:59:59+09:00",
   "start_at": "2026-05-10T00:00:00+09:00",
-  "activated_at": "2026-05-09T23:30:00+09:00",
+  "activated_at": "2026-05-10T00:00:00+09:00",
   "end_at": "2026-05-31T23:59:59+09:00",
   "my_participation": {
     "participant_id": 101,
@@ -660,78 +662,48 @@ Error:
 - 신규 참여는 `RECRUITING` 상태이면서 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
 - `recruitment_deadline` 이후에는 `ROOM_RECRUITMENT_CLOSED` 또는 `ROOM_NOT_RECRUITING` 계열 오류로 거절한다.
 - 같은 `member`는 같은 방에 하나의 `participant`만 가질 수 있다.
-- 참여 처리에서는 아래 세 단계가 하나의 트랜잭션으로 함께 성공하거나 함께 롤백되어야 한다.
+- 참여 lifecycle은 `APPLIED -> APPROVED_LOCK_PENDING -> JOINED`로 진행한다.
+- `APPROVED_LOCK_PENDING`은 capacity reservation만 의미하며, 아래 예치 Lock 트랜잭션이 성공해야 `JOINED`가 된다.
+- `JOINED` 전이에서는 아래 세 단계가 하나의 트랜잭션으로 함께 성공하거나 함께 롤백되어야 한다.
   - `point_account.balance` 조건부 차감
-  - `room_participant` 생성
+  - `room_participant`의 JOINED 확정
   - `ROOM_DEPOSIT_LOCK point_history` 생성
 - 잔액 차감은 반드시 `WHERE balance >= deposit_amount` 조건부 update로 수행하고, row count가 `1`일 때만 성공으로 간주한다.
 - `INSUFFICIENT_BALANCE`는 잔액 부족뿐 아니라 동시 요청으로 조건부 update row count가 `0`이 된 경우도 포함한다.
 
-### `POST /api/rooms/{roomId}/start`
+### `POST /api/rooms/{roomId}/start` (Brownfield / removed from MVP active contract)
 
 역할:
 
-- host가 모집 중인 방을 수동으로 시작한다.
-- MVP에서 이 command의 성공 transaction만 `RECRUITING -> ACTIVE` 전이를 만들 수 있다.
+- 이 endpoint는 과거 host manual start 설계의 brownfield 흔적이며, MVP active API contract로 제공하지 않는다.
+- MVP에서 `RECRUITING -> ACTIVE` 전이는 host/admin command가 아니라 시스템 lifecycle 규칙이 `start_at`에 수행한다.
 
-Request:
+Canonical replacement:
 
-- body 없음
-
-Response `200 OK` 또는 `204 No Content`:
-
-```json
-{
-  "room_id": 42,
-  "status": "ACTIVE",
-  "min_participants": 2,
-  "current_participant_count": 5,
-  "start_at": "2026-05-10T00:00:00+09:00",
-  "activated_at": "2026-05-09T23:30:00+09:00"
-}
-```
-
-Error:
-
-- `ROOM_NOT_FOUND`
-- `ROOM_START_FORBIDDEN`
-- `ROOM_NOT_RECRUITING`
-- `MIN_PARTICIPANTS_NOT_MET`
-- `ROOM_START_EXPIRED`
-- `CONFLICT`
+- `start_at`에 시스템은 frozen eligibility를 평가한다.
+- activation eligibility는 `recruitment_deadline` 경과, `JOINED` participant 수 `min_participants` 이상, 승인+예치 Lock 완료, host의 시작 전 해체 없음으로 판단한다.
+- `APPROVED_LOCK_PENDING`은 capacity reservation만 의미하며 activation/minimum/frozen baseline에는 포함하지 않는다.
+- 조건을 만족하면 `status = ACTIVE`, `activated_at = start_at`이 된다.
+- 조건을 만족하지 못하면 방은 시작 전 취소 정산 대상이 된다.
+- scheduler 실제 실행 시각은 운영 구현 상세이며 product authority는 `start_at`이다.
 
 정책:
 
-- caller는 해당 방의 host여야 한다.
-- room은 `RECRUITING`이어야 한다. 단 이미 `ACTIVE`인 방에 대한 중복 요청은 idempotent success/no-op으로 처리한다.
-- 서버 시간이 `start_at`을 넘으면 `ROOM_START_EXPIRED` 또는 이미 batch가 취소한 경우 terminal-state conflict로 응답한다.
-- command 실행 시점에 eligible participant 수가 `min_participants` 이상인지 재검증한다.
-- 성공 transaction은 `status = ACTIVE`, `activated_at = server_now`를 함께 기록한다. 이 정책상 성공한 activation은 `activated_at <= start_at`을 만족하며, 이는 별도 DB constraint가 아니라 StartRoom 만료 검증과 시작 만료 취소 batch에서 파생되는 MVP invariant다.
-- 동시에 여러 start 요청이 오면 하나의 조건부 전이만 성공한다. loser는 최종 room 상태를 재조회해 deterministic response를 반환한다.
-- `CANCELLED`/`CLOSED` 같은 terminal 상태에는 `CONFLICT` 또는 `ROOM_NOT_RECRUITING` 계열 오류로 응답한다.
-- `activated_at` 이후 post-activation 인증, 정산, projection/log eligibility는 `room.start_at`이 아니라 `room.activated_at`을 기준으로 한다.
+- Host는 activation authority가 아니다.
+- Admin도 manual ACTIVE transition authority가 아니다.
+- 기존 클라이언트/구현 흔적이 이 endpoint를 참조하더라도, downstream propagation에서는 drift candidate로 취급하고 신규 ERD/API/QA authority로 확장하지 않는다.
 
-### `POST /api/rooms/{roomId}/withdraw`
+### `POST /api/rooms/{roomId}/withdraw` (Brownfield / deferred)
 
 역할:
 
-- 내 참여 상태를 `WITHDRAWN`으로 전환한다.
+- ACTIVE withdrawal/재참여 semantics는 MVP active contract가 아니라 brownfield/deferred 영역이다.
+- frozen participant baseline은 `start_at` 자동 activation 시점의 `JOINED` 집합이며, withdrawal wording이 이 baseline을 소급 변경하는 권한으로 해석되면 안 된다.
 
-Request:
+Request/Response:
 
-- body 없음
-
-Response `200 OK`:
-
-```json
-{
-  "participant_id": 101,
-  "room_id": 42,
-  "status": "WITHDRAWN",
-  "withdrawn_at": "2026-05-20T10:00:00+09:00",
-  "deposit_locked_amount": 100000
-}
-```
+- MVP active contract에서는 제공하지 않는다.
+- 기존 brownfield response shape가 남아 있더라도 frozen baseline, final settlement, point ledger 변경 권한으로 해석하지 않는다.
 
 Error:
 
@@ -741,12 +713,10 @@ Error:
 
 정책:
 
-- 탈퇴는 `RECRUITING`, `ACTIVE` 상태 모두에서 허용한다.
-- `RECRUITING` 상태 탈퇴는 참여 취소로 간주하지만, `participant.status`는 `WITHDRAWN`으로 유지한다.
-- `ACTIVE` 상태 탈퇴는 중도 탈퇴로 간주하고, 정산에서는 `withdrawn_at` 이전 성공만 인정한다.
-- 중도 탈퇴자와 모집 중 탈퇴자 모두 즉시 환급되지 않는다. 보증금은 최종 정산 또는 방 취소 시 환급된다.
-- 탈퇴 후 인증은 차단되고, 정산에서는 `withdrawn_at` 이전 성공만 인정한다.
-- MVP에서는 탈퇴 후 동일 방 재참여를 지원하지 않는다.
+- 이 endpoint는 MVP active semantics로 고정하지 않는다.
+- `RECRUITING` 중 신청 취소/승인 취소는 별도 lifecycle 정렬 대상이며, `JOINED` frozen baseline과 구분한다.
+- `ACTIVE` 이후 withdrawal은 deferred이며, 정산에서는 frozen `JOINED` baseline과 resolved certification state를 소급 변경하지 않는다는 원칙을 우선한다.
+- 향후 withdrawal을 재도입하더라도 즉시 환급, final settlement mutation, point ledger 직접 변경으로 해석하면 안 된다.
 - 구현 가이드: MVP 공개 계약은 `WITHDRAW_NOT_ALLOWED` 단일 코드를 사용한다.
 - 구현 단계에서는 필요 시 `WITHDRAW_ALREADY_DONE`, `WITHDRAW_FORBIDDEN`, `WITHDRAW_NOT_ALLOWED`로 세분화할 수 있다.
 - 세분화하더라도 API 응답 구조와 상위 코드 체계는 유지해야 한다.
@@ -855,7 +825,7 @@ Error:
 - `PARTICIPANT_NOT_FOUND`
 - `PARTICIPANT_WITHDRAWN`
 
-`PARTICIPANT_WITHDRAWN`는 참여 상태 기반 비즈니스 에러 코드이며, `AFTER_WITHDRAWN`은 MissionLog 검증 실패 사유(enum)다.
+`PARTICIPANT_WITHDRAWN`와 `AFTER_WITHDRAWN`은 brownfield/deferred withdrawal 상태를 방어적으로 표현하는 코드다. MVP active settlement에서 frozen `JOINED` baseline을 변경하는 근거가 아니다.
 
 정책:
 
@@ -866,27 +836,26 @@ Error:
 - 서버는 `image_s3_key`가 현재 사용자/participant/room 범위에 속하는지 검증한다.
 - 서버는 S3 object를 직접 조회해 존재 여부, size, content-type, ownership, EXIF를 검증한다.
 - 클라이언트는 `exif_taken_at`을 authoritative source로 제출하지 않는다.
-- 서버는 S3 object에서 EXIF를 추출하고 검증한다.
-- `MissionLog.exif_taken_at`은 서버 검증 결과 저장값이다.
-- EXIF가 없으면 `EXIF_MISSING`으로 실패 처리한다.
-- EXIF가 유효하지 않으면 `EXIF_TIME_INVALID`로 실패 처리한다.
-- 정산 인정 판단은 `server_time` 기준으로 수행한다.
+- 서버는 S3 object에서 EXIF/hash 등 risk signal을 추출하고 가능한 범위에서 검증한다.
+- `MissionLog.exif_taken_at`은 서버가 추출한 보조 metadata 저장값이며 authoritative timing source가 아니다.
+- EXIF 부재나 이상은 단독 automatic failure가 아니라 fraud/risk signal이다. 필요한 경우 moderation/review flow로 라우팅한다.
+- 정산 인정 판단의 timing anchor는 `server_time` 기준으로 수행한다.
 - `server_time`은 서버가 인증 요청을 수신한 시각이다.
-- `is_success`는 인증 요청이 유효성 검증을 통과했는지를 나타낸다.
-- 아래 조건을 통과하면 `is_success = true`로 기록한다.
-  - `EXIF` 존재 여부
-  - `EXIF` 시간 유효성
-  - 미션 기간 내 요청 여부
-  - 탈퇴 이후 요청 여부
+- `is_success`는 인증 요청이 현재 validation/moderation state에서 성공으로 기록됐는지를 나타내지만, 최종 정산 인정 여부를 보장하지 않는다.
+- 아래 조건을 검토해 `is_success`를 기록한다.
+  - 업로드 object의 소유/범위/기본 무결성
+  - EXIF/hash risk signal과 review 필요 여부
+  - 미션 기간 내 요청 여부(`server_time` 기준)
+  - frozen baseline / participant 상태 적합성
 - `is_success = true`는 인증 성공을 뜻하지만, 최종 정산에서 인정된다는 의미는 아니다.
 - `is_success = false`여도 원본 로그는 저장할 수 있다.
 - `mission_log.failure_reason`은 인증 시점 실패 사유다.
 - `settlement_item.calculation_reason`은 정산 시점 포함/제외 근거다.
 - MVP 인증 API에서 `OUT_OF_SCHEDULE`는 사용하지 않는다.
 - 최종 정산에서의 인정 여부는 `is_success`가 아니라 `Settlement` 계산 단계에서 결정된다.
-- `SPECIFIC_DAYS`, `DAILY` 중복, `WEEKLY_N` 초과처럼 인증은 성공했지만 정산에서 제외되는 경우는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`으로만 표현한다.
-- 따라서 인증 시점 성공 로그도 최종 정산에서 제외될 수 있다. 예: `DAILY` 중복, `WEEKLY_N` 상한, `SPECIFIC_DAYS` 비유효 요일.
-- 실시간 대시보드는 추정값이고, `SUCCEEDED` 전 정산 계산값은 `MissionLog` 재계산 결과로 확정한다.
+- `SPECIFIC_DAYS`, `DAILY` 중복처럼 인증은 성공했지만 정산에서 제외되는 경우는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`으로만 표현한다. `WEEKLY_N` 초과는 Phase 2/deferred reference다.
+- 따라서 인증 시점 성공 로그도 최종 정산에서 제외될 수 있다. 예: `DAILY` 중복, `SPECIFIC_DAYS` 비유효 요일, host moderation override 결과 resolved certification state가 미인정인 경우.
+- 실시간 대시보드는 추정값이고, `SUCCEEDED` 전 정산 계산값은 `MissionLog`, frozen `JOINED` participant baseline, resolved certification state 기준으로 확정한다.
 
 ### `GET /api/rooms/{roomId}/mission-logs/me`
 
@@ -934,7 +903,7 @@ Error:
 - `day_statuses[]`와 `participant_day_slots[]`는 참여자/일자 표시용 파생 상태다. 값은 `SUCCESS`, `FAILED`, `NOT_SUBMITTED`만 사용한다.
 - 파생 상태는 DB 상태가 아니고 피드 게시물이 아니며 정산 입력도 아니다.
 - feed eligibility는 정산 인정, 환급, 포인트 적립, AI 리포트 입력, `Settlement.status` 또는 방/참여 생명주기 전이를 의미하지 않는다.
-- Canonical rule: Feed success does NOT guarantee settlement inclusion. `feed_items[].is_success = true`는 UX/social layer 표시 기준이며, 정산 포함 여부는 정산 시점 재계산 결과와 `settlement_item.calculation_reason`이 결정한다.
+- Canonical rule: Feed success does NOT guarantee settlement inclusion. `feed_items[].is_success = true`는 UX/social layer 표시 기준이며, 정산 포함 여부는 `MissionLog`, frozen `JOINED` baseline, resolved certification state 기준의 settlement calculation과 `settlement_item.calculation_reason`이 결정한다.
 - 정산 인정 여부와 최종 성공 횟수는 정산 API와 `settlement_item.calculation_reason`을 기준으로 판단한다.
 
 ### `GET /api/rooms/{roomId}/feed`
@@ -1195,7 +1164,7 @@ Error:
 | Source | Dashboard에서의 역할 |
 | --- | --- |
 | `mission_log` | 성공 후보와 수행 현황의 primary event source다. `mission_log.is_success = true` 로그만 후보로 사용하고, 인정 판단 시간은 `MissionLog.server_time` 기준이다. |
-| `room_participant` | 참여자 식별, 참여 상태, `deposit_amount`, `withdrawn_at`, 보증금 금액 source다. |
+| `room_participant` | 참여자 식별, frozen `JOINED` baseline, `deposit_amount` 보증금 금액 source다. `withdrawn_at`은 brownfield/deferred reference다. |
 | `mission_room` | 방 상태, 기간, 미션 주기/규칙 컨텍스트다. 총 보증금 source가 아니다. |
 | `settlement` | `SUCCEEDED` 여부와 최종값 전환 판단용이다. `SUCCEEDED` 전 Dashboard projection 계산 source가 아니다. |
 | `point_history` | 포인트 원장 source of truth다. Dashboard projection 계산 source가 아니다. 최종 환급/잔액 반영은 `Settlement.status = SUCCEEDED` 이후 Settlement API와 `point_history` 기준으로 확인한다. |
@@ -1210,21 +1179,21 @@ Error:
 - projection 후보 로그는 `mission_log.is_success = true`이고, `room.activated_at <= MissionLog.server_time <= projection_cutoff_at`을 만족해야 한다. `activated_at`이 `null`이면 post-activation projection을 계산하지 않는다.
   - `LIVE`에서는 `projection_cutoff_at = min(응답 생성 시각, room.end_at)`이다.
   - `FROZEN`에서는 `projection_cutoff_at = room.end_at`이다.
-  - `room_participant.withdrawn_at`이 있으면 `MissionLog.server_time < withdrawn_at`인 success 로그만 후보로 사용한다.
+  - `withdrawn_at` cutoff는 brownfield/deferred reference이며 MVP Dashboard active projection에서 frozen `JOINED` baseline을 소급 변경하지 않는다.
 - 대표 success 선택은 모든 frequency projection에서 동일하게 `MissionLog.server_time ASC`, 동률이면 `MissionLog.id ASC` 순서를 사용한다.
 - `DAILY`는 같은 KST date의 첫 success만 인정하고 나머지 success는 duplicate로 제외한다.
 - `SPECIFIC_DAYS`는 `mission_schedule_day`에 포함된 KST weekday의 success만 후보로 삼고, valid KST date별 첫 success만 인정한다.
-- `WEEKLY_N`은 calendar week가 아니라 실제 activation anchor인 `room.activated_at`의 KST date를 기준으로 7일 bucket을 만들고, bucket별 정렬 상위 `frequency_count`개만 인정한다.
-  - 예: `week_index = floor(days_between(kst_date(room.activated_at), kst_date(MissionLog.server_time)) / 7) + 1`
+- `WEEKLY_N`은 Phase 2/deferred cadence다. MVP Dashboard projection active contract에서는 계산하지 않는다.
+  - 향후 재도입 시에도 activation anchor는 `room.activated_at = start_at`이며 host/admin manual activation이 아니다.
 - `total_recognized_success_count_estimated`는 참여자별 추정 인정 성공 수 합계다.
 - `my_share_ratio_estimated`는 소수 정밀도 오해를 줄이기 위해 문자열 decimal로 반환한다.
 - `my_expected_refund_amount`는 deterministic base UX estimate다. `total_recognized_success_count_estimated > 0`이면 `FLOOR(total_locked_amount × my_share_ratio_estimated)`로 계산한다.
-- Dashboard는 정산의 `remainder`, `remainder_policy`, deterministic draw winner, 1원 단위 잔액 배분을 계산하거나 반영하지 않는다. 해당 최종 지급 차이는 `Settlement.status = SUCCEEDED` 이후 Settlement API에서만 확인한다.
+- Dashboard는 정산의 `remainder`, `remainder_policy`, deterministic host remainder, 1원 단위 잔액 처리를 계산하거나 반영하지 않는다. 해당 최종 지급 차이는 `Settlement.status = SUCCEEDED` 이후 Settlement API에서만 확인한다.
 - `my_expected_net_profit_amount = my_expected_refund_amount - my_deposit_amount`다.
 - `rank_estimated`는 예상 환급금/예상 손익/지분율/보증금 기준 순위가 아니라 추정 수행 순위다. 정렬 기준은 `recognized_success_count_estimated DESC`, 동률이면 `participant_id ASC`다.
 - `total_recognized_success_count_estimated = 0`인 `LIVE` / `FROZEN` projection은 0으로 나누지 않고 균등 환급 base estimate를 적용한다.
-- 균등 환급 추정 denominator는 현재 normal settlement projection에 포함되는 `room_participant.deposit_amount > 0` 참여자 전체다. `WITHDRAWN` 참여자도 정산 전 보증금이 남아 있으면 포함한다.
-- zero-total base estimate의 `my_expected_refund_amount`는 `FLOOR(total_locked_amount / participant_count)`이며, 이 경우에도 remainder/draw 1원 배분은 Dashboard에서 수행하지 않는다.
+- 균등 환급 추정 denominator는 현재 normal settlement projection에 포함되는 frozen `JOINED` participant baseline이다. `WITHDRAWN`/ACTIVE withdrawal은 brownfield-deferred semantics다.
+- zero-total base estimate의 `my_expected_refund_amount`는 `FLOOR(total_locked_amount / participant_count)`이며, 이 경우에도 deterministic host remainder는 Dashboard에서 수행하지 않는다.
 - denominator를 확정할 수 없으면 `my_share_ratio_estimated`, `my_expected_refund_amount`, `my_expected_net_profit_amount`, `rank_estimated`는 `null`이고 `projection_notice = INSUFFICIENT_PROJECTION_INPUT`이다.
 - `Settlement.status = SUCCEEDED` 이후 최종 인정 성공 횟수, 최종 환급금, 최종 지분율은 Dashboard projection보다 Settlement API가 우선하며, `settlement_item`과 연결된 `point_history`가 final source of truth다.
 - Dashboard projection과 최종 settlement 결과가 달라도 시스템 오류로 보지 않는다.
@@ -1242,7 +1211,7 @@ Error:
 
 - `GET /api/points`의 `locked_balance`는 계정 단위 현재 잠긴 보증금 UX projection이다.
 - Dashboard의 `my_expected_refund_amount`는 특정 room/participant 기준 예상 환급금 projection이다.
-- FE는 `locked_balance`, `available_balance`, `total_balance`, `my_expected_refund_amount`를 합산하거나 차감해서 최종 보유 포인트, 출금 가능 금액, 확정 환급금을 계산하면 안 된다.
+- FE는 `locked_balance`, `available_balance`, `total_balance`, `my_expected_refund_amount`를 합산하거나 차감해서 최종 보유 포인트, 출금 가능 금액, 최종 정산 후 확정되는 환급금을 계산하면 안 된다.
 - `total_balance = available_balance + locked_balance` 관계는 포인트 요약 화면 전용이다.
 - `CLOSED`지만 `Settlement.status != SUCCEEDED`인 방은 `locked_balance`에 아직 남을 수 있고, Dashboard는 frozen `my_expected_refund_amount`를 보여줄 수 있다.
 - 최종 환급 여부와 금액은 `Settlement.status = SUCCEEDED` 이후 Settlement API와 `point_history` 원장 기준이다.
@@ -1319,8 +1288,8 @@ Response `200 OK`:
   "total_recognized_success": 390,
   "total_base_refund_amount": 499996,
   "total_remainder_amount": 4,
-  "remainder_policy": "TOP_1_ALL",
-  "remainder_winner_participant_id": 101,
+  "remainder_policy": "HOST_REMAINDER",
+  "remainder_winner_participant_id": null,
   "failure_code": null,
   "failure_message": null,
   "started_at": "2026-06-01T00:05:10+09:00",
@@ -1368,8 +1337,8 @@ Error:
 - `SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item + point_history`이며, `MissionLog` 재계산은 감사/디버깅용 검증에만 사용한다.
 - `SUCCEEDED`는 모든 `settlement_item.point_history_id`가 채워지고 대응 `point_history` 존재가 검증된 상태를 뜻한다.
 - partial 상태에서는 일부 item의 `point_history_id`가 `null`일 수 있고, 이 경우 `status`는 `SUCCEEDED`가 아니라 `RETRY_WAIT` 또는 `FAILED`다.
-- 일반 정산에서 절사 후 남은 잔액은 기여도 1위 참여자에게 지급한다. 기여도 1위가 동점이면 성공 횟수를 비교하고, 그래도 같으면 재현 가능한 draw 규칙으로 1명을 결정한다.
-- 전체 인정 성공 `0`이면 균등 환급 후, 남은 잔액은 같은 재현 가능한 규칙으로 `1원씩` 배분한다.
+- 일반 정산에서 절사 후 남은 잔액은 deterministic host remainder rule로 host에게 귀속한다. 이는 host payout authority가 아니라 replayable floor-remainder 처리 규칙이다.
+- 전체 인정 성공 `0`이면 equal-principal refund를 적용하고, 남은 잔액도 deterministic host remainder rule로 처리한다.
 
 ### `GET /api/admin/settlements`
 
@@ -1439,10 +1408,14 @@ Error:
 - 이미 생성된 `point_history`는 deterministic `idempotency_key`로 중복 지급이 차단된다.
 - 동일 `idempotency_key`와 동일 payload의 중복은 기존 `point_history`를 재사용하거나 연결하고, 동일 키에 다른 payload가 확인되면 idempotency conflict로 실패 처리한다.
 - partial 상태에서는 미지급 participant만 이어서 처리하거나, 이미 원장이 있으나 FK만 누락된 경우 기존 `point_history`를 재사용해 연결만 보정한다.
+- admin retry는 admin correction이 아니다. Retry는 기존 `Settlement`/`settlement_item` 기준의 interrupted execution 복구이며, frozen certification outcome, succeeded settlement snapshot, authoritative daily/final result를 변경하지 않는다.
+- replay가 필요하더라도 replay는 historical reproducibility 검증용이며 payout mutation이나 recalculation endpoint가 아니다.
 
 ## 5.7 AI
 
-AI API는 첫 릴리스 필수 사용자 기능을 위한 최소 계약만 고정한다. AI 실패, 무응답, 유효하지 않은 응답은 비트랜잭션성 기능 실패이지 시스템 실패가 아니다. 따라서 수동 방 생성, 정산 결과 조회, 환급, 포인트 원장, `Settlement.status`를 차단하거나 변경하지 않는다.
+AI API는 trust-loop authority가 아니다. AI 실패, 무응답, 유효하지 않은 응답은 비트랜잭션성 기능 실패이지 시스템 실패가 아니다. 따라서 수동 방 생성, 정산 결과 조회, 환급, 포인트 원장, `Settlement.status`를 차단하거나 변경하지 않는다.
+
+AI habit report는 Phase 2/deferred 영역이다. MVP semantic propagation에서는 AI 리포트가 settlement/ledger/lifecycle authority가 아니라는 boundary만 유지한다.
 
 ### `POST /api/ai/mission-recommendations`
 
@@ -1458,8 +1431,8 @@ Request:
 | `seed_text`             | `string`        | Y    | 사용자의 목표/습관 설명                |
 | `title`                 | `string`        | N    | 사용자가 이미 입력한 방 제목           |
 | `description`           | `string`        | N    | 사용자가 이미 입력한 설명              |
-| `frequency_type`        | `string`        | N    | `DAILY` / `SPECIFIC_DAYS` / `WEEKLY_N` |
-| `frequency_count`       | `integer`       | N    | 주 N회 등 반복 횟수                    |
+| `frequency_type`        | `string`        | N    | MVP: `DAILY` / `SPECIFIC_DAYS`; `WEEKLY_N`은 Phase 2/deferred |
+| `frequency_count`       | `integer`       | N    | Phase 2 `WEEKLY_N` reference 전용      |
 | `mission_schedule_days` | `array<string>` | N    | 반복 요일 후보                         |
 | `deposit_amount`        | `integer`       | N    | 보증금 후보                            |
 | `duration_days`         | `integer`       | N    | 기간 후보                              |
@@ -1710,7 +1683,7 @@ WHERE rp.member_id = :memberId
 - `RECRUITING`은 참여 후 아직 시작 전이지만 보증금이 잠겨 있는 상태다.
 - `ACTIVE`는 미션 진행 중이므로 보증금이 잠겨 있는 상태다.
 - `CLOSED`는 정산 완료 전까지 보증금이 잠겨 있는 것으로 표시한다.
-- `WITHDRAWN` 참여자도 즉시 환급되지 않으므로 정산 완료 전이면 `locked_balance`에 포함한다.
+- `WITHDRAWN`/ACTIVE withdrawal은 brownfield-deferred다. MVP locked balance projection은 frozen `JOINED` baseline과 settlement status를 기준으로 해석한다.
 - `Settlement.status = SUCCEEDED` 이후에는 해당 방의 보증금 lock이 해제된 것으로 본다.
 - 다만 MVP projection은 settlement 조인을 강제하지 않고 `mission_room.status` 기반으로 시작한다. 따라서 `CLOSED` 포함은 정산 전 잠금 표시를 위한 근사값이며, 더 정확한 정산 상태 기반 제외 조건은 Settlement 조회/정산 구현 단계에서 보강할 수 있다.
 - `total_balance = available_balance + locked_balance`다.
@@ -1863,7 +1836,7 @@ Reconnect / delivery semantics:
 
 - SSE delivery는 best-effort realtime UX delivery다.
 - 서버 재시작, 네트워크 단절, 브라우저 재연결 중 이벤트가 누락될 수 있다.
-- missed event 복구는 replay가 아니라 기존 REST API 화면 재조회로 처리한다.
+- missed event 복구는 settlement replay가 아니라 기존 REST API 화면 재조회로 처리한다.
 - 이벤트 순서, durable delivery, cross-device unread state를 보장하지 않는다.
 - 같은 `eventId`가 다시 수신될 수 있으므로 클라이언트는 동일 세션에서 중복 이벤트를 idempotent하게 처리해야 한다.
 
@@ -1884,14 +1857,15 @@ Error / close policy:
 ### 6.1 Room
 
 ```text
-RECRUITING --host StartRoom success / activated_at set--> ACTIVE -> CLOSED
-RECRUITING --start_at expired cancellation batch--> CANCELLED
+RECRUITING --system activation at start_at / activated_at = start_at--> ACTIVE -> CLOSED
+RECRUITING --start_at eligibility failure cancellation batch--> CANCELLED
 ```
 
 ### 6.2 Participant
 
 ```text
-JOINED -> WITHDRAWN
+APPLIED -> APPROVED_LOCK_PENDING -> JOINED
+WITHDRAWN / ACTIVE withdrawal: brownfield-deferred, not MVP active baseline authority
 ```
 
 ### 6.3 Settlement
@@ -1915,7 +1889,7 @@ RUNNING
 - FE는 여러 방의 `my_participation.deposit_locked_amount`를 직접 합산해 계정 단위 잠금 잔액을 만들지 않고, `GET /api/points.locked_balance`를 표시한다.
 - `my_participation.deposit_locked_amount`는 방 상세의 해당 참여 보증금 표시용 필드이며, 계정 단위 `locked_balance`나 `total_balance`의 source of truth가 아니다.
 - `locked_balance`와 `total_balance`는 UX 표시용이며, 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단 기준으로 사용하면 안 된다.
-- 탈퇴 버튼은 `RECRUITING`, `ACTIVE`에서만 노출하고, 탈퇴 직후에도 보증금은 즉시 반환되지 않는다고 안내해야 한다.
+- 탈퇴 버튼/withdrawal UX는 MVP active contract가 아니라 brownfield-deferred로 취급한다. 노출하더라도 frozen baseline, final settlement, point ledger를 직접 변경한다고 안내하면 안 된다.
 - FE는 `is_success`를 인증 성공 여부로만 사용해야 하고, 최종 인정 여부 판단 기준으로 사용하면 안 된다.
 - 피드 화면에서 `feed_items[]`는 성공 인증 게시물이고, `day_statuses[]` / `participant_day_slots[]`는 `SUCCESS`, `FAILED`, `NOT_SUBMITTED` 표시용 projection이다. 둘을 정산 결과나 포인트 원장으로 해석하면 안 된다.
 - 리액션은 `mission_log_reaction` 기반 social metadata이며, `reaction_counts`는 파생값이다. FE는 리액션이 인증 성공 여부, 정산 인정, 환급, 포인트, AI 리포트 상태를 바꾼다고 표시하면 안 된다.
@@ -1932,7 +1906,7 @@ RUNNING
 - 포인트 내역 화면의 `next_cursor`는 UI가 직접 해석하지 말고 다음 요청에 그대로 전달해야 한다.
 - `Settlement.status = SUCCEEDED` 전에는 일부 `point_history_id`가 비어 있을 수 있으므로, 정산 상세의 item 금액과 포인트 내역 표시 시 상태를 함께 봐야 한다.
 - Dashboard 화면의 금액, 비율, 순위는 “예상”, “현재 기준”, “추정” 라벨로 표시하고 “확정”, “최종”, “정산 완료” 라벨은 Settlement API 결과에만 사용한다.
-- Dashboard의 `my_expected_refund_amount`와 `GET /api/points`의 `locked_balance`, `available_balance`, `total_balance`를 조합해 최종 보유 포인트, 출금 가능 금액, 확정 환급금을 계산하면 안 된다.
+- Dashboard의 `my_expected_refund_amount`와 `GET /api/points`의 `locked_balance`, `available_balance`, `total_balance`를 조합해 최종 보유 포인트, 출금 가능 금액, 최종 정산 후 확정되는 환급금을 계산하면 안 된다.
 - Dashboard의 `projection_status = SETTLEMENT_SUCCEEDED`이면 `settlement_id`로 `GET /api/settlements/{settlementId}`를 호출해 최종 인정 성공 수, 최종 지분율, 최종 환급금을 표시한다.
 - Dashboard projection과 최종 settlement 결과가 달라도 시스템 오류로 간주하지 않고, 차이 설명은 Settlement API의 `settlement_item.calculation_reason`을 기준으로 한다.
 
@@ -1944,16 +1918,16 @@ SSE realtime UX handling은 `GET /api/notifications/stream` 계약의 client rea
 ## 8. 구현 메모
 
 - 인증 시점에는 과도한 분산 락보다 `MissionLog append-only 저장 + 캐시 원자 연산 + 최종 재계산`을 우선한다.
-- `SUCCEEDED` 전 최종 정산 계산은 `MissionLog.server_time`과 room/participant 상태를 기준으로 수행한다.
+- `SUCCEEDED` 전 최종 정산 계산은 `MissionLog.server_time`, frozen `JOINED` participant baseline, resolved certification state를 기준으로 수행한다.
 - `exif_taken_at`은 서버가 S3 object에서 추출/검증한 이미지 조작 또는 촬영 시각 이상 여부 검증 보조 정보이며, 인정 횟수 계산 기준 시간으로 사용하지 않는다.
 - 정산 시점에는 DB 조건부 `Settlement(PENDING/RETRY_WAIT -> RUNNING)` claim을 1차 기준으로 사용하고, Redisson room lock은 보조 수단, DB unique 제약과 `point_history.idempotency_key`는 최종 방어선으로 사용한다.
 - `total_locked_amount`는 정산 시점의 `room_participant.deposit_amount` 합계 스냅샷이며, `point_account`나 `point_history`를 다시 합산하지 않는다.
-- 일반 정산 remainder는 `기여도 1위 -> 성공 횟수 비교 -> 재현 가능한 draw` 순서로 결정한다.
+- 일반 정산 remainder는 deterministic host remainder rule로 처리한다. 이는 host payout authority가 아니라 replayable floor-remainder 규칙이다.
 - 취소형 정산에서도 조회 구조는 동일하고 `settlement_type = CANCELLED_BEFORE_START`만 달라진다.
 - 포인트 원장 기록과 `point_account.balance` 갱신은 participant 지급 단위로 같은 트랜잭션에서 처리하되, 전체 정산은 partial 복구가 가능하도록 이미 생성된 원장을 idempotency key로 재사용한다.
 
 ## 9. 확정 메모
 
-- 탈퇴는 `RECRUITING`, `ACTIVE` 모두에서 허용하되, 즉시 환급은 없다.
+- Withdrawal/탈퇴 semantics는 brownfield/deferred다. MVP active contract에서는 frozen `JOINED` baseline, final settlement, point ledger를 직접 변경하지 않는다.
 - MVP 인증 API의 `mission_log.failure_reason`은 인증 시점 실패 사유만 표현하고, `OUT_OF_SCHEDULE`는 사용하지 않는다.
 - 관리자 정산 재시도는 `roomId`가 아니라 `settlementId` 기준으로 수행한다.
