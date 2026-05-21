@@ -811,6 +811,7 @@ Unique / Index:
 
 ```mermaid
 erDiagram
+    %% Structural mirror only; lifecycle/freeze/enum semantics are defined in the ERD text above.
     MEMBER {
         BIGINT id PK
         UUID uuid UK
