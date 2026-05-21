@@ -1,12 +1,12 @@
-# ADR: 갓세이빙 MVP 기술 아키텍처 — 복구 가능한 단순함
+# ADR: Dondok MVP 기술 아키텍처 — 복구 가능한 단순함
 
 - 상태: Accepted for MVP
 - 작성일: 2026-05-13
 - 기준 문서:
-  - `docs/PRD-god-saving.md`
-  - `docs/Tech-stack-god-saving.md`
+  - `docs/PRD-dondok.md`
+  - `docs/Tech-stack-dondok.md`
   - `docs/Settlement-design.md`
-  - `docs/ERD-god-saving.md`
+  - `docs/ERD-dondok.md`
   - `.omx/specs/deep-interview-tech-stack-validation.md`
 
 ## 1. 문서 목적
@@ -180,7 +180,7 @@ Redis 장애 시에도 금전성 정합성은 다음 MySQL 기준으로 보존�
 
 SSE notification은 MVP에서 낮은 복잡도로 server-to-client realtime UX signal을 제공하기 위해 선택한다. SSE 성공 여부는 인증, 정산, 포인트 원장, 결제 transaction의 성공 조건이 아니며, REST/DB state가 source of truth다.
 
-Durable broker, outbox, replay, notification inbox, unread sync는 MVP에서 제외한다. 현재 제품 요구는 영속 알림 상태가 아니라 중요한 상태 변화의 best-effort 인지이며, 누락 복구는 API 조회로 충분하다. SSE 외부 계약과 identity 사용 방식은 `API-spec-god-saving.md`가 소유한다.
+Durable broker, outbox, replay, notification inbox, unread sync는 MVP에서 제외한다. 현재 제품 요구는 영속 알림 상태가 아니라 중요한 상태 변화의 best-effort 인지이며, 누락 복구는 API 조회로 충분하다. SSE 외부 계약과 identity 사용 방식은 `API-spec-dondok.md`가 소유한다.
 
 ---
 
@@ -780,7 +780,7 @@ Direct DB mutation은 정상 복구 경로가 아니다. break-glass emergency�
 1. SSE 연결 실패, reconnect, 서버 재시작은 인증/정산/포인트 원장 transaction을 롤백하거나 차단하면 안 된다.
 2. SSE는 source-of-truth state가 아니라 best-effort UX signal이다.
 3. Durable broker, outbox, replay, notification inbox, unread sync는 MVP 필수 요구가 아니다.
-4. SSE 외부 계약, identity, payload, reconnect semantics는 `API-spec-god-saving.md`의 알림/SSE 계약을 따른다.
+4. SSE 외부 계약, identity, payload, reconnect semantics는 `API-spec-dondok.md`의 알림/SSE 계약을 따른다.
 
 ### Operator recovery
 

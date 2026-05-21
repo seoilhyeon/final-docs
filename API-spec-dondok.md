@@ -1,10 +1,10 @@
-# API 명세: 갓세이빙 MVP
+# API 명세: Dondok MVP
 
 기준 문서:
 
-- [PRD-god-saving.md](/Users/ilhyeon/Documents/projects/dondok/docs/PRD-god-saving.md)
+- [PRD-dondok.md](./PRD-dondok.md)
 - [Settlement-design.md](/Users/ilhyeon/Documents/projects/dondok/docs/Settlement-design.md)
-- [ERD-god-saving.md](/Users/ilhyeon/Documents/projects/dondok/docs/ERD-god-saving.md)
+- [ERD-dondok.md](./ERD-dondok.md)
 
 ## 1. 목적
 

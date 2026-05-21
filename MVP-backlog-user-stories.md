@@ -1,6 +1,6 @@
-# MVP 백로그 및 User Stories: 갓세이빙
+# MVP 백로그 및 User Stories: Dondok
 
-기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 ## 1. 정리 원칙
 
@@ -64,7 +64,7 @@
 
 **Priority:** P0  
 **Card:** 신규 사용자는 계정을 만들고 로그인해서 크루와 포인트 기능을 사용할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 전체 MVP의 진입점이다. 가입과 로그인 자체보다 중요한 것은 보호된 기능 접근 제어와 JWT 기반 세션 처리다. 인증 실패 메시지는 사용자가 이해할 수 있어야 하지만, 내부 정보를 과하게 노출하면 안 된다.
@@ -81,7 +81,7 @@
 
 **Priority:** P0  
 **Card:** 로그인 사용자는 서비스 안에서 표시될 닉네임과 프로필 이미지를 관리할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 Auth backlog(`B-01`)에 포함되는 사용자 identity 범위다. 프로필은 닉네임과 프로필 이미지만 다루며, 크루 참여자 표시, 인증 피드 작성자 표시, 마이페이지의 기본 사용자 표시 정보로 사용된다. 팔로우, 친구, 소셜 그래프, 공개 범위 설정, 인증 방식 변경은 포함하지 않는다.
@@ -98,7 +98,7 @@
 
 **Priority:** P0  
 **Card:** 크루 주최자는 미션 규칙과 보증금 조건을 입력해 공개 또는 비공개 크루를 만들 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 크루의 계약서를 만드는 역할을 한다. 기간은 `1주~3개월`, 인원은 `최대 10명`, 보증금은 `1,000원~100만원`이며 `1,000원 단위`만 허용한다. 주최자는 `min_participants`, `recruitment_deadline`, 예정 시작 시각인 `start_at`을 설정한다. 비공개 크루는 `6자리 참여 코드`가 필요하다. 주최자는 생성 직후 운영 권한을 가지며, 최소 인원 충족 후 `StartRoom`을 실행할 수 있다.
@@ -118,7 +118,7 @@
 
 **Priority:** P0  
 **Card:** 사용자는 공개 크루를 둘러보고 참여할 만한 크루인지 판단할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story의 목표는 공개 크루의 모집 퍼널을 여는 것이다. 사용자는 목록과 상세 화면에서 기간, 보증금, 현재 인원, 인증 방식 같은 핵심 규칙을 이해해야 한다. 비공개 크루는 이 목록에 노출되면 안 된다.
@@ -135,7 +135,7 @@
 
 **Priority:** P0  
 **Card:** 초대받은 사용자는 참여 코드를 입력해 비공개 크루 정보를 확인할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 공개 탐색과 분리된 비공개 유입 경로다. 사용자는 `6자리 참여 코드`로 크루에 접근한다. 코드가 맞아도 이미 가득 찼거나 모집이 종료된 크루라면 입장할 수 없어야 한다.
@@ -152,7 +152,7 @@
 
 **Priority:** P0  
 **Card:** 사용자는 포인트를 충전해 크루 보증금을 낼 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 토스페이먼츠 샌드박스 기반 충전 흐름을 다룬다. 충전 성공과 실패는 잔액과 이력에 정확히 반영되어야 한다. 포인트는 실제 현금 출금이 아니라 예치와 환급을 위한 내부 수단으로 취급한다.
@@ -169,7 +169,7 @@
 
 **Priority:** P0  
 **Card:** 사용자는 충분한 포인트가 있을 때만 크루에 입장하고 보증금을 예치할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 입장과 동시에 보증금은 사용 가능 잔액에서 빠지고 잠금 상태가 된다. 이 잠금 금액은 정산 전까지 일반 사용 가능 포인트와 분리되어야 한다. 참여는 `RECRUITING` 상태이고 `recruitment_deadline` 전일 때만 가능하다. 최소 인원이 모여도 자동 시작되지 않으며, host가 `start_at`까지 시작하지 않거나 인원 미달로 시작되지 못하면 예치금은 취소형 정산으로 전액 환급되어야 한다.
@@ -188,7 +188,7 @@
 
 **Priority:** P0  
 **Card:** 방장은 최소 인원이 충족된 크루를 직접 시작해 실제 미션 진행 상태를 확정할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작되지 않는다. 방장이 `미션 시작`을 누르면 서버는 그 순간의 조건을 다시 검증하고 `RECRUITING -> ACTIVE` 전이를 확정한다. 이때 기록되는 `activated_at`이 인증 가능 시점, projection/log eligibility, 정산 replay 기준이 된다.
@@ -207,7 +207,7 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 
 **Priority:** P0  
 **Card:** 크루 참여자는 정해진 시간 안에 사진을 올려 미션 수행을 증명할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 이미지 파일 업로드와 서버 수신 시각 기록을 다룬다. 업로드 자체는 성공했더라도 다음 story의 Exif 검증에서 실패할 수 있다. 회원이 아니거나 허용 시간 밖에서 올린 인증은 실패 처리되어야 한다.
@@ -224,7 +224,7 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 
 **Priority:** P0  
 **Card:** 시스템은 업로드된 사진의 Exif를 검사해 유효한 인증만 성공으로 인정해야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 인증 공정성의 핵심이다. Exif가 없거나 촬영 시각이 규칙과 맞지 않으면 실패다. 실패한 인증은 왜 실패했는지 사용자가 이해할 수 있어야 하고, 성공 횟수 집계에서 제외되어야 한다.
@@ -242,7 +242,7 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 
 **Priority:** P0  
 **Card:** 참여자는 지금까지의 성공 횟수와 예상 환급금을 한눈에 볼 수 있어야 한다. 단, 대시보드 값은 최종 정산 결과가 아니라 현재 기준 estimated projection이다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 대시보드는 갓세이빙의 차별 포인트다. 사용자는 자신의 누적 raw 성공 횟수, 정산 규칙을 반영한 현재 기준 추정 인정 성공 횟수, 크루 전체 추정 인정 성공 횟수, 현재 기준 추정 지분율, 예상 환급금을 이해할 수 있어야 한다. 이 값들은 `MissionLog.server_time`과 `Asia/Seoul` 기준으로 계산되는 deterministic estimated projection이며 최종 정산 결과가 아니다. 크루 전체 추정 인정 성공 횟수가 `0`이면 나눗셈이 아니라 균등 환급 base estimate를 보여줘야 한다. `Settlement.status = SUCCEEDED` 이후 최종 인정 횟수, 지분율, 환급금은 Dashboard projection이 아니라 Settlement API 기준으로 표시한다.
@@ -261,7 +261,7 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 
 **Priority:** P0  
 **Card:** 미션이 끝나거나 시작 전 취소되면 시스템은 정해진 규칙으로 환급을 끝내야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 정산은 MVP의 가장 위험한 구간이다. 일반 정산 배치는 `종료 익일 새벽`에 돌아야 하고, 시작 전 취소 방은 취소형 정산으로 전액 환급되어야 한다. 계산은 `BigDecimal`, `원 단위 절사`, `잔액 처리 규칙`을 따라야 한다. `전체 성공 횟수 0`, `절사 후 잔액`, `1위 동점`, `중도 탈퇴`, `start_at`까지 미시작 취소 같은 예외를 다뤄야 한다.
@@ -280,7 +280,7 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 
 **Priority:** P0  
 **Card:** 사용자는 정산이 끝난 뒤 얼마를 돌려받았는지 이유와 함께 확인할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 사용자 입장에서 정산은 숫자가 아니라 신뢰의 문제다. 그래서 결과 화면은 성공 횟수, 지분율, 환급금, 예치금 이동 이력을 함께 보여줘야 한다. 인원 미달 취소나 예외 환급도 같은 화면에서 이해할 수 있어야 한다.
@@ -297,10 +297,10 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 
 **Priority:** P1  
 **Card:** 사용자는 인증 결과와 지분 변화 같은 중요한 상태 변화를 인앱 알림으로 빠르게 확인할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
-이 story는 `SSE 인앱 알림` 자체에 집중한다. 알림은 사용자가 중요한 상태 변화를 빠르게 인지하도록 돕는 realtime UX signal이다. 상세 SSE 계약과 client reaction expectation은 `API-spec-god-saving.md`의 알림/SSE 섹션을 따른다. 알림이 실패해도 인증 성공/실패 집계나 정산 흐름은 그대로 유지되어야 한다.
+이 story는 `SSE 인앱 알림` 자체에 집중한다. 알림은 사용자가 중요한 상태 변화를 빠르게 인지하도록 돕는 realtime UX signal이다. 상세 SSE 계약과 client reaction expectation은 `API-spec-dondok.md`의 알림/SSE 섹션을 따른다. 알림이 실패해도 인증 성공/실패 집계나 정산 흐름은 그대로 유지되어야 한다.
 
 **Confirmation:**
 
@@ -315,7 +315,7 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 
 **Priority:** P1  
 **Card:** 사용자는 정산이 끝난 뒤 이메일로 결과를 받아 다시 앱에 돌아올 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 정산 결과 전달 채널을 앱 밖으로 확장한다. 이메일은 정산 완료 이후 한 번만 발송되어야 하며, 메일 발송 실패가 정산 트랜잭션을 되돌리면 안 된다. 사용자는 메일을 못 받아도 앱 안에서는 같은 결과를 볼 수 있어야 한다.
@@ -332,7 +332,7 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 
 **Priority:** FR-Required / Non-transactional  
 **Card:** 크루 주최자는 AI 제안을 받아 더 쉽게 미션 규칙을 정할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 AI 미션 추천은 첫 릴리스 필수 사용자 기능이지만 방 생성 트랜잭션의 source of truth는 아니다. 추천 결과는 바로 저장되는 것이 아니라, 사용자가 검토하고 수정할 수 있는 초안이어야 한다. AI 응답 실패나 이상 응답은 실패 UI로 설명되고, 수동 입력 흐름을 막지 않아야 한다.
@@ -350,7 +350,7 @@ AI 미션 추천은 첫 릴리스 필수 사용자 기능이지만 방 생성 �
 
 **Priority:** FR-Required / Non-transactional  
 **Card:** 사용자는 미션이 끝난 뒤 AI가 정리한 내 습관 리포트를 볼 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 정산 이후 재방문 가치를 만든다. 리포트는 실제 성공/실패 데이터와 정산 결과를 바탕으로 생성되어야 하며, 정산 완료 이후에만 노출된다. AI 리포트는 저장/재조회 가능한 첫 릴리스 필수 사용자 기능이지만, 실패가 정산 완료, 환급, 포인트 원장 상태를 바꾸면 안 된다.
@@ -369,7 +369,7 @@ AI 미션 추천은 첫 릴리스 필수 사용자 기능이지만 방 생성 �
 
 **Priority:** P1  
 **Card:** 운영자는 어떤 정산이 성공했고 어떤 정산이 실패했는지 빠르게 파악할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 수동 대응의 출발점이다. 운영자는 미션별 배치 상태, 재시도 횟수, 실패 요약을 보고 우선 대응 대상을 골라야 한다. 이 화면은 일반 사용자와 엄격히 분리된 권한이어야 한다.
@@ -386,7 +386,7 @@ AI 미션 추천은 첫 릴리스 필수 사용자 기능이지만 방 생성 �
 
 **Priority:** FR-Required / Non-transactional  
 **Card:** 사용자는 크루의 성공 인증을 피드로 보고, 실패나 미제출 같은 일자 상태는 별도 상태 목록으로 확인할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 `B-17 → US-17 → T-33` traceability를 고정한다. `feed_items`는 `mission_log.is_success = true`인 성공 인증 로그만 포함한다. 실패 인증과 미제출 상태는 피드 게시물이 아니라 `day_statuses` 또는 동등한 일자 상태 projection으로 표현한다. 피드 조회는 소셜 표시 기능이며 정산, 포인트, 환급, AI 리포트, 방/참여 상태를 변경하지 않는다.
@@ -403,7 +403,7 @@ AI 미션 추천은 첫 릴리스 필수 사용자 기능이지만 방 생성 �
 
 **Priority:** FR-Required / Non-transactional  
 **Card:** 사용자는 성공 인증 피드 항목에 이모지 리액션을 남기거나 취소할 수 있어야 한다.  
-**Design:** 미정. 기준 문서: [PRD-god-saving.md](./PRD-god-saving.md)
+**Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
 **Conversation:**  
 이 story는 `B-18 → US-18 → T-34` traceability를 고정한다. 리액션은 성공 인증 로그에 대한 비거래성 상호작용이다. 같은 사용자는 같은 인증 로그에 하나의 리액션만 가진다. 리액션은 정산, 포인트, 환급, 상태에 영향을 주지 않는다.

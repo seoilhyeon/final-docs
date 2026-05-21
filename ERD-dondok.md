@@ -1,4 +1,4 @@
-# ERD 초안: 갓세이빙 MVP
+# ERD 초안: Dondok MVP
 
 기준 문서:
 
@@ -118,7 +118,7 @@ Unique / Index:
 - `member.id`는 내부 persistence identity이고 외부 사용자 식별자로 노출하지 않는다.
 - `member.uuid`는 회원 생성 시 발급하고 변경하지 않는 immutable external canonical identifier다.
 - `email`은 변경 가능하고 PII이므로 canonical identity로 사용하지 않는다.
-- JWT와 SSE를 포함한 외부 계약에서 이 identifier를 사용하는 방식은 `API-spec-god-saving.md`가 소유한다.
+- JWT와 SSE를 포함한 외부 계약에서 이 identifier를 사용하는 방식은 `API-spec-dondok.md`가 소유한다.
 - `member`는 계정의 기준 키고, 정산 계산 단위는 아니다.
 - `member`는 사용자 식별·인증·프로필 상태를 담당하며, 포인트 현재 잔액처럼 빈번히 변하는 금액 상태는 직접 보관하지 않는다.
 - 프로필은 닉네임 + 프로필 이미지로 제한된다.

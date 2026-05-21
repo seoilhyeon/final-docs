@@ -1,4 +1,4 @@
-# Implementation Gates: 갓세이빙 MVP Invariants
+# Implementation Gates: Dondok MVP Invariants
 
 이 문서는 구현 단계에서 반복해서 확인할 blocker-level invariant와 PR 리뷰 gate를 모은다. 새로운 설계 문서가 아니라, 아래 source of truth를 구현자가 놓치지 않도록 압축한 governance 문서다.
 
@@ -8,8 +8,8 @@ Source-of-truth overlay:
 
 이 문서가 압축해 참조하는 구현 gate 근거 문서는 다음이다.
 
-- `docs/API-spec-god-saving.md` — API 계약, 요청/응답, 상태 노출 규칙
-- `docs/ERD-god-saving.md` — 테이블, FK, unique 제약, source-of-truth 관계
+- `docs/API-spec-dondok.md` — API 계약, 요청/응답, 상태 노출 규칙
+- `docs/ERD-dondok.md` — 테이블, FK, unique 제약, source-of-truth 관계
 - `docs/Settlement-design.md` — 정산 계산, batch/retry/recovery 동작
 - `docs/adr/ADR-mvp-tech-architecture.md` — 기술 선택, cut line, 운영 철학
 - `docs/runbooks/settlement-recovery.md` — 장애 시 운영 절차
@@ -188,8 +188,8 @@ Minimum PR evidence:
 
 Owner references:
 
-- Identity persistence invariant: `ERD-god-saving.md`의 `member` 정의
-- Auth/SSE external contract: `API-spec-god-saving.md`의 인증 및 알림/SSE 계약
+- Identity persistence invariant: `ERD-dondok.md`의 `member` 정의
+- Auth/SSE external contract: `API-spec-dondok.md`의 인증 및 알림/SSE 계약
 - SSE architecture boundary: `ADR-mvp-tech-architecture.md`의 SSE 결정 사유
 
 Minimum PR evidence:
@@ -250,8 +250,8 @@ Minimum PR evidence:
 
 ### Identity / Notification PR Gate
 
-- [ ] Identity implementation complies with `ERD-god-saving.md` member invariant.
-- [ ] Auth and SSE behavior complies with `API-spec-god-saving.md` auth/SSE contract.
+- [ ] Identity implementation complies with `ERD-dondok.md` member invariant.
+- [ ] Auth and SSE behavior complies with `API-spec-dondok.md` auth/SSE contract.
 - [ ] SSE routing integration tests exist.
 - [ ] Tests prove email is not used as routing identity.
 - [ ] SSE payload contract tests cover PII/state-snapshot exclusion.

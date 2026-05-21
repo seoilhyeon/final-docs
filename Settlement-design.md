@@ -1,8 +1,8 @@
-# 정산 설계: 갓세이빙
+# 정산 설계: Dondok
 
 기준 문서:
 
-- [PRD-god-saving.md](./PRD-god-saving.md)
+- [PRD-dondok.md](./PRD-dondok.md)
 - [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md)
 - [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)
 - `docs/갓세이빙_프로젝트기획안.docx` (활성 제품/UX 참고 자료; 기존 `갓세이빙_프로젝트기획서.docx` 명칭이나 사본은 legacy/reference 입력)
@@ -859,7 +859,7 @@ remainderPolicy
 
 ## 14. 외부 API 계약
 
-> 외부 API의 최종 요청/응답 계약은 `API-spec-god-saving.md`를 따른다. 이 섹션은 정산 운영 흐름 설명을 위한 보조 설명이며, API 계약과 충돌할 경우 API-spec이 우선한다.
+> 외부 API의 최종 요청/응답 계약은 `API-spec-dondok.md`를 따른다. 이 섹션은 정산 운영 흐름 설명을 위한 보조 설명이며, API 계약과 충돌할 경우 API-spec이 우선한다.
 
 ### 사용자 조회 API
 
