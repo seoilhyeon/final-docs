@@ -188,6 +188,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A01 — Crew Creation and Rule Commitment
 
 - **Actors**: Host, system
+- **Classification**: actor-performed usecase (Host setup action; no lifecycle/settlement authority granted)
 - **Preconditions**: Host authenticated; mission/deposit/recruitment inputs valid.
 - **Main Flow**: Host creates a crew with mission rules, deposit amount, schedule, recruitment window, participant limits, and visibility.
 - **Failure Flow**: Invalid dates, invalid deposit, or contradictory participant limits prevent creation.
@@ -200,10 +201,11 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A02 — Join, Approval, and Deposit Lock
 
 - **Actors**: Participant, host, system
+- **Classification**: actor-performed usecase (Participant join action; host approval is contextual review context only)
 - **Preconditions**: Room recruiting; participant eligible; sufficient point balance.
 - **Main Flow**: Participant applies/joins according to room visibility; approval and deposit lock complete before participant is part of the frozen baseline.
 - **Failure Flow**: Insufficient balance, duplicate join, deadline passed, approval pending, lock failure.
-- **Authority Boundary**: Deposit lock and participant inclusion are system/ledger constrained; host cannot waive settlement rules.
+- **Authority Boundary**: Deposit lock and participant inclusion are system/ledger constrained; host approval here is contextual review context (not payout approval, not deposit-waive authority); host cannot waive settlement rules.
 - **Projection Impact**: Locked balance may update as a UX projection.
 - **Settlement Impact**: Only properly joined/deposit-locked participants can become payout baseline candidates.
 - **UX Risk**: Users may confuse “approved” or “pending” with fully joined baseline status.
@@ -212,6 +214,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A03 — Concurrent Join and Capacity/Balance Race
 
 - **Actors**: Multiple participants, system
+- **Classification**: extension / edge case (UC-A02 race variant; DB/account consistency invariant)
 - **Preconditions**: Room still accepts participants; concurrent join requests occur.
 - **Main Flow**: System commits each join/deposit lock atomically according to balance, capacity, and state.
 - **Failure Flow**: Duplicate participant row, double balance deduction, optimistic UI showing joined before lock commits.
@@ -224,6 +227,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A04 — Automatic Activation and Baseline Freeze
 
 - **Actors**: System, host, participants
+- **Classification**: system-driven lifecycle event (canonical activation anchor; not host-initiated)
 - **Preconditions**: Recruitment conditions, approval, and deposit locks satisfy canonical start rules.
 - **Main Flow**: System transitions room to active at the canonical activation anchor and freezes the participant baseline.
 - **Failure Flow**: Conditions missing; activation/cancellation race; brownfield host-start wording survives.
@@ -236,6 +240,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A05 — Recruitment Expiry or Start Failure Cancellation
 
 - **Actors**: System, participants, host
+- **Classification**: system-driven lifecycle event (cancellation/refund path; system owns expiry rules)
 - **Preconditions**: Room remains recruiting when canonical start/cutoff conditions fail.
 - **Main Flow**: System cancels or prevents activation and routes deposits to the appropriate cancellation/refund settlement path.
 - **Failure Flow**: Room remains indefinitely recruiting; user expects instant refund without settlement/recovery step.
@@ -248,6 +253,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A06 — Certification Upload vs MissionLog Authority
 
 - **Actors**: Participant, system
+- **Classification**: actor-performed usecase (Participant certification submission; upload ≠ certification success)
 - **Preconditions**: Participant is eligible to submit; upload route available.
 - **Main Flow**: User uploads image, then creates mission-log/certification record through server validation.
 - **Failure Flow**: Upload succeeds but mission-log creation fails; image object orphaned; validation delayed near cutoff.
@@ -260,6 +266,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A07 — Server-Time Certification Eligibility
 
 - **Actors**: Participant, system
+- **Classification**: shared input rule / invariant within UC-A06 (server_time eligibility — not a standalone actor-performed action; diagram v4에서 UC-A06 라벨에 흡수)
 - **Preconditions**: Mission active or near boundary.
 - **Main Flow**: System records `server_time` and uses canonical time rules for eligibility.
 - **Failure Flow**: Client time, EXIF time, or async processing completion is incorrectly used.
@@ -272,6 +279,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A08 — EXIF/Hash Risk Signal Handling
 
 - **Actors**: Participant, system, host
+- **Classification**: shared signal rule (EXIF/hash = risk signal only; not standalone authority, not standalone action)
 - **Preconditions**: Certification image exists and can be inspected.
 - **Main Flow**: EXIF/hash is recorded as fraud/risk signal and may inform moderation or validation.
 - **Failure Flow**: Missing EXIF or duplicate hash is treated as final fraud/settlement failure without layered review.
@@ -284,6 +292,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A09 — Duplicate or Excess Certification Under Cadence Rules
 
 - **Actors**: Participant, system
+- **Classification**: shared input rule (cadence cap; projection·settlement에 동일 적용; diagram v4에서 floating «shared input rule» 노드로 표현)
 - **Preconditions**: Multiple successful raw logs exist in the same cadence period.
 - **Main Flow**: Raw logs remain append-only; projection/settlement recognizes only allowed count according to cadence.
 - **Failure Flow**: Feed success count inflates final settlement recognized count.
@@ -296,6 +305,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A10 — Host Moderation of Certification Input
 
 - **Actors**: Host, participant, system
+- **Classification**: actor-performed usecase (Host moderation of certification input; append-only, pre-freeze only)
 - **Preconditions**: Certification log exists and is eligible for review.
 - **Main Flow**: Host appends contextual certification input review decision with actor, reason category, and time.
 - **Failure Flow**: Host decision overwrites prior history or directly mutates settlement/ledger.
@@ -308,6 +318,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A11 — Moderation Correction Before Freeze
 
 - **Actors**: Host, participant, system
+- **Classification**: extension / variant of UC-A10 (append-only correction event before freeze; not state overwrite)
 - **Preconditions**: Prior moderation decision exists; settlement input not frozen.
 - **Main Flow**: New moderation event is appended; current-effective interpretation may change.
 - **Failure Flow**: Prior decision is deleted or silently changed.
@@ -320,6 +331,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A12 — Post-Freeze / Post-Success Correction Boundary
 
 - **Actors**: Host, admin/support, participant, system
+- **Classification**: invariant / boundary (settlement input freeze · post-final immutability; not a usecase action — diagram v4에서 FREEZE block으로 승격. Correction workflow는 MVP unresolved/deferred)
 - **Preconditions**: Settlement input is frozen or settlement succeeded.
 - **Main Flow**: Host correction cannot mutate final settlement input. Any post-success correction lifecycle remains unresolved/defer-as-unsafe unless separately frozen by L1 authority.
 - **Failure Flow**: Retry or host correction is used to change final payout.
@@ -332,6 +344,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A13 — Live Projection
 
 - **Actors**: Participant, host, system
+- **Classification**: system-driven projection (non-authoritative live estimate; projection ≠ final settlement)
 - **Preconditions**: Mission active and enough inputs exist.
 - **Main Flow**: Dashboard calculates current-basis estimated progress, expected settlement state, and contribution visibility.
 - **Failure Flow**: Estimate is displayed as guaranteed payout, expected profit/loss, or adversarial rank loop.
@@ -344,6 +357,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A14 — Cutoff/Frozen Projection Before Final Settlement
 
 - **Actors**: Participant, system
+- **Classification**: system-driven projection (non-authoritative cutoff estimate; “frozen” ≠ final settlement)
 - **Preconditions**: Mission ended; settlement not yet succeeded.
 - **Main Flow**: System shows cutoff-basis estimate using end cutoff.
 - **Failure Flow**: “Frozen” is interpreted as final settlement or payout certainty.
@@ -356,6 +370,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A15 — Final Settlement Success and Ledger Authority
 
 - **Actors**: System, participants, support
+- **Classification**: system-driven settlement authority (authoritative final-state producer; settlement snapshot → `point_history` ledger)
 - **Preconditions**: Settlement item snapshot and point history linkage are valid.
 - **Main Flow**: Settlement succeeds; final source of truth becomes settlement snapshot + `point_history`.
 - **Failure Flow**: Settlement marked succeeded before every item is linked to valid ledger history.
@@ -368,6 +383,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A16 — All-Fail Settlement and Deterministic Remainder
 
 - **Actors**: System, participants, host
+- **Classification**: variant / exceptional branch of UC-A15 (all-fail = equal principal refund; host remainder = deterministic replayable rule, not host authority)
 - **Preconditions**: Settlement input has no recognized successes, or rounding/remainder exists.
 - **Main Flow**: All-fail settles by equal principal refund so that nobody's failure becomes another participant's profit. Any separate rounding/remainder rule must be deterministic, replayable, and not host-discretionary.
 - **Failure Flow**: “전원 0원 환급”, “환급 없음”, house-edge wording, or host discretionary remainder wording conflicts with canonical settlement semantics.
@@ -380,6 +396,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A17 — Settlement Retry / Partial Recovery
 
 - **Actors**: Admin, system
+- **Classification**: recovery (resume incomplete settlement processing; retry ≠ recalculation; snapshot unchanged)
 - **Preconditions**: Settlement failed or retry-wait with existing snapshot and possibly partial ledger effects.
 - **Main Flow**: Retry resumes existing settlement work, reuses existing idempotent point history, or links missing `point_history_id`.
 - **Failure Flow**: Retry recalculates new payout, rewrites final settlement, or creates duplicate point history.
@@ -392,6 +409,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A18 — Replay / Audit Verification
 
 - **Actors**: Admin/support, system
+- **Classification**: audit (settlement-time input reproduction; replay ≠ payout mutation; no ledger change)
 - **Preconditions**: Settlement result exists and audit/reconciliation is requested.
 - **Main Flow**: System reproduces/verifies result using settlement-time inputs/version/snapshot for audit explanation.
 - **Failure Flow**: Replay uses current algorithm and produces different result, or mutates final payout.
@@ -404,6 +422,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A19 — Notification and Reconnect State Drift
 
 - **Actors**: Participant, system, client
+- **Classification**: cross-cutting non-authoritative semantics (notification = hint only; canonical API is source of truth)
 - **Preconditions**: Notification/SSE/FCM/event delivery exists.
 - **Main Flow**: Notification arrives as hint; client opens/refetches canonical state.
 - **Failure Flow**: Late notification contradicts current canonical state; notification failure triggers domain retry.
@@ -416,6 +435,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A20 — Support Explanation by Lifecycle State
 
 - **Actors**: Participant, support/admin, system
+- **Classification**: cross-cutting support semantics (lifecycle-state explanation only; support creates no new authority)
 - **Preconditions**: User disputes estimate, moderation, notification, retry, or final settlement.
 - **Main Flow**: Support explains using the correct source-of-truth layer for the lifecycle state.
 - **Failure Flow**: Support cites dashboard estimate as final, describes retry as correction, or promises support override of immutable settlement.
@@ -424,6 +444,67 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Settlement Impact**: Post-settlement support explains settlement item + point history.
 - **UX Risk**: Conflicting support answers destroy trust.
 - **Related Domain Objects**: projection response, `settlement_item`, `point_history`, moderation timeline.
+
+### 4.A Usecase Classification Taxonomy
+
+각 UC의 `**Classification**` 필드는 아래 카테고리 중 하나로 분류된다. UML usecase diagram 상에서 actor-performed usecase 노드로 표현되는 것과, invariant/boundary/shared-rule로 표현되는 것을 구분하기 위한 분류 체계다.
+
+| Category | 의미 | 해당 UC |
+|---|---|---|
+| actor-performed usecase | actor가 직접 트리거하는 discrete action | UC-A01, UC-A02, UC-A06, UC-A10 |
+| system-driven lifecycle event | system이 lifecycle 전이를 소유 | UC-A04, UC-A05 |
+| system-driven projection | non-authoritative estimate를 system이 생산 | UC-A13, UC-A14 |
+| system-driven settlement authority | authoritative final-state를 system이 생산 | UC-A15 |
+| shared input rule / invariant | 여러 UC에 cross-cutting으로 적용되는 규칙·boundary | UC-A07, UC-A08, UC-A09, UC-A12 |
+| extension / variant | 상위 UC의 edge-case branch | UC-A03, UC-A11, UC-A16 |
+| recovery | 미완료 작업의 operational resume (mutation 없음) | UC-A17 |
+| audit | 결과 검증·재현 (mutation 없음) | UC-A18 |
+| cross-cutting non-authoritative semantics | hint 또는 설명 레이어 (state authority 없음) | UC-A19, UC-A20 |
+
+### 4.B Diagram Alignment Note
+
+`docs/Usecase-diagram-dondok.md` (v4)는 UML 가독성과 authority boundary 보호를 위해 일부 UC를 actor-performed usecase 노드로 표현하지 않는다. 본 inventory와 diagram 사이의 매핑은 다음과 같다.
+
+| UC | Diagram v4 표현 | 이유 |
+|---|---|---|
+| UC-A07 | UC-A06 라벨에 흡수 (server_time eligibility) | UC-A06 내부 입력 규칙 — standalone actor action이 아님 |
+| UC-A08 | UC-A06/UC-A10 라벨에 흡수 (signal only) | risk signal — standalone authority 아님 |
+| UC-A09 | floating «shared input rule» 노드 (no edges) | projection·settlement에 동일 적용되는 cross-cutting cadence rule |
+| UC-A12 | FREEZE invariant block (boundary) | usecase action이 아닌 lifecycle boundary; post-final immutability |
+| UC-A16 | UC-A15의 all-fail 분기 노트 | UC-A15의 variant branch; standalone authority 아님 |
+| UC-A17 | ⑥ Recovery lane («non-authoritative» recovery) | retry는 recalculation이 아님 |
+| UC-A18 | ⑦ Audit lane («append-only») | replay는 payout mutation이 아님 |
+| UC-A19 | ⑧ OPS lane «non-authoritative» | hint layer; canonical state authority 없음 |
+
+Diagram v4에서 노드로 승격되지 않은 UC도 본 inventory에서는 normative semantic으로 보존된다. Diagram은 가독성을 위한 표현 layer이고, 본 inventory가 canonical semantic source다.
+
+### 4.C Authority Boundary Matrix
+
+각 actor가 보유한 권한을 명시적으로 나열한다. PRD §1.5 canonical constraints 및 PRD §7.2 host 해산 정책과 정합.
+
+| Actor | Lifecycle 시작/종료 | Settlement 결정 | Ledger 변경 | Pre-freeze moderation 입력 | Post-freeze correction |
+|---|---|---|---|---|---|
+| Host | ✗ (system이 canonical activation anchor 소유; PRD §7.2의 host 해산은 start_at 시점 제한 내에서만 허용되며 본 inventory에서는 확장하지 않음) | ✗ | ✗ | ✓ (append-only contextual review input) | ✗ |
+| Participant | ✗ | ✗ | ✗ | ✗ (자기 인증 제출 가능; 타인 입력 영향 없음) | ✗ |
+| System | ✓ (canonical activation/cancellation anchor) | ✓ (snapshot · all-fail rule · deterministic remainder) | ✓ (`point_history` ledger) | ✗ (입력을 frozen state로 consume; 직접 mutation 없음) | ✗ (post-final immutable) |
+| Admin/Support | ✗ | ✗ (snapshot 변경 불가) | ✗ (별도 correction process 정의 전까지 hidden mutation 금지) | ✗ | ✗ (retry/replay 가능; payout mutation 불가) |
+
+Authority leakage 방지를 위해 위 매트릭스의 ✗는 “현재 캐노니컬 시멘틱에서 부재”를 의미하며, 새로운 권한 확장은 별도 L1 resolution을 거쳐야 한다.
+
+### 4.D Freeze Boundary Clarification
+
+Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Freeze 전/후의 입력 가변성과 authoritative source를 명시한다.
+
+| 시점 | Moderation 입력 | Settlement 입력 | Authoritative source |
+|---|---|---|---|
+| Pre-freeze | mutable (append-only event history) | not yet committed | 없음 — projection은 estimate only |
+| Freeze 시점 | resolved state가 settlement input으로 consumed | committed snapshot 생성 | settlement snapshot 후보 |
+| Post-freeze (settlement in-progress) | immutable | immutable | settlement snapshot (in-progress) |
+| Final settlement succeeded | immutable | immutable | settlement snapshot + `point_history` ledger |
+
+- Retry (UC-A17): 동일 snapshot으로 미완료 작업 resume — 재계산 아님.
+- Replay (UC-A18): 동일 snapshot/version으로 재현·감사 — payout mutation 아님.
+- Correction (UC-A12): post-freeze 입력 변경 또는 post-final ledger 변경은 hidden mutation으로 금지되며, MVP에서는 unresolved/deferred 상태. 향후 별도 correction process가 명시적으로 정의되기 전까지 admin/support는 explanation 권한만 보유 (UC-A20).
 
 ## 5. Pressure-Test Findings Summary
 
