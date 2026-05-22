@@ -2,15 +2,15 @@
 
 기준 문서:
 
-1. `docs/Dondok_프로젝트기획안_v1.1.docx` — L1 intent source
+1. 최신 기획안 및 accepted semantic freeze 결과 — L1 intent authority
 2. [PRD-dondok.md](./PRD-dondok.md) — canonical synthesis layer
 3. `docs/Dondok_요구사항명세서_v0.1.xlsx` — requirement detail reference
 
-이 문서는 위 SoT의 하위 운영/runtime semantics 문서이며, 제품 의미를 새로 정의하거나 PRD synthesis를 override하지 않는다. Backlog, ticket, API 문서는 downstream 구현/계약 참고 자료로만 교차 확인한다.
+이 문서는 위 SoT의 하위 운영/runtime semantics 문서이며, 제품 의미를 새로 정의하거나 PRD synthesis를 override하지 않는다. `API-spec`, 요구사항 명세서, 외부 WBS/GitHub Issues는 downstream 구현/계약 참고 자료로만 교차 확인한다.
 
 ## 1. 목적
 
-이 문서는 `T-17 정산 규칙 엔진`, `T-18 정산 배치`, `T-22 골든 데이터 테스트`를 구현하기 전에 정산 도메인의 기술 설계를 고정하기 위한 문서다.
+이 문서는 정산 규칙 엔진, 정산 배치, 골든 데이터 테스트를 구현하기 전에 정산 도메인의 runtime semantics와 구현 전 guardrail을 정리하기 위한 문서다.
 
 이번 개정의 목표는 정산 로직 자체를 갈아엎는 것이 아니라, 아래 운영 요구를 만족하도록 MVP 설계를 보강하는 것이다.
 
@@ -39,6 +39,10 @@
 - 복잡한 분산 트랜잭션
 - 성공 후 재정산용 별도 회계 정정 프로세스
 - final settlement 이후 payout rewrite, hidden mutation, support/admin override workflow
+- Redis/Redisson 여부, distributed lock topology, batch infrastructure topology의 신규 결정
+- `point_account` physical balance shape(`available`, `locked`, `pending`, `total` 등) 재설계
+- SSE/FCM 같은 notification transport 결정
+- settlement amount unit 재검토 결정
 
 ## 3. 고정할 비즈니스 규칙
 
@@ -62,8 +66,13 @@
 - 이 불변식은 `unique(room_id, member_id)`로 강제하고, `participant`는 정산과 감사 추적을 위해 물리 삭제하지 않는다.
 - `participant` 생명주기는 MVP에서 `APPLIED -> APPROVED_LOCK_PENDING -> JOINED`로 해석한다.
 - `APPLIED`는 신청 상태이며 capacity, activation eligibility, frozen participant baseline에 포함하지 않는다.
+- `APPLIED` 시점에는 보증금 reserve/hold semantics를 둘 수 있다. 이는 신청자의 참여 의사를 보증하고 잔액 오인을 줄이기 위한 pre-lock boundary이며, 예치 Lock 완료나 settlement baseline 포함을 의미하지 않는다.
+- 승인 전 참여자 철회는 허용하며, 철회된 신청의 reserve/hold 금액은 즉시 환급 또는 release되어야 한다. 철회된 신청은 capacity, activation eligibility, frozen participant baseline에 포함하지 않는다.
+- Host 거절 또는 미검토 자동 거절된 신청의 reserve/hold 금액은 즉시 환급 또는 release되어야 하며, 해당 신청은 settlement baseline에 포함하지 않는다.
 - `APPROVED_LOCK_PENDING`은 host approval 이후 예치 Lock 완료 전 상태이며 capacity reservation만 의미한다. 이 상태는 activation eligibility, minimum participant baseline, frozen participant baseline에 포함하지 않는다.
 - `JOINED`는 승인과 예치 Lock이 모두 완료된 상태다. MVP에서 activation eligibility, minimum participant baseline, frozen participant baseline, settlement eligibility의 participant anchor는 `JOINED`만 사용한다.
+- `JOINED` 이후에는 MVP에서 participant-side 변경/취소를 허용하지 않는다. 승인 + 예치 Lock 완료 후 상태 변경은 frozen baseline integrity와 deterministic settlement를 흔들 수 있으므로 별도 후속 설계 없이는 열지 않는다.
+- 위 reserve/hold/lock 문장은 lifecycle semantic boundary이며, 구체적인 DB column, API status, enum name, account balance column, lock implementation strategy를 여기서 새로 freeze하지 않는다.
 - 신규 참여/상태 전이는 `MissionRoom.status = RECRUITING`이고 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
 - `ACTIVE` 이후 신규 참여와 baseline 변경은 허용하지 않는다.
 - ACTIVE 이후 탈퇴/재참여 및 중도 탈퇴 정산은 MVP active semantics가 아니라 brownfield/deferred 영역으로 남긴다. 기존 문서/구현 흔적이 있더라도 `JOINED` frozen baseline을 바꾸는 권한으로 해석하지 않는다.
@@ -91,7 +100,9 @@
 - 그러나 `Settlement.status = SUCCEEDED` 전 최종 정산 금액 계산은 반드시 `MissionLog`, frozen participant baseline, resolved certification state를 다시 읽어서 수행한다.
 - Final settlement batch가 authoritative settlement snapshot을 만들며, dashboard/expected refund 값은 그 전까지 projection일 뿐 확정 환급금이 아니다. Projection은 현재 기준 예상/설명용이며 payout authority가 아니다.
 - Settlement input freeze 이후에는 frozen certification outcome과 authoritative daily/final result를 host/admin이 소급 변경하지 않는다.
+- Replay는 historical semantic truth reconstruction이다. Replay는 당시 algorithm semantics, cadence/timezone/cutoff interpretation, lifecycle cutoff semantics, effective moderation state, reason-code mapping을 설명 가능하게 복원하는 audit authority이며, current-engine reinterpretation이나 payout rewrite 권한이 아니다.
 - Host moderation은 certification input/state를 resolve하는 권한이며, settlement engine, refund amount, point ledger, final settlement snapshot을 직접 조작하는 권한이 아니다.
+- Moderation persistence는 authoritative moderation transition ledger와 non-authoritative operational context를 분리한다. Settlement truth에 필요한 것은 effective state, state transition, reason-code, actor, timestamp, append-only chain reference이고, human memo/support note/UX wording/운영 코멘트는 정산 truth가 아니다.
 - Pre-freeze moderation resolution은 certification input을 정리하는 행위이고, post-freeze settlement recovery는 누락 row, FK linkage, payout execution failure만 append-only로 복구하는 행위다. 둘은 같은 권한이 아니다.
 - `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item` 계산 스냅샷과 연결된 `point_history` 원장이다. 이후 `MissionLog` 기반 replay는 감사/디버깅 검증용이지 지급 결과를 대체하거나 변경하는 기준이 아니다.
 - retry는 실패/partial execution을 기존 snapshot과 idempotency key로 이어 붙이는 recovery 동작이고, correction은 별도 support/operations 조정 후보일 뿐 hidden settlement mutation이 아니다.
@@ -103,6 +114,7 @@
 - DB 금액 컬럼은 `BIGINT` 또는 `DECIMAL(18,0)` 등 정수 표현을 사용한다.
 - Java 계산은 `BigDecimal`과 `MathContext.DECIMAL128`을 사용한다.
 - 최종 지급액은 `RoundingMode.FLOOR`로 절사한다.
+- settlement amount unit 재검토는 별도 결정 후보로 남긴다. 이 문서는 현행 정수/절사/remainder baseline을 유지하며, 단위 변경이나 rounding 변경을 이번 propagation에서 freeze하지 않는다.
 
 ### 3.7 재현 가능성 원칙
 
@@ -110,6 +122,8 @@
 - 재현 가능성은 `정산 배치 실행 시각`, `settlement.id`, 런타임 랜덤에 의존하면 안 된다.
 - 외부 결제 상태나 후속 이벤트 성공 여부는 정산 계산 결과의 입력값이 아니다.
 - Projection boundary는 사용자 안내용 조회/캐시까지이고, settlement snapshot boundary는 final settlement batch가 저장한 `settlement_item`과 연결된 `point_history` 원장까지다. Projection을 재계산해도 succeeded settlement snapshot이나 ledger를 변경하지 않는다. Projection 문구는 `현재 기준 예상`, `진행 상황 업데이트`, `최종 정산 전 변동 가능` 수준으로 제한하고 수익/순위/payout 확정처럼 표현하지 않는다.
+- Runtime replay의 최소 authoritative context는 `algorithm_version`, frozen participant baseline, deposit snapshot, recognized success counts, all-fail/remainder policy, cadence interpretation, timezone/cutoff semantics, lifecycle cutoff semantics, effective moderation state, append-only moderation chain reference, reason-code mapping version을 포함한다. 이는 과거 semantic truth를 설명하기 위한 contract이며 과거 지급액을 다시 쓰기 위한 contract가 아니다.
+- Versioned semantic replay에서 v2 runtime은 v1 settlement를 수정하지 않고 v1 semantics를 해석 가능해야 한다. Historical replay는 migration-forward reinterpretation이나 current semantics overwrite가 아니다.
 
 ## 4. 정산 도메인 책임
 
@@ -128,7 +142,7 @@
 - `MissionRoom.settlement_status`가 필요하다면 조회 최적화용 비정규화 필드로만 둔다.
 - 운영 판단, 재시도 가능 여부, 배치 대상 여부의 원천 상태는 항상 `Settlement.status`다.
 - 포인트 금액 판단의 원천은 `point_history`이고, 현재 잔액 테이블의 `balance`는 재계산 가능한 캐시다.
-- `member`는 사용자 식별·인증 책임만 가지며, `point_account.balance`는 현재 사용 가능 포인트 잔액 캐시만 담당한다.
+- `member`는 사용자 식별·인증 책임만 가진다. `point_account.balance` 표현은 현재 사용 가능 포인트 잔액 캐시를 설명하는 brownfield/MVP observation이며, physical account shape 결정 권한이 아니다.
 
 ## 5. 정산 상태 흐름
 
@@ -186,6 +200,7 @@ MissionRoom 종료/취소 감지
 - 이미 `SUCCEEDED`인 정산은 다시 `PENDING`으로 되돌리지 않는다.
 - `SUCCEEDED`는 immutable finality boundary다. replay, retry, support/admin recovery가 succeeded settlement snapshot이나 이미 기록된 point ledger를 overwrite하지 않는다.
 - 일부 participant 지급만 완료됐거나 원장-FK 연결이 누락된 partial 상태는 복구 가능한 중간 상태이며, `SUCCEEDED`가 아니라 `RETRY_WAIT` 또는 `FAILED`로 남긴다.
+- `RETRY_WAIT`/`FAILED`에서 retry가 갖는 권한은 unfinished execution completion authority다. 이미 authoritative하게 append된 ledger/item/snapshot은 그대로 두고, 누락된 item completion 또는 FK linkage만 idempotent하게 완료한다.
 
 ### 5.3 비정규화된 `MissionRoom.settlement_status`
 
@@ -260,7 +275,7 @@ MissionRoom 상태가 RECRUITING -> CANCELLED
 
 1. 대상 `Settlement` 목록 조회
 2. 조건부 update로 `PENDING/RETRY_WAIT -> RUNNING` claim
-3. `lock:settlement:room:{roomId}` Redis/Redisson 락 시도
+3. 동시 실행 완화용 보조 수단이 구성된 경우 이를 시도하되, 실행권의 최종 기준은 조건부 claim과 원장 멱등성으로 유지
 4. 정산 입력 데이터 로드
 5. 정산 계산 수행
 6. `settlement` 집계값과 `settlement_item` 스냅샷 저장
@@ -364,6 +379,8 @@ where id = :settlementId
 - `total_locked_amount`는 정산 실행 시점의 정산 대상 participant `room_participant.deposit_amount` 합계를 스냅샷으로 고정한 값이다.
 - `total_locked_amount`는 `point_history`나 `point_account`를 다시 합산해 계산하지 않는다.
 - MVP에서는 별도 `total_active_participants` 컬럼을 두지 않고, 필요 시 조회/분석용 후속 검토 항목으로 남긴다.
+- `algorithm_version`과 rule interpretation snapshot은 versioned semantic replay를 위한 설명/감사 context다. 이 값들은 historical semantics를 reconstruct하기 위한 기준이며, succeeded settlement를 현재 엔진 기준으로 다시 쓰는 migration hook이 아니다.
+- `remainder_policy`는 all-fail/remainder policy snapshot 역할도 수행한다. Legacy/brownfield alias가 남아 있어도 host/winner/draw payout authority를 부활시키지 않는다.
 
 ### 7.2 `settlement_item`
 
@@ -415,6 +432,8 @@ where id = :settlementId
 - `settlement_item`은 참여자별 정산 계산 결과의 source of truth고, `point_history`는 그 결과를 계정 잔액에 반영하는 금액 source of truth다. `Settlement.status = SUCCEEDED` 이후 두 테이블이 운영/분쟁/조회 기준이다.
 - `deposit_amount`는 participant 단위로 잠겨 있던 보증금의 입력 스냅샷이며, 실제 잔액 반영은 `point_history`가 담당한다.
 - `calculation_reason`은 `DAILY` 중복 제외, `SPECIFIC_DAYS` 비유효 요일 제외, resolved certification state, Phase 2/deferred cadence reference를 설명할 수 있어야 한다.
+- `calculation_reason`은 reason-code mapping version과 함께 해석되어야 한다. 과거 settlement의 reason code는 현재 wording/UX 문구가 아니라 당시 vocabulary 기준으로 설명한다.
+- Effective moderation state와 append-only moderation chain reference는 settlement-time input truth를 설명하기 위한 replay context다. Human memo, support note, UX wording, 운영 comment는 이 context를 보조할 수 있어도 authoritative settlement truth가 아니다.
 - `AFTER_WITHDRAWN_AT` 같은 withdrawal cutoff 값은 brownfield/deferred reference이며 MVP frozen `JOINED` baseline을 소급 변경하는 active rule이 아니다.
 - `reward_amount`는 잠긴 보증금보다 더 많이 환급된 경우를 설명하기 위한 보조 저장값이다.
 - 잠긴 보증금보다 적게 환급된 경우는 `deposit_amount`, `final_amount`, `share_ratio`, `recognized_success_count` 비교로 설명한다.
@@ -492,9 +511,9 @@ MVP `calculation_reason` vocabulary:
 - 모든 포인트 변경은 반드시 `point_history`를 통해서만 발생한다.
 - `point_history`는 항상 `member_id` 기준으로 기록되며, 정산 계산 결과를 실제 계정 잔액 변화로 반영하는 금액 source of truth다.
 - `PointAccount` 또는 `MemberPoint` 같은 현재 잔액 테이블이 있다면, 이 값은 항상 `사용 가능한 포인트 잔액`만 나타내는 재계산 가능한 캐시다.
-- MVP에서는 현재 잔액 캐시에 `pending_balance`, `waiting_balance`, `locked_balance` 같은 대기·잠금 상태 컬럼을 분리하지 않는다.
+- 현재 MVP/brownfield 설명은 잔액 캐시에 `pending_balance`, `waiting_balance`, `locked_balance` 같은 대기·잠금 상태 컬럼을 분리하지 않는 형태를 전제로 설명한다. 이는 physical balance shape를 새로 freeze하는 문장이 아니다.
 - 현재 잔액 캐시와 `point_history` 원장 재계산값이 다르면 `point_history`를 source of truth로 삼고, 원인 조사 후 잔액 캐시를 보정하거나 재생성한다.
-- 보증금은 별도의 계좌로 이동하지 않고, 참여 시점에 `point_account.balance`에서 차감되어 `room_participant.deposit_amount`로 잠긴 상태로 관리된다.
+- 현재 MVP/brownfield 설명에서는 보증금이 별도의 계좌로 이동하지 않고, 참여 시점에 `point_account.balance`에서 차감되어 `room_participant.deposit_amount`로 잠긴 상태로 관리된다. 이 표현의 semantic 핵심은 participant 단위 잠금 금액과 원장 추적이지, physical balance column 확정이 아니다.
 - `ROOM_DEPOSIT_LOCK`는 자산 이동이 아니라 기존 포인트를 사용 불가 상태로 전환하는 이벤트다.
 - 정산 또는 취소 시점에만 해당 잠금 금액이 환급되며, 환급은 `point_history`를 통해 `member` 계정 잔액에 다시 반영된다.
 - `point_history` insert와 `point_account.balance` 갱신은 동일 트랜잭션에서 처리한다.
@@ -520,8 +539,9 @@ MVP `calculation_reason` vocabulary:
 
 원칙:
 
-- 포인트 충전은 `point_account.balance`를 증가시키는 일반 잔액 충전이다.
-- `point_account`는 `member`와 분리해 사용자 식별·인증 책임과 포인트 잔액 갱신 책임을 나누며, MVP에서는 `balance` 하나만 현재 사용 가능 잔액 캐시로 둔다.
+- 포인트 충전은 현재 brownfield/MVP 설명에서는 `point_account.balance`를 증가시키는 일반 잔액 충전으로 관찰된다. 이 표현은 물리 balance shape를 새로 freeze하지 않는다.
+- Layering note: 이 절의 `point_account` 형태는 현재 brownfield/MVP observation을 설명하는 비권위 구현 맥락이다. semantic invariant는 `point_history`가 금액 source of truth이고 balance 계열 값은 재계산 가능한 조회/캐시라는 점이다. `available/locked/pending/total` 같은 physical balance shape 후보는 이 cleanup에서 새로 freeze하지 않는다.
+- `point_account`는 `member`와 분리해 사용자 식별·인증 책임과 포인트 잔액 갱신 책임을 나눈다. 현재 문서의 `balance` 표현은 사용 가능 잔액 캐시를 설명하는 brownfield/MVP observation이며, 향후 physical balance shape 결정 권한이 아니다.
 - 크루 참여 시 보증금은 별도 자산으로 이동하지 않고, `point_account.balance`에서 차감되어 해당 `room_participant.deposit_amount`에 participant 단위 잠금 금액으로 기록된다.
 - 보증금 잠금 상태는 `point_account.locked_balance`가 아니라 `balance` 차감과 `room_participant.deposit_amount` 기록으로 표현한다.
 - 사용자에게 보여줄 `GET /api/points.locked_balance`는 정산 전 참여 보증금 합계를 API projection으로 제공할 수 있다.
@@ -690,7 +710,8 @@ ordering_key = stable domain input(room_id, participant_id/member_id, event_id �
 ### 10.2 정산 시점 방어선
 
 - 최종 정산 시점에는 중복 정산/중복 지급 방지를 위해 여러 방어선을 함께 사용한다.
-- 1차 실행권은 DB 조건부 claim이 결정하고, Redisson은 보조 수단이며, DB unique와 `point_history.idempotency_key`가 최종 방어선이다.
+- 1차 실행권은 DB 조건부 claim이 결정하고, 현재 brownfield에 존재하는 Redisson 계열 락은 보조 수단으로만 취급한다. DB unique와 `point_history.idempotency_key`가 최종 방어선이다.
+- 이 절에서 고정하는 semantic은 duplicate payout 방지, idempotent recovery, conditional claim 우선순위, point_history 멱등성이다. Redisson/distributed lock의 구체 전략은 현재 brownfield implementation note일 뿐 PRD/Usecase authority나 settlement finality proof가 아니다.
 - 아래 10.3~10.6은 같은 방에 대해 배치 워커, 관리자 재시도, 복구 작업이 겹쳐도 결과가 participant 단위로 한 번만 확정되도록 하는 장치다.
 
 ### 10.3 상태 기반 claim
@@ -699,12 +720,13 @@ ordering_key = stable domain input(room_id, participant_id/member_id, event_id �
 - claim은 조건부 update로 수행한다.
 - 같은 `Settlement`를 두 워커가 동시에 집어도 row count `1`을 받은 워커만 실행한다.
 
-### 10.4 분산 락
+### 10.4 동시 실행 완화 수단(non-authoritative)
 
-- `lock:settlement:room:{roomId}` Redisson 락을 사용한다.
-- 목적은 배치 워커와 관리자 재시도, 복구 스크립트가 같은 방을 동시에 잡지 못하게 하는 것이다.
-- 락이 없어도 DB 조건부 update와 unique 제약이 최종 방어선이므로, 락은 보조 안전장치로 설명한다.
-- 즉, Redisson은 `정산 커밋 경계`에서만 제한적으로 사용하고, 인증 로그 저장 전 구간까지 확장하지 않는다.
+- 현재 brownfield note는 `lock:settlement:room:{roomId}` Redisson 계열 락을 같은 방 중복 실행 완화 수단으로 설명한다.
+- 이 문서가 고정하는 것은 특정 distributed lock topology가 아니라, 배치 워커와 관리자 재시도, 복구 스크립트가 같은 방을 동시에 처리해도 중복 지급으로 이어지지 않아야 한다는 invariant다.
+- 락 계층이 없어도 DB 조건부 update와 unique 제약이 최종 방어선이므로, 락은 semantic authority가 아닌 보조 안전장치로만 설명한다.
+- 따라서 현재 Redisson 언급은 `정산 커밋 경계`의 brownfield context이며, 인증 로그 저장 전 구간까지 확장하거나 future architecture decision으로 복제하지 않는다.
+- 향후 distributed lock 전략을 변경하더라도 동일한 semantic invariants(조건부 claim, unique constraint, participant 단위 idempotency, point_history 방어선)를 만족해야 한다. 전략 변경 자체는 별도 architecture/implementation decision으로 다룬다.
 
 ### 10.5 DB unique 제약
 
@@ -746,19 +768,22 @@ settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cance
 - 애플리케이션은 이 충돌을 `이미 지급됨`으로 해석하고 무조건 성공 처리하지 말고, 현재 `Settlement.status`, `settlement_item.point_history_id`, `point_history` payload 일치 여부를 함께 검증해야 한다.
 - 이 원칙은 정산 환급뿐 아니라 충전, 보증금 잠금 같은 모든 포인트 이벤트에도 동일하게 적용한다. 따라서 `point_history.idempotency_key`는 항상 `NOT NULL`이어야 한다.
 
-### 10.7 Implementation constraints
+### 10.7 Implementation guardrails (non-authoritative topology)
 
-구현 단계에서는 `docs/implementation-gates.md`의 Settlement PR Gate를 함께 적용한다. 특히 아래 항목은 구현 편의나 batch metadata로 대체할 수 없다.
+구현 단계에서는 `docs/implementation-gates.md`의 Settlement PR Gate를 함께 적용한다. 이 절은 stack topology를 freeze하지 않고, 구현 편의나 batch metadata로 대체할 수 없는 semantic guardrail만 나열한다.
 
-- `Settlement.status` 조건부 claim이 실행권의 최종 기준이다. Redisson lock은 중복 실행 가능성을 낮추는 보조 장치다.
+- `Settlement.status` 조건부 claim이 실행권의 최종 기준이다. 현재 brownfield Redisson 계열 lock은 중복 실행 가능성을 낮추는 보조 장치일 뿐, 실행권 authority나 finality proof가 아니다.
 - `settlement_item`은 먼저 생성되어 participant별 계산 snapshot을 고정하고, 이후 `point_history` 생성/재사용 결과를 `point_history_id`로 연결한다.
 - retry는 새 계산 결과를 만드는 재정산이나 correction이 아니라, 기존 `Settlement`와 `settlement_item` 기준으로 미완료 participant만 복구하는 작업이다.
 - replay는 settlement-time input/rule/snapshot으로 결과 재현성을 검증하는 audit 동작이며, payout mutation이나 succeeded settlement 변경이 아니다.
 - 이미 `point_history_id`가 연결된 item은 재지급하지 않는다.
 - `point_history`는 있으나 `settlement_item.point_history_id`만 누락된 경우 새 원장을 만들지 않고 기존 원장 payload를 확인한 뒤 FK 연결 보정 대상으로 다룬다.
 - `settlement_item.point_history_id`가 non-null인데 대응 `point_history`가 없으면 `INVALID_INCONSISTENT`로 취급하고 `SUCCEEDED`로 보지 않는다.
+- retry는 item-level idempotent recovery만 수행한다. 기존 snapshot을 폐기하거나 current engine 산출값으로 payout을 교체하는 동작은 retry가 아니라 금지된 hidden mutation이다.
 - 모든 item의 `point_history_id`와 대응 `point_history` 존재가 검증되기 전까지 parent `Settlement.status`를 `SUCCEEDED`로 바꾸지 않는다.
 - Email/AI/SSE 같은 후속 이벤트 실패는 settlement, settlement_item, point_history를 rollback하지 않는다.
+- Notification은 reconciled UX signal이다. SSE/알림 payload가 누락·중복·역순 수신되어도 authoritative REST state와 `Settlement`/`settlement_item`/`point_history`가 우선한다.
+- AI report/explanation은 non-authoritative 후행 artifact다. AI 산출물은 settlement authority, replay authority, payout truth가 아니며, version/stale/invalidation-aware artifact lifecycle이나 regeneration append semantics는 Phase 2 hardening guardrail로 남긴다.
 
 ## 11. 실패/재시도 정책
 
@@ -794,6 +819,7 @@ settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cance
 - 전자는 미반영 participant에 대한 재시도 대상이고, 후자는 FK 연결 보정 대상이다.
 - `Settlement.status`는 `point_history` 생성 여부만이 아니라 `settlement_item`과의 연결 완료 여부까지 포함해 판단한다.
 - 모든 `settlement_item`의 `point_history_id`가 채워지고 대응 `point_history` 존재가 검증되기 전까지는 `Settlement.status`를 `SUCCEEDED`로 바꾸지 않는다.
+- Scheduler downtime이나 delayed batch execution은 audit/recovery fact로 기록하되 lifecycle authority를 바꾸지 않는다. `start_at`, room timezone, daily cutoff, mission period end 같은 scheduled semantic anchor가 계약 기준이며, 실제 job 실행 시각이 cutoff를 밀거나 participant/log eligibility를 확장하지 않는다.
 
 ## 12. 예외 케이스
 
@@ -855,7 +881,14 @@ totalLockedAmount
 minParticipants
 startAt
 endAt
+algorithmVersion
+ruleInterpretationSnapshot
+reasonCodeMappingVersion
+effectiveModerationStateSnapshot
+moderationChainReference
 ```
+
+`ruleInterpretationSnapshot`은 cadence interpretation, timezone/cutoff semantics, lifecycle cutoff semantics, all-fail/remainder policy를 포함하는 semantic context다. 이 내부 계약은 replay explanation/audit를 위한 것이며 public API field 확정이나 event-sourcing redesign을 뜻하지 않는다.
 
 ### 13.4 SettlementResult
 
@@ -872,6 +905,7 @@ remainderPolicy
 원칙:
 
 - `remainderPolicy`는 deterministic allocation metadata이며 host/winner authority가 아니다.
+- `SettlementResult`는 historical semantic truth reconstruction에 필요한 snapshot/version context를 보존해야 하지만, replay 결과가 final payout을 변경하는 authority가 되면 안 된다.
 
 ## 14. 외부 API 계약
 
@@ -949,6 +983,7 @@ remainderPolicy
 - 같은 `room_id`라도 `settlement_type`에 따라 별도 `Settlement`가 존재할 수 있으므로 기준 식별자는 `settlement_id`다
 - 내부적으로는 지정된 기존 `Settlement`를 다시 claim한다
 - partial 상태에서는 기존 `point_history`와 payload가 일치하면 재사용해 FK만 보정하고, 미지급 participant만 새로 지급한다
+- retry는 current-engine recalculation이나 payout rewrite가 아니라 기존 authoritative snapshot의 unfinished execution completion이다
 
 ## 15. 후속 이벤트
 
@@ -1095,6 +1130,10 @@ total_remainder_amount = 0
   기대 결과: 하나의 시스템 조건부 전이만 성공하고 loser는 최종 상태를 재조회한다.
 - `TS-LC-06` 인증/log eligibility anchor
   기대 결과: `MissionLog.server_time < room.activated_at`이면 `BEFORE_START` 또는 동등 사유로 정산 인정에서 제외한다.
+- `TS-LC-07` delayed scheduler reconciliation
+  기대 결과: activation/settlement/cancel job이 늦게 실행되어도 판정은 scheduled semantic anchor(`start_at`, room timezone, daily cutoff, mission period end) 기준으로 수행되고, 실제 실행 지연은 audit/recovery log로만 남는다.
+- `TS-LC-08` replay semantic context preservation
+  기대 결과: algorithm version, cadence/timezone/cutoff interpretation, lifecycle cutoff, effective moderation state, moderation chain reference, reason-code mapping version으로 당시 semantic truth를 설명할 수 있으며 replay가 payout rewrite로 이어지지 않는다.
 
 ### 18.1 단위 테스트
 
@@ -1185,9 +1224,11 @@ total_remainder_amount = 0
 - `TS-23A` 종료 감지 누락 시 운영 복구로 `Settlement(PENDING)`를 생성할 수 있는지
   기대 결과: `room_id` 기준 정산 대상 여부 재검사 후 누락된 정산만 복구 생성되고, `unique(room_id, settlement_type)` 제약 위반 시 중복 생성되지 않는다.
 
-## 19. 구현 시작 순서
+## 19. 구현 전 비권위 체크포인트
 
-1. `settlement`, `settlement_item`, `point_history` 확장 컬럼과 unique 제약을 먼저 확정한다.
-2. `SettlementPendingCreator`, `SettlementInputAssembler`, `MissionRecognitionStrategy`, `SettlementCalculator` 책임을 분리한다.
-3. `TS-01`~`TS-09`와 `TS-08A` 골든/단위 테스트를 먼저 작성한다.
-4. 그 다음 `Spring Batch + Redisson + conditional claim + PointHistory idempotency`를 붙인다.
+이 섹션은 implementation sequence나 stack topology를 freeze하지 않는다. 구현 계획은 별도 architecture/implementation decision에서 다루며, 이 문서는 아래 semantic guardrail만 유지한다.
+
+1. `settlement`, `settlement_item`, `point_history`가 정산 snapshot, item linkage, ledger idempotency를 설명할 수 있어야 한다.
+2. `SettlementPendingCreator`, `SettlementInputAssembler`, `MissionRecognitionStrategy`, `SettlementCalculator` 책임은 계산 규칙·입력 조립·실행 상태가 뒤섞이지 않도록 분리되어야 한다.
+3. `TS-01`~`TS-09`와 `TS-08A` 골든/단위 테스트는 semantic invariant를 먼저 검증해야 한다.
+4. Batch infrastructure, Redisson/distributed lock, conditional claim 구현 방식, PointHistory idempotency wiring의 구체 조합은 이 문서가 확정하지 않는다. 다만 어떤 조합이든 조건부 claim, duplicate payout 방지, participant 단위 idempotency, point_history 방어선을 만족해야 한다.

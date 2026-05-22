@@ -23,14 +23,14 @@
 
 1. [PRD-dondok.md](./PRD-dondok.md)
    제품 목표, MVP 범위, 핵심 비즈니스 규칙을 먼저 이해한다. 이 문서를 읽지 않고 설계나 API부터 보면 왜 그런 제약이 있는지 놓치기 쉽다.
-2. [Tech-stack-dondok.md](./Tech-stack-dondok.md)
-   문서 기준으로 확정된 기술 스택과 아직 미정인 구현 세부사항을 빠르게 확인한다. 이 문서는 요약 문서이며, 세부 기준은 PRD, ERD, 정산 설계, API 문서가 우선한다.
-3. [ERD-dondok.md](./ERD-dondok.md) + [Settlement-design.md](./Settlement-design.md)
-   PRD를 읽은 뒤에는 도메인 구조와 정산 규칙을 같이 본다. `ERD`는 데이터 모델의 경계를 설명하고, `Settlement-design`은 정산/포인트/동시성/재시도 같은 운영 규칙을 설명한다. 두 문서를 함께 봐야 데이터 구조와 비즈니스 계산 규칙이 연결된다.
+2. [Usecase-dondok.md](./Usecase-dondok.md)
+   PRD의 제품 의미가 화면, API, 정산, QA로 전파될 때 흔들리기 쉬운 권한 경계와 drift warning을 확인한다.
+3. [Settlement-design.md](./Settlement-design.md) + [ERD-dondok.md](./ERD-dondok.md)
+   PRD와 Usecase bridge를 읽은 뒤에는 정산 규칙과 도메인 구조를 같이 본다. `Settlement-design`은 정산/포인트/동시성/재시도 같은 운영 규칙을 설명하고, `ERD`는 데이터 모델의 경계를 설명한다. 두 문서를 함께 봐야 데이터 구조와 비즈니스 계산 규칙이 연결된다.
 4. [API-spec-dondok.md](./API-spec-dondok.md)
-   앞선 문서들을 기반으로 FE/BE 계약을 확인한다. API는 독립 출발점이 아니라 PRD, ERD, 정산 설계를 외부 인터페이스로 고정한 결과물이다.
-5. [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md) + [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)
-   마지막으로 실행 계획을 본다. 여기서는 무엇을 만들지 다시 정의하지 않고, 이미 결정된 범위를 어떤 단위로 구현할지 확인한다.
+   앞선 문서들을 기반으로 FE/BE 계약을 확인한다. API는 독립 출발점이 아니라 PRD, Usecase bridge, 정산 설계, ERD를 외부 인터페이스로 고정한 결과물이다.
+5. [Dondok_요구사항명세서_v0.1.xlsx](./Dondok_요구사항명세서_v0.1.xlsx), wireframe/QA 자료, 외부 WBS/GitHub Issues
+   마지막으로 실행 계획과 검증 단위를 본다. 여기서는 무엇을 만들지 다시 정의하지 않고, 이미 결정된 범위를 어떤 단위로 구현하고 검증할지 확인한다.
 6. [Dondok_프로젝트기획안_v1.0.docx](./Dondok_프로젝트기획안_v1.0.docx)
    활성 제품/UX 참고 자료다. 배경, 화면 의도, 소셜 피드 표현을 확인할 때만 본다. 구현 판단은 Markdown source of truth 문서에 승격된 내용만 따른다.
 
@@ -39,23 +39,24 @@
 | 문서                                                            | 한 줄 요약                                                            | 언제 읽는가                                     | Source of Truth                        |
 | --------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------- |
 | [PRD-dondok.md](./PRD-dondok.md)                        | MVP의 목표, 범위, 사용자 가치, 핵심 비즈니스 규칙을 정의한다.         | 프로젝트 온보딩 시작 시, 제품 정책 변경 검토 시 | 비즈니스 요구사항과 MVP 범위           |
-| [Tech-stack-dondok.md](./Tech-stack-dondok.md)          | 문서 기준 기술 스택, 운영 원칙, 미정 구현 항목을 요약한다.            | 온보딩, 구현 착수 전 기술 전제 확인 시          | 요약 문서. 세부 기준은 원문 문서 우선  |
-| [ERD-dondok.md](./ERD-dondok.md)                        | 핵심 테이블, 관계, 제약, 스냅샷 저장 구조를 정의한다.                 | DB 설계, 쿼리 설계, 영속성 모델 검토 시         | 데이터 구조와 DB 제약                  |
+| [Usecase-dondok.md](./Usecase-dondok.md)                | PRD 의미가 downstream 문서로 전파될 때 필요한 권한 경계와 drift warning을 정리한다. | 정산/화면/API/QA 해석이 갈릴 때                 | PRD 의미의 semantic bridge             |
 | [Settlement-design.md](./Settlement-design.md)                  | 정산 계산, 상태 흐름, 멱등성, 동시성, 실패/재시도 정책을 정의한다.    | 정산/포인트/배치 구현 또는 운영 정책 검토 시    | 정산 도메인 규칙과 운영 안전성 정책    |
-| [API-spec-dondok.md](./API-spec-dondok.md)              | FE/BE가 공유하는 엔드포인트, 요청/응답, 에러, 상태값 계약을 정의한다. | 화면 연동, API 구현, QA 시나리오 작성 시        | 외부 API 계약. 알림 transport 세부는 API/ADR 후속 propagation 대상 |
-| [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md)    | MVP 기능을 사용자 가치 중심의 백로그와 스토리로 정리한다.             | 우선순위 검토, 스프린트 범위 설정 시            | 스토리 레벨 구현 대상과 우선순위       |
-| [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)            | 스토리를 구현 가능한 티켓과 의존성으로 분해한다.                      | 실제 작업 착수, 일정/병렬화 계획 수립 시        | 구현 단위, 선행 의존성, 실행 순서      |
+| [ERD-dondok.md](./ERD-dondok.md)                        | 핵심 테이블, 관계, 제약, 스냅샷 저장 구조를 정의한다.                 | DB 설계, 쿼리 설계, 영속성 모델 검토 시         | 데이터 구조와 DB 제약                  |
+| [API-spec-dondok.md](./API-spec-dondok.md)              | FE/BE가 공유하는 엔드포인트, 요청/응답, 에러, 상태값 계약을 정의한다. | 화면 연동, API 구현, QA 시나리오 작성 시        | 외부 API 계약. 알림 transport 세부는 API 및 외부 implementation/infra decision docs 후속 propagation 대상 |
+| [Dondok_요구사항명세서_v0.1.xlsx](./Dondok_요구사항명세서_v0.1.xlsx) | 상세 요구사항 참고 자료다.                                            | 요구사항 세부 항목과 검증 단위를 확인할 때      | Downstream 요구사항 reference          |
 | [Dondok_프로젝트기획안_v1.0.docx](./Dondok_프로젝트기획안_v1.0.docx) | 활성 제품/UX 참고 자료다.                                             | 배경, UX 의도, 제안서 표현 확인이 필요할 때     | 현재 source of truth 아님. 참고용 입력 |
 
 문서 충돌 시 우선순위는 아래를 따른다.
 
 1. PRD: 제품 목표와 비즈니스 규칙
-2. Settlement-design / ERD: 도메인 규칙과 데이터 구조
-3. API-spec: 외부 인터페이스 계약
-4. Backlog / Ticket: 실행 계획
+2. Usecase: PRD 의미의 semantic bridge와 drift warning
+3. Settlement-design: 정산 도메인 규칙과 운영/runtime semantics
+4. ERD: 데이터 구조와 DB 제약
+5. API-spec: 외부 인터페이스 계약
+6. 요구사항 명세서 / wireframe / QA / 외부 WBS·GitHub Issues·implementation/infra decision docs: 실행·검증·구현 참고
 
-단, 외부 API 계약은 `API-spec`이 우선하고, identity persistence invariant와 원장/캐시 경계는 `ERD`가 우선한다. 알림 transport와 NOTIFY-003 semantics는 API-spec/ADR 후속 propagation 대상이다.
-5. 활성 기획안 docx: 참고 자료
+단, 외부 API 계약은 `API-spec`이 우선하고, identity persistence invariant와 원장/캐시 경계는 `ERD`가 우선한다. 알림 transport와 NOTIFY-003 semantics는 API-spec 및 외부 implementation/infra decision docs의 후속 propagation 대상이다.
+7. 활성 기획안 docx: 참고 자료
 
 ## 3.1 Canonical Freeze v1 적용 메모
 
@@ -71,16 +72,16 @@
 
 문서 간 의존 방향은 아래와 같다.
 
-- `PRD -> ERD`
-  제품 요구사항이 어떤 데이터 구조가 필요한지 결정한다.
-- `PRD -> Settlement-design`
-  비즈니스 규칙이 정산 정책, 예외 처리, 운영 규칙의 상위 기준이 된다.
+- `PRD -> Usecase`
+  PRD의 제품 의미와 권한 경계를 downstream 문서가 소비할 수 있는 semantic bridge로 정리한다.
+- `Usecase -> Settlement-design`
+  drift warning과 권한 경계를 정산 정책, 예외 처리, 운영 규칙에 반영한다.
+- `Settlement-design -> ERD`
+  정산/runtime semantics가 필요한 스냅샷, 원장, 제약 구조를 데이터 모델에서 확인하게 한다.
 - `ERD + Settlement-design -> API-spec`
   API는 데이터 모델과 도메인 규칙을 외부 계약으로 노출한 결과다.
-- `PRD + API-spec + Settlement-design -> MVP-backlog-user-stories`
-  무엇을 어떤 가치로 구현할지 스토리 단위로 정리한다.
-- `MVP-backlog-user-stories + API-spec + Settlement-design -> MVP-ticket-breakdown`
-  구현 단위, 선행 작업, 병렬 작업 구성을 확정한다.
+- `API-spec + 요구사항 명세서 + wireframe/QA + 외부 WBS/GitHub Issues`
+  구현 단위와 검증 단위는 상위 의미를 재정의하지 않고 실행 계획으로만 소비한다.
 
 간단히 보면 구조는 아래와 같다.
 
@@ -89,13 +90,15 @@
     ↓
 PRD
     ↓
-ERD / Settlement-design
+Usecase semantic bridge
+    ↓
+Settlement-design
+    ↓
+ERD
     ↓
 API-spec
     ↓
-MVP-backlog-user-stories
-    ↓
-MVP-ticket-breakdown
+요구사항 명세서 / wireframe / QA / 외부 WBS·GitHub Issues
 ```
 
 ## 5. 중복 방지 규칙
@@ -106,8 +109,7 @@ MVP-ticket-breakdown
 - 정산 로직, 정산 상태 흐름, 재시도, 멱등성, 실패 코드 의미는 `Settlement-design`에만 상세 정의한다.
 - 테이블, 컬럼, FK, unique 제약, 스냅샷 저장 구조는 `ERD`에만 상세 정의한다.
 - 엔드포인트, 요청/응답 JSON, 에러 응답, API enum, 알림 transport/API 외부 계약은 `API-spec`에만 상세 정의한다.
-- 백로그 우선순위와 user story는 `MVP-backlog-user-stories`에만 정의한다.
-- 구현 티켓, 선행 의존성, 병렬 실행 순서는 `MVP-ticket-breakdown`에만 정의한다.
+- 실행 우선순위, 선행 의존성, 병렬 실행 순서는 요구사항 명세서, wireframe/QA 자료, 외부 WBS, GitHub Issues에서 추적하되 상위 제품/정산/API 의미를 재정의하지 않는다.
 - 활성 기획안(`docs/Dondok_프로젝트기획안_v1.0.docx`)의 표현이 현재 Markdown 문서와 다르면 docx를 직접 구현 기준으로 사용하지 않는다. 필요한 내용은 먼저 소유 Markdown source of truth 문서로 승격한 뒤 구현한다. 기존 `갓세이빙_프로젝트기획서.docx`는 legacy/reference 입력으로만 취급한다.
 - AI 비트랜잭션 경계는 `PRD`, `API-spec`, `ERD`가 같은 정책을 유지해야 한다.
 - DB enum/constraint와 `member.uuid` identity persistence invariant의 source of truth는 `ERD`가 소유하고, `API-spec`은 FE/BE 계약에 필요한 consumer-facing enum, auth subject, 알림 recipient/transport contract만 반복한다. 예: `point_history.reference_type`, `settlement_status`, `settlement_type`, `frequency_type`, `transaction_type`.
@@ -119,17 +121,17 @@ MVP-ticket-breakdown
 문서 수정은 아래 영향 범위를 기본으로 점검한다.
 
 - `PRD` 수정:
-  제품 규칙이 바뀌면 `Settlement-design`, `ERD`, `API-spec`, `Backlog`, `Ticket`까지 연쇄 영향이 있는지 확인한다.
+  제품 규칙이 바뀌면 `Usecase`, `Settlement-design`, `ERD`, `API-spec`, 요구사항 명세서, wireframe/QA, 외부 WBS/GitHub Issues까지 연쇄 영향이 있는지 확인한다.
+- `Usecase` 수정:
+  semantic bridge나 drift warning이 바뀌면 `Settlement-design`, `ERD`, `API-spec`, QA 시나리오, wireframe copy 영향 여부를 확인한다.
 - `Settlement-design` 수정:
-  정산 상태, 계산 규칙, 재시도 정책이 바뀌면 `ERD`, `API-spec`, 관련 티켓을 함께 검토한다.
+  정산 상태, 계산 규칙, 재시도 정책이 바뀌면 `ERD`, `API-spec`, 요구사항 명세서, QA 시나리오 영향 여부를 함께 검토한다.
 - `ERD` 수정:
-  테이블 구조나 제약이 바뀌면 `API-spec`, 정산 설계, 구현 티켓 영향 여부를 확인한다.
+  테이블 구조나 제약이 바뀌면 `API-spec`, 정산 설계, 요구사항 명세서, QA 시나리오 영향 여부를 확인한다.
 - `API-spec` 수정:
-  FE 화면, BE 구현, QA 시나리오, 티켓 정의가 영향을 받는다.
-- `MVP-backlog-user-stories` 수정:
-  우선순위 변경이 `Ticket` 실행 순서에 반영되어야 한다.
-- `MVP-ticket-breakdown` 수정:
-  구현 계획 변경이므로 상위 요구사항 자체를 바꾸지 않는다. 상위 규칙이 바뀌면 먼저 `PRD`, `Settlement-design`, `ERD`, `API-spec`를 수정한다.
+  FE 화면, BE 구현, QA 시나리오, 요구사항 명세서, 외부 WBS/GitHub Issues가 영향을 받는다.
+- 요구사항 명세서 / wireframe / QA / 외부 WBS·GitHub Issues 수정:
+  실행 계획 변경이므로 상위 요구사항 자체를 바꾸지 않는다. 상위 규칙이 바뀌면 먼저 `PRD`, `Usecase`, `Settlement-design`, `ERD`, `API-spec`를 수정한다.
 
 실행 문서가 상위 문서를 덮어쓰면 안 된다. 규칙 변경은 항상 상위 문서에서 먼저 반영한다.
 
@@ -142,11 +144,12 @@ MVP-ticket-breakdown
 권장 순서:
 
 1. [PRD-dondok.md](./PRD-dondok.md)
-2. [Tech-stack-dondok.md](./Tech-stack-dondok.md)
+2. [Usecase-dondok.md](./Usecase-dondok.md)
 3. [Settlement-design.md](./Settlement-design.md)
 4. [ERD-dondok.md](./ERD-dondok.md)
 5. [API-spec-dondok.md](./API-spec-dondok.md)
-6. [MVP-ticket-breakdown.md](./MVP-ticket-breakdown.md)
+6. [implementation-gates.md](./implementation-gates.md) + [runbooks/settlement-recovery.md](./runbooks/settlement-recovery.md)
+7. 외부 WBS/GitHub Issues
 
 이 순서가 필요한 이유:
 정산, 포인트, 참가/탈퇴, 원장, 배치 같은 핵심 도메인 규칙이 데이터 구조와 강하게 연결되어 있기 때문이다.
@@ -156,10 +159,11 @@ MVP-ticket-breakdown
 권장 순서:
 
 1. [PRD-dondok.md](./PRD-dondok.md)
-2. [Tech-stack-dondok.md](./Tech-stack-dondok.md)
+2. [Usecase-dondok.md](./Usecase-dondok.md)
 3. [API-spec-dondok.md](./API-spec-dondok.md)
 4. [Settlement-design.md](./Settlement-design.md)
-5. [MVP-backlog-user-stories.md](./MVP-backlog-user-stories.md)
+5. 요구사항 명세서 / wireframe / QA 자료
+6. 외부 WBS/GitHub Issues
 
 이 순서가 필요한 이유:
 화면은 제품 흐름과 API 계약에 직접 연결되고, 정산/인증처럼 오해하기 쉬운 상태는 `Settlement-design`의 기준을 같이 알아야 UI 해석 오류를 줄일 수 있다.
@@ -169,10 +173,12 @@ MVP-ticket-breakdown
 권장 순서:
 
 1. [PRD-dondok.md](./PRD-dondok.md)
-2. [Tech-stack-dondok.md](./Tech-stack-dondok.md)
+2. [Usecase-dondok.md](./Usecase-dondok.md)
 3. [Settlement-design.md](./Settlement-design.md)
 4. [ERD-dondok.md](./ERD-dondok.md)
 5. [API-spec-dondok.md](./API-spec-dondok.md)
+6. [implementation-gates.md](./implementation-gates.md) + [runbooks/settlement-recovery.md](./runbooks/settlement-recovery.md)
+7. 외부 implementation/infra decision docs
 
 이 순서가 필요한 이유:
 배치 스케줄, 재시도, 멱등성, 포인트 원장, 운영 복구 경로는 인프라와 운영 설계에 직접 영향을 준다.

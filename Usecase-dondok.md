@@ -1,4 +1,4 @@
-# Usecase: Dondok Behavioral Semantic Architecture
+# Usecase: Dondok Behavioral Semantic Bridge
 
 > 이 문서는 Dondok의 행동 의미(behavioral semantics)를 안정화하기 위한 브리지 문서다. PRD를 대체하지 않고, API/ERD/Settlement/QA/화면/운영 문서가 같은 신뢰 루프와 권한 경계를 공유하도록 돕는다.
 
@@ -16,7 +16,7 @@ Dondok은 돈이 걸린 그룹 습관 계약 플랫폼이다. 따라서 단순�
 - settlement, retry, replay, correction은 서로 어떻게 다른가.
 - append-only history가 기술적으로만 존재하는 것이 아니라 사용자가 어떻게 신뢰할 수 있는가.
 
-이 문서는 usecase explosion, pressure-test findings, semantic consolidation, propagation stabilization plan을 하나의 행동 의미 지도(behavioral semantic architecture)로 정리한다.
+이 문서는 PRD의 제품 의미를 normalized behavioral scenarios, authority boundaries, propagation risks로 풀어 downstream drift를 줄이는 행동 의미 브리지(behavioral semantic bridge)다.
 
 ### 1.2 문서 계층에서의 위치
 
@@ -164,6 +164,19 @@ Dondok에서 UX copy는 단순 polish가 아니다. 다음 오해를 만들면 s
 
 원칙은 legalistic warning spam이 아니라 trust-through-visibility다.
 
+Hardening은 engagement mechanics 제거가 아니다. 실시간 지분율, 상대적 위치/순위, 예상 환급 흐름, 기여도, 결과 카드, 피드/리액션, 알림 재진입은 사용자가 현재 상태를 이해하고 다시 돌아오게 만드는 UX intent로 유지한다. 단, 표현은 “현재 기준”, “기여/진행”, “함께 버틴 기록”, “최종 정산 전 변동 가능”을 중심으로 하고, 금전적 우위·타인의 미이행·승자 독식처럼 보이는 framing을 금지한다.
+
+### 2.10 Engagement visibility boundary
+
+아래 mechanics는 Usecase에서 살아 있어야 하지만 authority로 격상하면 안 된다.
+
+- 실시간 지분율/기여도: 현재 입력 기준 projection visibility이며 final settlement input mutation 권한이 아니다.
+- 상대적 순위/위치: cooperative persistence를 돕는 상대 위치 표시이며 adversarial leaderboard가 아니다.
+- 예상 환급금: 불안 완화와 정산 설명을 위한 current-basis estimate이며 payout promise가 아니다.
+- 인증 피드/리액션: social richness와 응원을 위한 engagement surface이며 certification result authority가 아니다.
+- 결과 카드/공유 욕구: final settlement 이후 completion ritual과 virality intent이며 projection 공유 카드나 금전적 우위 자랑 카드가 아니다.
+- 알림 richness: 사용자를 canonical 화면으로 다시 데려오는 hint/deep-link이며 state authority가 아니다.
+
 ## 3. Semantic Domain Map
 
 | Domain | Authority Owner | Key Lifecycle Boundaries | Key Semantic Risks | Related Usecases |
@@ -203,12 +216,18 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Participant, host, system
 - **Classification**: actor-performed usecase (Participant join action; host approval is contextual review context only)
 - **Preconditions**: Room recruiting; participant eligible; sufficient point balance.
-- **Main Flow**: Participant applies/joins according to room visibility; approval and deposit lock complete before participant is part of the frozen baseline.
-- **Failure Flow**: Insufficient balance, duplicate join, deadline passed, approval pending, lock failure.
+- **Main Flow**: Participant applies/joins according to room visibility. Application may create a deposit reserve/hold UX, but approval and deposit lock must complete before participant is part of the frozen baseline.
+- **Lifecycle Semantics**:
+  - Before approval, participant withdrawal is allowed and reserved/held deposit must be immediately refunded or released.
+  - Host rejection before lock excludes the application from baseline and reserved/held deposit must be immediately refunded or released.
+  - Unreviewed applications at the relevant recruitment cutoff are auto-rejected for baseline purposes and reserved/held deposit must be immediately refunded or released.
+  - After approval + deposit lock, MVP does not allow participant-side change/cancel; the participant becomes a `JOINED` baseline candidate until activation freeze.
+  - This is behavioral semantics only; it does not freeze DB columns, API statuses, enum values, or point-account physical shape.
+- **Failure Flow**: Insufficient balance, duplicate join, deadline passed, approval pending, participant withdrawal before approval, host rejection, auto-rejection at cutoff, reserve/release failure, lock failure.
 - **Authority Boundary**: Deposit lock and participant inclusion are system/ledger constrained; host approval here is contextual review context (not payout approval, not deposit-waive authority); host cannot waive settlement rules.
-- **Projection Impact**: Locked balance may update as a UX projection.
+- **Projection Impact**: Reserve/held/locked balance and participant-count visibility may update as UX projection, but these displays do not make the participant part of final baseline before approval + lock.
 - **Settlement Impact**: Only properly joined/deposit-locked participants can become payout baseline candidates.
-- **UX Risk**: Users may confuse “approved” or “pending” with fully joined baseline status.
+- **UX Risk**: Users may confuse “applied”, “approved”, “reserved”, or “pending” with fully joined baseline status, or interpret rejection/auto-rejection as confiscation.
 - **Related Domain Objects**: `room_participant`, `point_account`, `point_history`.
 
 ### UC-A03 — Concurrent Join and Capacity/Balance Race
@@ -266,7 +285,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A07 — Server-Time Certification Eligibility
 
 - **Actors**: Participant, system
-- **Classification**: shared input rule / invariant within UC-A06 (server_time eligibility — not a standalone actor-performed action; diagram v4에서 UC-A06 라벨에 흡수)
+- **Classification**: shared input rule / invariant within UC-A06 (server_time eligibility — not a standalone actor-performed action; diagram에서는 UC-A06 라벨에 흡수될 수 있음)
 - **Preconditions**: Mission active or near boundary.
 - **Main Flow**: System records `server_time` and uses canonical time rules for eligibility.
 - **Failure Flow**: Client time, EXIF time, or async processing completion is incorrectly used.
@@ -292,7 +311,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A09 — Duplicate or Excess Certification Under Cadence Rules
 
 - **Actors**: Participant, system
-- **Classification**: shared input rule (cadence cap; projection·settlement에 동일 적용; diagram v4에서 floating «shared input rule» 노드로 표현)
+- **Classification**: shared input rule (cadence cap; projection·settlement에 동일 적용; diagram에서는 floating «shared input rule» 노드로 표현될 수 있음)
 - **Preconditions**: Multiple successful raw logs exist in the same cadence period.
 - **Main Flow**: Raw logs remain append-only; projection/settlement recognizes only allowed count according to cadence.
 - **Failure Flow**: Feed success count inflates final settlement recognized count.
@@ -331,7 +350,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A12 — Post-Freeze / Post-Success Correction Boundary
 
 - **Actors**: Host, admin/support, participant, system
-- **Classification**: invariant / boundary (settlement input freeze · post-final immutability; not a usecase action — diagram v4에서 FREEZE block으로 승격. Correction workflow는 MVP unresolved/deferred)
+- **Classification**: invariant / boundary (settlement input freeze · post-final immutability; not a usecase action — diagram에서는 FREEZE block으로 표현될 수 있음. Correction workflow는 MVP unresolved/deferred)
 - **Preconditions**: Settlement input is frozen or settlement succeeded.
 - **Main Flow**: Host correction cannot mutate final settlement input. Any post-success correction lifecycle remains unresolved/defer-as-unsafe unless separately frozen by L1 authority.
 - **Failure Flow**: Retry or host correction is used to change final payout.
@@ -461,11 +480,11 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 | audit | 결과 검증·재현 (mutation 없음) | UC-A18 |
 | cross-cutting non-authoritative semantics | hint 또는 설명 레이어 (state authority 없음) | UC-A19, UC-A20 |
 
-### 4.B Diagram Alignment Note
+### 4.B Diagram Projection Note
 
-`docs/Usecase-diagram-dondok.md` (v4)는 UML 가독성과 authority boundary 보호를 위해 일부 UC를 actor-performed usecase 노드로 표현하지 않는다. 본 inventory와 diagram 사이의 매핑은 다음과 같다.
+`docs/Usecase-diagram-dondok.md`는 UML 가독성과 authority boundary 보호를 위한 non-authoritative visual projection이다. 본 inventory가 behavioral semantic source이며, diagram 표현은 이를 화면화한 보조 산출물로만 소비한다. 본 inventory와 diagram 사이의 현재 매핑은 다음과 같다.
 
-| UC | Diagram v4 표현 | 이유 |
+| UC | Diagram 표현 | 이유 |
 |---|---|---|
 | UC-A07 | UC-A06 라벨에 흡수 (server_time eligibility) | UC-A06 내부 입력 규칙 — standalone actor action이 아님 |
 | UC-A08 | UC-A06/UC-A10 라벨에 흡수 (signal only) | risk signal — standalone authority 아님 |
@@ -476,7 +495,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 | UC-A18 | ⑦ Audit lane («append-only») | replay는 payout mutation이 아님 |
 | UC-A19 | ⑧ OPS lane «non-authoritative» | hint layer; canonical state authority 없음 |
 
-Diagram v4에서 노드로 승격되지 않은 UC도 본 inventory에서는 normative semantic으로 보존된다. Diagram은 가독성을 위한 표현 layer이고, 본 inventory가 canonical semantic source다.
+Diagram에서 노드로 승격되지 않은 UC도 본 inventory에서는 normative semantic으로 보존된다. Diagram은 가독성을 위한 표현 layer이고, 본 inventory가 canonical behavioral semantic source다.
 
 ### 4.C Authority Boundary Matrix
 
@@ -515,7 +534,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 | PF-003 | Final differs from last estimate | User sees final delta as arbitrary | Provide explanation drivers: moderation, cadence cap, server-time cutoff, withdrawal/defer rule, tie/remainder | Settlement, API, Support, QA |
 | PF-004 | Host rejection as confiscation | Moderation feels like money authority | Copy must state certification review input, not deposit/ledger decision | PRD, Wireframe, Support |
 | PF-005 | Append-only hidden by latest-only UI | Users suspect tampering | Show timeline/progressive audit visibility where relevant | ERD, API, Wireframe |
-| PF-006 | Host inactivity | Participants feel hostage to host | Preserve as warning unless it changes settlement freeze; do not invent workflow here | PRD, QA, Backlog |
+| PF-006 | Host inactivity | Participants feel hostage to host | Preserve as warning unless it changes settlement freeze; do not invent workflow here | PRD, QA, Requirements/WBS |
 | PF-007 | Bulk moderation | Convenience can amplify wrong decisions | Require per-log audit semantics if bulk exists | API, ERD, QA |
 | PF-008 | Late/stale notifications | Notification becomes pseudo-state | Notification deep-links to canonical refresh; avoid final wording unless final is verified | API, Wireframe, QA |
 | PF-009 | Upload success misunderstanding | Storage upload treated as certification | Separate upload object from MissionLog authority | API, Wireframe, QA |
@@ -529,6 +548,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 | PF-017 | All-fail / tie / remainder fairness | Deterministic can still feel unfair or house-like | All-fail = equal principal refund; remainder must be replayable rule, not host discretion | Settlement detail, Support |
 | PF-018 | Brownfield host-start drift | Host lifecycle authority contradicts canonical model | Label/remove/reframe as Drift Candidate | PRD, API, Settlement, QA |
 | PF-019 | Support source confusion | Support answers become semantic authority drift | Lifecycle-specific support source hierarchy | Runbook, Support QA |
+| PF-020 | Engagement over-hardening | Rank, projection, result card, feed, reaction, and notification are reduced to risk-only surfaces | Preserve mechanic visibility with cooperative wording; harden copy, not the underlying UX intent | PRD, Wireframe, QA |
 
 ## 6. Lifecycle Dependency Graph
 
@@ -617,7 +637,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 | Settlement eligibility anchors | Hard Blocker | `start_at`, `activated_at`, `server_time`, withdrawal/deferred semantics can drift | Authoritative lifecycle interpretation splits | Two valid replay paths | PRD/API/Settlement mismatch |
 | Replay/version snapshot requirements | Hard Blocker | Minimum data for settlement-time replay not fully frozen | Replay can become current-rule recalculation | Audit reproduction can differ | ERD/Settlement cannot prove replayability |
 | Post-success correction lifecycle | Hard Blocker / Deferred Semantic | Formal correction/dispute workflow is not MVP-frozen | Hidden mutation or admin payout editing risk | Final settlement could be overwritten without append-only model | Do not design in API/ERD until L1 freezes it |
-| All-fail refund mismatch | Resolved upstream / Brownfield Conflict | PRD now requires all-fail equal principal refund, but prior docs may still say all fail => 0 refund | Settlement constitution conflict if old wording propagates | Direct payout difference | Settlement/ERD/API/backlog must remove or label zero-refund wording before propagation |
+| All-fail refund mismatch | Resolved upstream / Brownfield Conflict | PRD now requires all-fail equal principal refund, but prior docs may still say all fail => 0 refund | Settlement constitution conflict if old wording propagates | Direct payout difference | Settlement/ERD/API/requirements/QA must remove or label zero-refund wording before propagation |
 | Deterministic host remainder | Hard Blocker / UX Warning | Host receives deterministic remainder but must not look discretionary | Host authority leakage | Remainder replay rule misunderstood as host privilege | PRD/Settlement/API/Support wording drift |
 | Host manual start / `/start` | Brownfield Conflict | Existing docs/API may imply host lifecycle authority | Host becomes activation authority | Eligibility and projection anchors drift | Must be removed, deferred, or labeled before propagation |
 | Moderation timeout / inactive host | Propagation Warning, possibly blocker if it affects freeze | What happens when host does not moderate before freeze? | Participant may feel hostage to host | If unresolved input affects final settlement, can become hard blocker | PRD/API/QA need label; no invented workflow here |
@@ -625,8 +645,8 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 | Frozen projection wording | Propagation Warning | Name sounds final | Projection becomes pseudo-settlement | Users dispute final delta | API/Wireframe copy drift |
 | Notification stale-state reconciliation | Propagation Warning | Reconnect/late notification behavior wording incomplete | Notification becomes pseudo-authority | No direct settlement change | Client/QA/support drift |
 | Support explanation hierarchy | Propagation Warning | Support may cite wrong source depending on lifecycle | Support becomes informal authority | Disputes handled from projection instead of settlement item | Runbook/support QA drift |
-| Emotional trust framing | Propagation Warning | Ranking, rejection, warnings can feel punitive/gambling-like | Product trust erodes | No direct payout change | Wireframe/PRD/backlog may drop as polish |
-| Competitive mechanics vs emotional framing | Propagation Warning | Relative contribution visibility may be copied as adversarial leaderboard | Users start hoping others fail | No direct payout change | Wireframe/API/backlog may encode “1위 수익자” or failure-profit copy |
+| Emotional trust framing | Propagation Warning | Ranking, rejection, warnings can feel punitive/gambling-like | Product trust erodes | No direct payout change | Wireframe/PRD/requirements/QA may drop as polish |
+| Competitive mechanics vs emotional framing | Propagation Warning | Relative contribution visibility may be copied as adversarial leaderboard | Users start hoping others fail | No direct payout change | Wireframe/API/requirements/QA may encode first-place earner or failure-profit copy |
 
 ## 8. Downstream Propagation Guidance
 
@@ -677,7 +697,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 3. Settlement semantic patch.
 4. ERD propagation.
 5. API wording/contract propagation.
-6. Backlog/ticket cleanup.
+6. Requirements / WBS / GitHub Issues cleanup.
 7. QA semantic matrix.
 8. Wireframe/copy guidance.
 9. Support runbook scripts.

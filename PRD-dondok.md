@@ -15,6 +15,7 @@ ERD/API/Settlement/Test 문서는 이 PRD synthesis를 기준으로 후속 propa
 - Dondok의 emotional priority는 `계약 신뢰 > 상호 책임 기반 성장 > 경쟁 긴장감`이다. 경쟁 긴장감과 상대적 환급 차이는 허용 가능하지만, 제품의 emotional center는 환급 경쟁이 아니라 “누가 얼마나 꾸준히 함께 버텼는가”에 둔다.
 - 정산 UX 우선순위는 `설명 가능성/감정적 수용성 > authoritative 정확성 > 예상값 고정성`이다.
 - 예상 환급금은 anxiety reduction과 settlement explanation을 위한 현재 기준 projection이며 최종 정산금이 아니다. 최종 정산은 authoritative batch 결과로 확정된다.
+- 실시간 지분율, 상대적 순위/위치, 예상 환급금, 기여도, 결과 카드, 알림 재진입은 engagement visibility로 유지한다. 이는 사용자가 현재 흐름을 이해하고 다시 돌아오게 만드는 UX mechanics이며, 최종 정산·원장·payout authority가 아니다.
 - 정산은 deterministic, explainable, replayable 해야 한다.
 - 전체 인정 성공 기록이 없는 all-fail 상황에서는 누군가의 실패가 다른 참여자의 수익으로 이어지지 않도록 equal principal refund를 적용한다.
 - 사용자 화면에서 도딘(Dodin)은 보증금·환급 UX를 표현하는 user-facing app-money branding이며, authoritative accounting은 point ledger/history가 담당한다. 도딘은 별도 coin, 외부 현금, 인출 가능 자산, 또는 별도 ledger가 아니다.
@@ -40,6 +41,10 @@ ERD/API/Settlement/Test 문서는 이 PRD synthesis를 기준으로 후속 propa
 - 약관/법무 wording
 - role-based moderation history visibility matrix
 - post-final correction/support workflow 세부 운영
+- Redis/Redisson/distributed lock/concurrency control 전략
+- notification transport(SSE/FCM/push 등)와 delivery topology
+- `point_account`의 물리적 balance shape(`available`, `locked`, `pending`, `total` 등)와 cache/reconciliation 전략
+- settlement amount unit 재검토 후보와 기존 정수/절사 baseline 변경 여부
 
 ### Downstream alignment rule
 
@@ -58,7 +63,7 @@ Dondok의 MVP는 기능 풍성함이 아니라 “돈이 걸린 습관 계약의
 | 이름 | 역할                           | 코멘트                                       |
 | ---- | ------------------------------ | -------------------------------------------- |
 | 미정 | Product Owner / PM             | 범위, 우선순위, 최종 의사결정 담당           |
-| 미정 | Architecture / Settlement Lead | 정산 엔진, 배치, downstream alignment 책임   |
+| 미정 | Technical / Settlement Lead | 정산 엔진, 배치, downstream alignment 책임   |
 | 미정 | Auth / Security Lead           | 인증, 권한, 이미지 검증, 보안 정책 책임      |
 | 미정 | Crew / Mission Lead            | 크루, 미션, moderation, 알림 흐름 책임       |
 | 미정 | Point / Dashboard Lead         | 포인트, projection, 대시보드, 결과 설명 책임 |
@@ -199,6 +204,8 @@ P1 이후 프로토타입 후보:
 - AI 습관 리포트
 - retention visual / social richness 확장
 
+단, 결과 카드와 공유 욕구 자체는 단순 polish로 삭제할 수 있는 intent가 아니다. MVP에서 저장/다운로드 구현을 P1로 미루더라도, final settlement 이후 완주 기록·공동 성취·다시 보고 싶은 결과 entry point는 PRD에 살아 있어야 한다. Projection 상태를 공유 카드처럼 포장하지 않고, final result 전용 completion ritual로 다룬다.
+
 핵심 UX 안내 문구:
 
 - 모집 상태 영역에는 아래 문구를 노출한다.
@@ -238,21 +245,25 @@ P1 이후 프로토타입 후보:
 
 Authority P0와 Engagement UX P0는 서로 다른 실패 경계를 가진다. Authority P0는 정산, 원장, lifecycle, participant baseline, final settlement authority에 직접 영향을 주는 필수 흐름이다. Engagement UX P0는 사용자의 이해, 재방문, 운영 가시성, 생성 편의성을 돕는 Phase 1 경험이며, 실패하더라도 settlement/ledger/lifecycle authority를 차단하거나 변경해서는 안 된다. 따라서 AI 크루 생성 도우미, 인증 피드/리액션, 알림, 운영 탭, projection dashboard, 반응형 UX, 방장 badge/counter는 trust-loop-first를 약화하지 않는 범위에서 P0 Engagement UX로 유지할 수 있다.
 
-| 기능                | 포함 이유                                                        | Boundary                                                              |
-| ------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------- |
-| AI 크루 생성 도우미 | 사용자가 미션명/인증 규칙/문구를 쉽게 작성하도록 돕는다.         | Manual fallback 필수. AI 결과는 policy/settlement authority가 아니다. |
-| 인증 피드           | 인증 로그를 참여자에게 보여준다.                                 | Feed ordering/display는 settlement input을 직접 바꾸지 않는다.        |
-| 리액션              | 참여자 간 응원/가벼운 반응을 제공한다.                           | Reaction은 인증 성공/실패나 지분율에 영향 없음.                       |
-| 운영 탭             | 검토 대기/거절/누락 등 상태를 설명한다.                          | Contextual visibility, not ledger control.                            |
-| 알림                | 모집/인증/검토/정산 주의가 필요한 순간을 best-effort로 알려준다. | Notification failure must not block certification or settlement.      |
-| 반응형 UX           | 모바일/데스크톱에서 핵심 trust loop를 수행할 수 있게 한다.       | Presentation requirement, not authority semantics.                    |
-| Host badge/counter  | Host 역할과 검토 책임을 이해시킨다.                              | Host badge는 activation/settlement authority가 아니다.                |
+Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 자체를 제거하지 않는다. 현재 기준 지분율, 상대적 위치, 예상 환급 흐름, 기여도, 인증 피드, 리액션, 알림 재진입은 사용자가 “돈이 걸린 약속”을 이해하고 계속 참여하게 만드는 핵심 표면이다. 이 표면은 cooperative persistence framing으로 설명하며, 금전적 우위·타인의 미이행·승패 중심 framing으로 격상하지 않는다.
+
+| 기능                         | 포함 이유                                                        | Boundary                                                                                 |
+| ---------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| AI 크루 생성 도우미          | 사용자가 미션명/인증 규칙/문구를 쉽게 작성하도록 돕는다.         | Manual fallback 필수. AI 결과는 policy/settlement authority가 아니다.                    |
+| 인증 피드                    | 인증 로그를 참여자에게 보여준다.                                 | Feed ordering/display는 settlement input을 직접 바꾸지 않는다.                           |
+| 리액션                       | 참여자 간 응원/가벼운 반응을 제공한다.                           | Reaction은 인증 성공/실패나 지분율에 영향 없음.                                          |
+| 실시간 현황 / 기여 visibility | 현재 기준 지분율, 상대적 위치, 예상 환급 흐름, 기여도를 보여준다. | Projection/current-basis UX다. final settlement, ledger, payout certainty가 아니다.       |
+| 운영 탭                      | 검토 대기/거절/누락 등 상태를 설명한다.                          | Contextual visibility, not ledger control.                                               |
+| 최종 결과 entry point        | final settlement 이후 완주 기록과 공동 성취를 다시 보게 한다.     | 결과 카드 intent는 유지하되 저장/공유 polish는 P1 가능. Projection 공유 카드는 금지한다. |
+| 알림                         | 모집/인증/검토/정산 주의가 필요한 순간을 best-effort로 알려준다. | Notification failure must not block certification or settlement.                         |
+| 반응형 UX                    | 모바일/데스크톱에서 핵심 trust loop를 수행할 수 있게 한다.       | Presentation requirement, not authority semantics.                                       |
+| Host badge/counter           | Host 역할과 검토 책임을 이해시킨다.                              | Host badge는 activation/settlement authority가 아니다.                                   |
 
 #### P1 / Later 후보
 
 | 기능                                    | 설명                                                | 이유                                                                            |
 | --------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------- |
-| 결과 카드 저장/공유/다운로드            | final settlement 이후 결과를 카드로 저장하거나 공유 | 정산 authority와 분리된 확산/기념 UX. Projection 공유 카드로 오해시키지 않는다. |
+| 결과 카드 저장/공유/다운로드            | final settlement 이후 결과를 카드로 저장하거나 공유 | 구현 polish는 P1이나 completion/virality intent는 PRD에 보존한다. Projection 공유 카드로 오해시키지 않는다. |
 | 정산 이메일/리포트 polish               | 정산 결과 알림·요약 고도화                          | MVP trust loop 이후 communication polish                                        |
 | AI 습관 리포트                          | 개인 습관 요약/코칭                                 | Settlement input이 아니므로 Phase 1 이후 가능                                   |
 | Retention visual / social richness 확장 | 배지, streak, 외부 공유 등                          | P0 authority와 직접 무관                                                        |
@@ -286,6 +297,11 @@ Dashboard는 운영 중 사용자에게 예상 상태와 그 이유를 설명하
 - 보증금은 1,000~100,000원이며 1,000원 단위로 설정한다.
 - `recruitment_deadline`은 참여자 승인 + 예치 Lock eligibility cutoff다.
 - `recruitment_deadline`까지 승인 + 예치 Lock 완료된 참여자만 frozen participant baseline에 포함된다.
+- 참여 신청 시 보증금 reserve/hold UX는 가능하지만, 승인 + 예치 Lock 완료 전에는 activation eligibility나 frozen participant baseline에 포함되지 않는다.
+- 승인 전 참여자는 신청을 철회할 수 있으며, 철회 시 reserve/hold된 도딘은 즉시 환급 또는 release되어야 한다.
+- Host 거절 또는 미검토 자동 거절 시 해당 신청은 baseline에 포함되지 않으며 reserve/hold된 도딘은 즉시 환급 또는 release되어야 한다.
+- 승인 + 예치 Lock 완료 후에는 MVP에서 참여 변경/취소를 허용하지 않으며, 해당 참여자는 frozen baseline 후보가 된다.
+- 위 lifecycle semantics는 사용자 기대와 정산 boundary를 고정하기 위한 것이며, DB schema/API status/point account physical shape를 PRD에서 freeze하지 않는다.
 - baseline이 최소 인원을 충족하지 못하면 미션은 시작되지 않고 예치 도딘은 환급된다.
 - Host는 `start_at` 전까지 미션을 해체할 수 있다. 해체되면 미션은 시작되지 않고 예치 도딘은 환급된다.
 - baseline이 최소 인원을 충족하고 host disband가 없으면 system은 `start_at` 기준 자동 `ACTIVE`로 전이한다.
@@ -367,6 +383,7 @@ PRD는 기술 선택의 상세 정책을 소유하지 않는다. MVP 기술 스�
 - 보증금을 안전하게 예치하고, 결과에 따라 도딘/포인트를 환급할 수 있는가?
 - 인증 signal과 방장 moderation을 통해 final certification state를 설명할 수 있는가?
 - 예상 환급금 projection과 최종 정산 결과를 명확히 구분할 수 있는가?
+- 실시간 지분율, 상대적 위치, 예상 환급 흐름, 기여도 visibility가 trust-safe wording으로 유지되는가?
 - 정산 결과가 deterministic/replayable/explainable 한가?
 - 방장 moderation history와 운영자 예외 개입이 audit 가능하게 남는가?
 - AI·소셜·알림 기능이 실패해도 방 생성, 자동 시작, 인증, 정산, 환급 authority 흐름은 계속 사용할 수 있는가?
@@ -387,9 +404,11 @@ PRD는 기술 선택의 상세 정책을 소유하지 않는다. MVP 기술 스�
 - 인증 피드 / 리액션
 - best-effort 알림
 - 예상 환급금 projection 대시보드
+- 실시간 지분율 / 상대적 위치 / 기여도 visibility
 - 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 deterministic final settlement batch
 - authoritative point ledger/history 기반 포인트/도딘 환급
 - 정산 결과 설명 화면
+- final result 전용 결과 entry point와 completion framing
 - 반응형 UX
 - 외부 운영 문의 fallback 안내
 
@@ -551,11 +570,7 @@ Phase 2 후보는 아래와 같다.
 
 ## 10. Downstream Propagation Preparation
 
-이 섹션은 후속 ERD/API/Settlement/Test 정렬을 위한 영향도 지도다. 이번 PRD synthesis wording stabilization 단계에서는 아래 downstream 문서를 수정하지 않는다.
-
-### Protected downstream files for this phase
-
-이번 phase에서는 API specification, ERD, settlement design, MVP backlog/ticket, implementation gate, settlement recovery runbook 계열 downstream 문서를 수정하지 않는다. 일부 downstream 파일명에는 아직 legacy naming이 남아 있을 수 있으나, 이번 작업의 scope는 L1-aligned PRD synthesis wording correction에 한정한다.
+이 섹션은 후속 ERD/API/Settlement/Test 정렬을 위한 영향도 지도다. PRD는 제품 의미와 정책 boundary를 정리하되, API specification, ERD, requirements specification, wireframe/QA, 외부 WBS/GitHub Issues, implementation gate, settlement recovery runbook 계열 downstream 문서를 직접 수정하거나 구현 세부를 freeze하지 않는다.
 
 ### Policy impact map
 
@@ -592,7 +607,7 @@ Phase 2 후보는 아래와 같다.
 5. Settlement semantics wording confirmation
 6. ERD impact mapping
 7. API contract patch
-8. Backlog/ticket and QA scenario cleanup
+8. Requirements / WBS / GitHub Issues / wireframe / QA scenario alignment
 
 ### Freeze-before-propagation areas
 
