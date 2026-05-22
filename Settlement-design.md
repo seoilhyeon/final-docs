@@ -39,7 +39,7 @@
 - 복잡한 분산 트랜잭션
 - 성공 후 재정산용 별도 회계 정정 프로세스
 - final settlement 이후 payout rewrite, hidden mutation, support/admin override workflow
-- Redis/Redisson 여부, distributed lock topology, batch infrastructure topology의 신규 결정
+- MVP 범위를 넘어서는 분산 실행 조정 전략, batch infrastructure topology의 신규 결정
 - `point_account` physical balance shape(`available`, `locked`, `pending`, `total` 등) 재설계
 - SSE/FCM 같은 notification transport 결정
 - settlement amount unit 재검토 결정
@@ -275,16 +275,15 @@ MissionRoom 상태가 RECRUITING -> CANCELLED
 
 1. 대상 `Settlement` 목록 조회
 2. 조건부 update로 `PENDING/RETRY_WAIT -> RUNNING` claim
-3. 동시 실행 완화용 보조 수단이 구성된 경우 이를 시도하되, 실행권의 최종 기준은 조건부 claim과 원장 멱등성으로 유지
-4. 정산 입력 데이터 로드
-5. 정산 계산 수행
-6. `settlement` 집계값과 `settlement_item` 스냅샷 저장
-7. 참여자별 `point_history`를 `idempotency_key`와 함께 생성
-8. 생성된 `point_history.id`를 각 `settlement_item.point_history_id`에 연결
-9. 모든 `settlement_item`에 대응하는 `point_history`가 존재하고 `point_history_id`가 채워졌는지 검증
-10. 참여자/방 projection 갱신
-11. 위 검증이 모두 통과한 경우에만 `Settlement.status = SUCCEEDED`로 종료
-12. 커밋 후 `SettlementCompleted` 후속 이벤트 발행
+3. 정산 입력 데이터 로드
+4. 정산 계산 수행
+5. `settlement` 집계값과 `settlement_item` 스냅샷 저장
+6. 참여자별 `point_history`를 `idempotency_key`와 함께 생성
+7. 생성된 `point_history.id`를 각 `settlement_item.point_history_id`에 연결
+8. 모든 `settlement_item`에 대응하는 `point_history`가 존재하고 `point_history_id`가 채워졌는지 검증
+9. 참여자/방 projection 갱신
+10. 위 검증이 모두 통과한 경우에만 `Settlement.status = SUCCEEDED`로 종료
+11. 커밋 후 `SettlementCompleted` 후속 이벤트 발행
 
 claim SQL의 개념 예시:
 
@@ -303,8 +302,8 @@ where id = :settlementId
 
 - update 결과 row count가 `1`이면 claim 성공이다.
 - row count가 `0`이면 다른 워커가 먼저 claim한 것이므로 즉시 skip한다.
-- claim 후 Redis 락 획득에 실패하면 `LOCK_ACQUIRE_FAILED`로 기록하고 `RETRY_WAIT`로 되돌린다.
-- Redis 락은 보조 안전장치고, 최종 claim 성공 여부는 DB 조건부 update가 결정한다.
+- MVP 실행권은 DB conditional claim의 row count가 결정한다. row count가 `1`이면 해당 실행자가 이번 시도 실행권을 갖고, row count가 `0`이면 이미 다른 실행자가 claim한 것으로 보고 skip한다.
+- 중복 지급 방어는 unique 제약, participant 단위 `point_history.idempotency_key`, payload consistency check, `settlement_item.point_history_id` linkage verification before SUCCEEDED로 유지한다.
 - 계산 스냅샷인 `settlement_item`이 먼저 저장되고, 실제 잔액 원장인 `point_history`는 그 뒤에 생성되어 `point_history_id`로 연결된다.
 - 정산 재시도 시 일부 participant의 `point_history`만 먼저 생성된 partial 상태를 허용한다. 이미 생성된 원장은 같은 `idempotency_key`로 중복 생성되지 않고, 아직 생성되지 않은 participant만 추가 반영한다.
 - 재시도는 기존 `Settlement`와 기존/frozen `settlement_item` 스냅샷 기준으로 중단된 authoritative execution을 이어가는 행위다. 재시도는 정산 재계산, moderation re-resolution, frozen input mutation이 아니다.
@@ -700,18 +699,18 @@ ordering_key = stable domain input(room_id, participant_id/member_id, event_id �
 
 ### 10.1 인증 시점 동시성 원칙
 
-- 인증 업로드와 `MissionLog` 저장 시점에는 Redisson 락을 기본값으로 두지 않는다.
+- 인증 업로드와 `MissionLog` 저장 시점에는 추가 실행 조정 계층을 기본값으로 두지 않는다.
 - 인증은 `MissionLog` append-only 저장을 우선해 원본 로그 유실 가능성을 낮춘다.
 - 실시간 대시보드, 예상 지분율, 임시 진행/참여도 표시는 Redis `INCR`, `SETNX`, Lua script 같은 원자적 캐시 연산으로 갱신할 수 있다.
 - 위 실시간 지표는 사용자 안내용 current-basis 추정값일 뿐이며, 최종 정산 금액의 source of truth가 아니다.
 - 실시간 캐시가 일부 지연되거나 누락돼도 최종 정산은 반드시 `MissionLog` 원본을 다시 읽어 확정한다.
-- 따라서 인증 시점에는 과도한 분산 락보다 `로그 보존 + 원자적 캐시 갱신 + 사후 replay/audit 가능성`을 우선한다.
+- 따라서 인증 시점에는 선행 직렬화보다 `로그 보존 + 원자적 캐시 갱신 + 사후 replay/audit 가능성`을 우선한다.
 
 ### 10.2 정산 시점 방어선
 
 - 최종 정산 시점에는 중복 정산/중복 지급 방지를 위해 여러 방어선을 함께 사용한다.
-- 1차 실행권은 DB 조건부 claim이 결정하고, 현재 brownfield에 존재하는 Redisson 계열 락은 보조 수단으로만 취급한다. DB unique와 `point_history.idempotency_key`가 최종 방어선이다.
-- 이 절에서 고정하는 semantic은 duplicate payout 방지, idempotent recovery, conditional claim 우선순위, point_history 멱등성이다. Redisson/distributed lock의 구체 전략은 현재 brownfield implementation note일 뿐 PRD/Usecase authority나 settlement finality proof가 아니다.
+- 1차 실행권은 DB 조건부 claim(DB conditional claim)이 결정한다. DB unique, `point_history.idempotency_key`, payload consistency check, `settlement_item.point_history_id` linkage verification before SUCCEEDED가 MVP 최종 방어선이다.
+- 이 절에서 고정하는 semantic은 duplicate payout 방지, idempotent recovery, conditional claim 우선순위, point_history 멱등성이다. 분산 실행 조정 전략은 MVP correctness proof가 아니다.
 - 아래 10.3~10.6은 같은 방에 대해 배치 워커, 관리자 재시도, 복구 작업이 겹쳐도 결과가 participant 단위로 한 번만 확정되도록 하는 장치다.
 
 ### 10.3 상태 기반 claim
@@ -720,13 +719,12 @@ ordering_key = stable domain input(room_id, participant_id/member_id, event_id �
 - claim은 조건부 update로 수행한다.
 - 같은 `Settlement`를 두 워커가 동시에 집어도 row count `1`을 받은 워커만 실행한다.
 
-### 10.4 동시 실행 완화 수단(non-authoritative)
+### 10.4 Phase 2 scale hardening candidate (non-authoritative)
 
-- 현재 brownfield note는 `lock:settlement:room:{roomId}` Redisson 계열 락을 같은 방 중복 실행 완화 수단으로 설명한다.
-- 이 문서가 고정하는 것은 특정 distributed lock topology가 아니라, 배치 워커와 관리자 재시도, 복구 스크립트가 같은 방을 동시에 처리해도 중복 지급으로 이어지지 않아야 한다는 invariant다.
-- 락 계층이 없어도 DB 조건부 update와 unique 제약이 최종 방어선이므로, 락은 semantic authority가 아닌 보조 안전장치로만 설명한다.
-- 따라서 현재 Redisson 언급은 `정산 커밋 경계`의 brownfield context이며, 인증 로그 저장 전 구간까지 확장하거나 future architecture decision으로 복제하지 않는다.
-- 향후 distributed lock 전략을 변경하더라도 동일한 semantic invariants(조건부 claim, unique constraint, participant 단위 idempotency, point_history 방어선)를 만족해야 한다. 전략 변경 자체는 별도 architecture/implementation decision으로 다룬다.
+- Redisson / Redis distributed lock은 MVP requirement나 optional runtime path가 아니라 Phase 2 scale hardening candidate only다.
+- MVP가 고정하는 것은 배치 워커와 관리자 재시도, 복구 작업이 같은 방을 동시에 처리하려 해도 DB conditional claim, unique constraint, participant 단위 idempotency, point_history 방어선으로 중복 지급이 발생하지 않아야 한다는 invariant다.
+- 다중 인스턴스 정산 워커, 관리자 재시도 동시성, 복구 스크립트 동시성이 MVP 범위를 넘어 실제 운영 요구가 될 때만 별도 architecture decision에서 분산 실행 조정 전략을 검토한다.
+- Redis availability, Redis HA, lease timeout, watchdog, split brain 같은 운영 복잡도와 구체 topology는 이 문서의 MVP runtime path와 correctness proof에 포함하지 않는다.
 
 ### 10.5 DB unique 제약
 
@@ -772,7 +770,7 @@ settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cance
 
 구현 단계에서는 `docs/implementation-gates.md`의 Settlement PR Gate를 함께 적용한다. 이 절은 stack topology를 freeze하지 않고, 구현 편의나 batch metadata로 대체할 수 없는 semantic guardrail만 나열한다.
 
-- `Settlement.status` 조건부 claim이 실행권의 최종 기준이다. 현재 brownfield Redisson 계열 lock은 중복 실행 가능성을 낮추는 보조 장치일 뿐, 실행권 authority나 finality proof가 아니다.
+- `Settlement.status` 조건부 claim(DB conditional claim)이 실행권의 최종 기준이다. 분산 실행 조정 계층은 MVP 실행권 authority나 finality proof가 아니다.
 - `settlement_item`은 먼저 생성되어 participant별 계산 snapshot을 고정하고, 이후 `point_history` 생성/재사용 결과를 `point_history_id`로 연결한다.
 - retry는 새 계산 결과를 만드는 재정산이나 correction이 아니라, 기존 `Settlement`와 `settlement_item` 기준으로 미완료 participant만 복구하는 작업이다.
 - replay는 settlement-time input/rule/snapshot으로 결과 재현성을 검증하는 audit 동작이며, payout mutation이나 succeeded settlement 변경이 아니다.
@@ -795,7 +793,6 @@ settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cance
 | `CALCULATION_FAILED`   | 계산 중 예외 또는 불일치 감지                | 불가        | `FAILED`, 감사 로그 기반 원인 분석 후 재시도/복구 판단 |
 | `POINT_CREDIT_FAILED`  | 포인트 원장 반영 실패                        | 가능        | `RETRY_WAIT` 후 재시도                |
 | `DUPLICATE_SETTLEMENT` | 중복 정산 생성 또는 이미 존재하는 정산 감지  | 불가        | 데이터 점검 후 기존 settlement 조회/복구 판단          |
-| `LOCK_ACQUIRE_FAILED`  | 락 획득 실패                                 | 가능        | 짧은 간격으로 재시도                  |
 | `UNKNOWN`              | 분류되지 않은 예외                           | 제한적 가능 | 기본은 `RETRY_WAIT`, 반복 시 `FAILED` |
 
 ### 11.2 상태 전이 규칙
@@ -834,7 +831,7 @@ settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cance
 | 참여자별 보증금 상이         | 총 풀은 합산하되, 결과 설명은 `deposit_amount`, `final_amount`, `share_ratio`로 제공                           |
 | `ACTIVE` 이후 신규 참여 요청 | 거절한다. MVP에서는 모집 완료 후 참여자 구성을 고정한다.                                                       |
 | 탈퇴 후 동일 방 재참여 요청  | MVP active flow에서는 지원하지 않고 거절한다. WITHDRAWN/rejoin은 brownfield/deferred이며 frozen baseline을 변경하지 않는다. |
-| 같은 방 중복 정산 시도       | 상태 claim + 락 + unique 제약 + `idempotency_key`로 차단                                                       |
+| 같은 방 중복 정산 시도       | 상태 claim + unique 제약 + `point_history.idempotency_key` + payload consistency check + `point_history_id` 연결 검증으로 차단 |
 | `Settlement` 누락            | 운영 복구 경로로 `PENDING` 생성, 단 `unique(room_id, settlement_type)` 준수                                    |
 | 이미 `SUCCEEDED`인 방 재요청 | 새 정산 생성 금지, 기존 결과 조회만 허용                                                                       |
 
@@ -1210,10 +1207,10 @@ total_remainder_amount = 0
 
 ### 18.3 동시성 테스트
 
-- `TS-17C` 동시 인증 업로드 시 room 단위 분산 락 없이도 `MissionLog` append-only 저장이 보존되는지
+- `TS-17C` 동시 인증 업로드 시 `MissionLog` append-only 저장이 보존되는지
   기대 결과: 같은 시점 인증 요청이 겹쳐도 로그는 유실 없이 저장되고, 실시간 지표는 일부 지연될 수 있지만 최종 정산 결과는 변하지 않는다.
 - `TS-18` 같은 방에 대해 동시 정산 요청이 들어온 경우 조건부 claim에서 1개 워커만 성공하는지
-- `TS-19` 락 획득 실패 시 실행이 시작되지 않고 재시도 대상으로 남는지
+  기대 결과: 같은 `Settlement`에 대해 동시 실행 요청이 들어와도 조건부 claim에서 하나의 실행자만 성공하고 나머지는 skip된다.
 - `TS-20` `unique(room_id, settlement_type)` 제약이 중복 생성 시도를 막는지
 
 ### 18.4 운영 검증
@@ -1231,4 +1228,4 @@ total_remainder_amount = 0
 1. `settlement`, `settlement_item`, `point_history`가 정산 snapshot, item linkage, ledger idempotency를 설명할 수 있어야 한다.
 2. `SettlementPendingCreator`, `SettlementInputAssembler`, `MissionRecognitionStrategy`, `SettlementCalculator` 책임은 계산 규칙·입력 조립·실행 상태가 뒤섞이지 않도록 분리되어야 한다.
 3. `TS-01`~`TS-09`와 `TS-08A` 골든/단위 테스트는 semantic invariant를 먼저 검증해야 한다.
-4. Batch infrastructure, Redisson/distributed lock, conditional claim 구현 방식, PointHistory idempotency wiring의 구체 조합은 이 문서가 확정하지 않는다. 다만 어떤 조합이든 조건부 claim, duplicate payout 방지, participant 단위 idempotency, point_history 방어선을 만족해야 한다.
+4. Batch infrastructure와 trigger topology는 이 문서가 확정하지 않는다. MVP semantic guardrail은 조건부 claim(DB conditional claim), duplicate payout 방지, participant 단위 idempotency, point_history 방어선이다. 분산 실행 조정 전략은 MVP requirement나 optional runtime path가 아니며 별도 Phase 2 scale hardening 후보로만 다룬다.
