@@ -238,7 +238,13 @@
 | AI          | `POST`   | `/api/rooms/{roomId}/ai-habit-report`           | 정산 완료 후 내 AI 습관 리포트 생성/조회 |
 | AI          | `GET`    | `/api/rooms/{roomId}/ai-habit-report/me`        | 내 AI 습관 리포트 상태/결과 조회         |
 | AI          | `GET`    | `/api/ai-habit-reports/{reportId}`              | AI 습관 리포트 단건 조회                 |
-| 알림        | `GET`    | `/api/notifications/stream`                  | 내 실시간 알림 SSE stream 구독             |
+| 알림        | `POST`   | `/api/notification-devices`                    | Android FCM token/device 등록 후보         |
+| 알림        | `PATCH`  | `/api/notification-devices/{deviceId}`         | FCM token 갱신/상태 변경 후보              |
+| 알림        | `DELETE` | `/api/notification-devices/{deviceId}`         | FCM token/device 비활성화 후보             |
+| 알림        | `GET`    | `/api/notifications`                           | 알림 inbox UX hint 목록 조회 후보          |
+| 알림        | `GET`    | `/api/notifications/unread-count`              | 미읽음 UX badge count 조회 후보            |
+| 알림        | `PATCH`  | `/api/notifications/{notificationId}/read`     | 알림 읽음 UX 상태 처리 후보                |
+| 알림        | `GET`    | `/api/notifications/stream`                    | Phase 2/deferred SSE realtime drift 후보   |
 | 포인트      | `POST`   | `/api/points/charges`                           | 포인트 충전 반영                         |
 | 포인트      | `GET`    | `/api/points`                                   | 사용 가능 잔액 조회                      |
 | 포인트      | `GET`    | `/api/points/history`                           | 포인트 내역 조회                         |
@@ -1267,6 +1273,7 @@ Error:
 - `NONE`은 API projection이다.
 - `PENDING -> RUNNING -> SUCCEEDED / RETRY_WAIT / FAILED`는 `Settlement.status` 원천 상태를 그대로 반영한다.
 - `finished_at`은 성공/실패 종료 시각이다.
+- `started_at`/`finished_at`은 runtime execution fact다. Lifecycle/cutoff authority는 `start_at`, room timezone, daily cutoff, mission period end 같은 scheduled semantic anchor에 남는다.
 
 ### `GET /api/settlements/{settlementId}`
 
@@ -1335,6 +1342,8 @@ Error:
 - `settlement_item`은 참여자별 계산 스냅샷의 source of truth다.
 - `point_history`는 그 결과를 실제 잔액에 반영한 금액 source of truth다.
 - `SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item + point_history`이며, `MissionLog` 기반 replay는 감사/디버깅용 검증에만 사용하고 지급 결과를 변경하지 않는다.
+- Replay는 historical semantic truth reconstruction이다. API가 calculation context를 노출하는 경우에도 이는 당시 algorithm/rule/moderation/reason-code/lifecycle semantics 설명용이며 current-engine reinterpretation, payout rewrite, mutable recalculation 권한이 아니다.
+- Versioned semantic replay는 v2 runtime이 v1 settlement semantics를 해석 가능하게 하는 것이다. v2 API/엔진이 v1 final settlement를 현재 규칙으로 덮어쓰는 migration-forward reinterpretation을 허용하지 않는다.
 - `SUCCEEDED`는 모든 `settlement_item.point_history_id`가 채워지고 대응 `point_history` 존재가 검증된 상태를 뜻한다.
 - partial 상태에서는 일부 item의 `point_history_id`가 `null`일 수 있고, 이 경우 `status`는 `SUCCEEDED`가 아니라 `RETRY_WAIT` 또는 `FAILED`다.
 - 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. Brownfield `HOST_REMAINDER` 명칭은 fixed rule alias일 뿐 host 지급 권한이 아니다.
@@ -1408,6 +1417,7 @@ Error:
 - 이미 생성된 `point_history`는 deterministic `idempotency_key`로 중복 지급이 차단된다.
 - 동일 `idempotency_key`와 동일 payload의 중복은 기존 `point_history`를 재사용하거나 연결하고, 동일 키에 다른 payload가 확인되면 idempotency conflict로 실패 처리한다.
 - partial 상태에서는 미지급 participant만 이어서 처리하거나, 이미 원장이 있으나 FK만 누락된 경우 기존 `point_history`를 재사용해 연결만 보정한다.
+- retry는 unfinished execution completion authority다. 기존 snapshot/ledger/item을 교체하거나 current engine으로 재계산해 payout을 바꾸는 API가 아니다.
 - admin retry는 별도 support adjustment 경로가 아니다. Retry는 기존 `Settlement`/`settlement_item` 기준의 interrupted execution 복구이며, frozen certification outcome, succeeded settlement snapshot, authoritative daily/final result를 변경하지 않는다.
 - replay가 필요하더라도 replay는 historical reproducibility 검증용이며 payout mutation이나 payout rewrite endpoint가 아니다.
 
@@ -1545,6 +1555,8 @@ Error:
 
 - 생성 실패는 리포트 상태를 `FAILED`로 남기되, 정산 성공 상태, 환급, `Settlement.status`, `settlement_item`, `point_history`를 변경하지 않는다.
 - 향후 재시도를 추가한다면 별도 명시적 operation 또는 같은 row의 명시적 상태 전이로 설계해야 한다.
+- AI report/explanation은 versioned + stale/invalidation-aware artifact로 발전할 수 있으나 non-authoritative다. Prompt/policy/model/input snapshot metadata를 추가하더라도 settlement authority, replay authority, payout truth가 되지 않는다.
+- Regeneration append semantics, provider-level determinism, full AI replay reproducibility는 Phase 2 hardening registry에 남기며 이 MVP endpoint의 create-or-return-existing 계약을 바꾸지 않는다.
 
 ### `GET /api/rooms/{roomId}/ai-habit-report/me`
 
@@ -1576,6 +1588,7 @@ Error:
 
 - `status`는 `PENDING`, `SUCCEEDED`, `FAILED` 중 하나다.
 - `FAILED`여도 정산 결과 화면과 포인트 히스토리 조회는 그대로 가능해야 한다.
+- AI 리포트의 stale/failed 상태는 정산 결과의 stale/failed 상태가 아니다. 정산 truth는 Settlement API와 point history 원장 기준이다.
 
 ### `GET /api/ai-habit-reports/{reportId}`
 
@@ -1760,14 +1773,125 @@ Error:
 | 시작 전 취소 환급   | `ROOM_CANCELLED_REFUND`  | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                |
 
 
-## 5.9 알림 / SSE
+## 5.9 알림 / Android FCM / Inbox / SSE drift
 
-### `GET /api/notifications/stream`
+알림 API의 MVP 기준은 Android-first FCM이다. FCM은 delivery transport이고, notification은 best-effort re-entry hint다. 알림 payload, inbox list item, read/unread state, delivery attempt success/failure는 crew lifecycle, certification, moderation, settlement, point ledger/history의 source of truth가 아니다.
+
+### MVP boundary
+
+| 범위 | MVP 판단 | 권한 경계 |
+| ---- | -------- | --------- |
+| FCM token/device lifecycle | 포함 후보 | token/device transport state만 변경한다 |
+| notification inbox/list/read | 포함 후보 | UX hint history/read affordance이며 audit/canonical history가 아니다 |
+| unread count | 포함 후보 | badge 표시용 UX count이며 unresolved settlement/certification task가 아니다 |
+| delivery attempt observability | 포함 후보 | FCM send attempt 관측/transport retry용이며 settlement evidence가 아니다 |
+| SSE realtime stream | Phase 2/deferred drift 후보 | Android-first FCM MVP의 source가 아니며 realtime reliability 보장은 deferred다 |
+| notification preference matrix | Phase 2 | 채널/이벤트별 수신 설정 freeze 대상 아님 |
+| notification template CMS/table | Phase 2 | 문구 CMS/table freeze 대상 아님 |
+| campaign/broadcast/advanced analytics | Phase 2 | 운영/마케팅 자동화는 MVP 밖 |
+
+### FCM token/device lifecycle 후보
+
+> Path naming은 후보이며, ERD/API propagation 단계에서 세부 스키마와 identifier 이름을 premature freeze하지 않는다.
+
+| Method | Candidate path | 역할 |
+| ------ | -------------- | ---- |
+| `POST` | `/api/notification-devices` | 현재 인증 사용자의 Android FCM token/device 등록 |
+| `PATCH` | `/api/notification-devices/{deviceId}` | token refresh, app version/platform metadata, enabled/disabled 상태 갱신 |
+| `DELETE` | `/api/notification-devices/{deviceId}` | logout, uninstall signal, invalid token 처리에 따른 token/device 비활성화 |
+
+Request 후보:
+
+```json
+{
+  "platform": "ANDROID",
+  "fcm_token": "fcm-token",
+  "device_id": "client-generated-or-installation-id",
+  "app_version": "1.0.0"
+}
+```
+
+Policy:
+
+- 서버는 현재 인증 사용자(JWT `sub = member.uuid`)의 token/device만 등록하거나 갱신한다. `email`이나 DB 내부 Long `member.id`를 routing identity로 사용하지 않는다.
+- invalid token, token refresh, deactivate는 notification device/token 상태만 변경한다. crew lifecycle, certification, moderation, settlement, point ledger/history를 변경하지 않는다.
+- FCM token은 delivery credential에 가까운 민감 데이터로 취급하고, public response에서 불필요하게 재노출하지 않는다.
+
+### Notification inbox/list/read 후보
+
+| Method | Candidate path | 역할 |
+| ------ | -------------- | ---- |
+| `GET` | `/api/notifications` | 내 알림 UX hint 목록 조회 |
+| `GET` | `/api/notifications/unread-count` | badge 표시용 미읽음 count 조회 |
+| `PATCH` | `/api/notifications/{notificationId}/read` | 단건 읽음 처리 |
+| `PATCH` | `/api/notifications/read-all` | 전체 읽음 처리 후보 |
+
+Response item 후보:
+
+```json
+{
+  "notification_id": "uuid-or-id",
+  "event_type": "MISSION_LOG_VERIFICATION_RESULT",
+  "resource_type": "mission_log",
+  "resource_id": "1201",
+  "deep_link": "dondok://rooms/42/mission-logs/1201",
+  "occurred_at": "2026-05-13T07:31:08+09:00",
+  "display_text": "인증 결과가 반영되었습니다.",
+  "requires_refetch": true,
+  "read_at": null
+}
+```
+
+Field policy:
+
+| 필드 | 설명 |
+| ---- | ---- |
+| `notification_id` | inbox/read UX 상태 처리를 위한 알림 식별자. 도메인 aggregate id가 아니다 |
+| `event_type` | 클라이언트 반응을 결정하는 notification event catalog 후보. DB strict enum freeze가 아니다 |
+| `resource_type` | refetch 대상 canonical resource 종류 |
+| `resource_id` | refetch/deep-link route에 사용할 resource 식별자 |
+| `deep_link` | 클릭 후 이동할 client route. 이동 직후 canonical API refetch가 필요하다 |
+| `occurred_at` | 알림 대상 product event 발생 시각 후보. 정산/원장 발생 시각 source of truth가 아니다 |
+| `display_text` | 사용자 표시 문구. 클라이언트 분기 조건이나 payout/certification proof로 사용하지 않는다 |
+| `requires_refetch` | MVP에서는 항상 `true`로 취급한다 |
+| `read_at` | UX read state. audit history나 미해결 domain task 상태가 아니다 |
+
+Click/refetch contract:
+
+- 사용자가 push 또는 inbox item을 클릭하면 클라이언트는 `deep_link`로 이동한 뒤 `resource_type`/`resource_id`에 맞는 canonical REST API를 다시 조회한다.
+- stale, duplicate, out-of-order, missed notification이 있어도 화면 표시와 domain action 가능 여부는 refetched canonical API state가 결정한다.
+- payload/list item에 authoritative payout snapshot, authoritative certification snapshot, ledger truth, settlement retry/replay/correction directive를 넣지 않는다.
+- notification read/unread는 badge와 목록 정리에만 쓰며 unresolved settlement/certification/moderation/ledger task로 표시하지 않는다.
+
+### Delivery attempt observability 후보
+
+- `notification_delivery_attempt` 또는 동등한 내부 log는 FCM send attempt, provider response, invalid token, bounded transport retry 관측용 후보다.
+- delivery attempt failure는 notification transport failure일 뿐 domain failure가 아니다. settlement retry, replay, correction, payout mutation trigger로 사용하지 않는다.
+- 동일 event에 대한 중복 알림은 클라이언트와 서버 모두 idempotent하게 처리한다. 중복 알림이 중복 정산/중복 ledger entry를 만들면 안 된다.
+
+### Event taxonomy 후보
+
+| `event_type` 후보 | 설명 | Refetch target 예시 |
+| ----------------- | ---- | ------------------ |
+| `CREW_APPLICATION_CREATED` | 가입 신청 발생 | room applications / host review API |
+| `CREW_APPLICATION_DECIDED` | 가입 승인/거절 결과 | room participant/application API |
+| `CREW_NOTICE_CREATED` | 새 공지/댓글 등 engagement re-entry | room notice API |
+| `MISSION_CERTIFICATION_DUE_SOON` | 인증 마감 reminder | room dashboard / mission logs API |
+| `MISSION_LOG_UPLOADED` | 방장 검수 대상 인증 업로드 | mission log review API |
+| `MISSION_LOG_VERIFICATION_RESULT` | 인증 결과 반영 hint | mission log detail / dashboard API |
+| `DASHBOARD_PROJECTION_UPDATED` | 현재 기준 projection 요약 변화 | room dashboard API |
+| `SETTLEMENT_RESULT_READY` | 정산 결과 조회 가능 | room settlement / settlement detail API |
+| `POINT_HISTORY_UPDATED` | 포인트 내역 반영 hint | points/history API |
+| `REACTION_CREATED` | 리액션 engagement hint | feed / mission log API |
+
+이 taxonomy는 notification routing 후보이며 DB enum이나 authoritative audit event catalog가 아니다. 새 event는 canonical REST API로 refetch 가능한 product event에만 추가한다.
+
+### `GET /api/notifications/stream` — Phase 2/deferred SSE drift 후보
 
 역할:
 
-- 현재 로그인한 사용자의 best-effort realtime notification stream을 SSE로 구독한다.
-- 이 endpoint는 notification inbox, unread sync, replay cursor를 제공하지 않는다.
+- 이 endpoint는 기존 문서/구현 흔적을 보존하기 위한 Phase 2/deferred realtime 후보이며 Android-first FCM MVP의 authoritative notification contract가 아니다.
+- 도입하더라도 best-effort realtime UX delivery만 제공하고, notification inbox/read, replay cursor, durable delivery, cross-device unread sync를 보장하지 않는다.
 - Public API contract는 "현재 인증 사용자 stream"이다. 서버는 JWT `sub = member.uuid`로 인증 사용자를 식별하고 해당 사용자 대상 이벤트만 전달한다.
 - `email`은 변경 가능하고 PII이므로 SSE routing identity, stream identifier, notification recipient key로 사용하지 않는다.
 
@@ -1779,78 +1903,20 @@ Authorization: Bearer {accessToken}
 Accept: text/event-stream
 ```
 
-Response:
-
-- `Content-Type: text/event-stream`
-- 서버는 연결 유지 중 인증된 현재 사용자 대상 이벤트를 SSE data payload로 전달한다.
-- 연결이 끊기면 클라이언트는 사용자에게 불필요한 오류를 노출하지 않고 재구독할 수 있다.
-
-Event payload contract:
-
-```json
-{
-  "eventId": "uuid-or-deterministic-id",
-  "eventType": "MISSION_LOG_VERIFICATION_RESULT",
-  "occurredAt": "2026-05-13T07:31:08+09:00",
-  "resourceType": "missionLog",
-  "resourceId": "1201",
-  "message": "인증 결과가 반영되었습니다.",
-  "severity": "success",
-  "uiHint": {
-    "toast": true,
-    "refreshTargets": ["missionLogs", "dashboard"],
-    "badgeDelta": 1
-  }
-}
-```
-
-Field policy:
-
-| 필드 | 설명 |
-| ---- | ---- |
-| `eventId` | 클라이언트 세션 내 중복 이벤트 처리를 위한 이벤트 식별자 |
-| `eventType` | 클라이언트 반응을 결정하는 SSE event catalog 값. DB enum이 아니다 |
-| `occurredAt` | 이벤트 발생 시각. API 공통 시간 규칙을 따른다 |
-| `resourceType` | 이벤트가 가리키는 도메인 리소스 종류 |
-| `resourceId` | refetch, invalidate, route 이동 등에 사용할 리소스 식별자 |
-| `message` | 사용자 표시용 fallback 문구. 클라이언트 분기 조건의 유일한 기준으로 사용하지 않는다 |
-| `severity` | `info`, `success`, `warning`, `error` 중 하나의 표시 강도 |
-| `uiHint` | 클라이언트 갱신을 돕는 UX hint. source of truth가 아니다 |
-
-Payload 최소화 원칙:
+SSE payload policy:
 
 - SSE payload에는 email, Long `member.id`, 불필요한 사용자 PII를 넣지 않는다.
-- recipient 식별은 인증된 현재 사용자 기준으로 처리하고, 클라이언트가 필요로 하는 도메인 refetch 단서만 payload에 포함한다.
 - SSE payload는 상태 snapshot이 아니라 REST refetch/invalidate를 유도하는 signal이다.
-
-Initial event catalog:
-
-- `MISSION_LOG_VERIFICATION_RESULT` — 인증 성공/실패 결과 반영
-- `DASHBOARD_PROJECTION_CHANGED` — 예상 환급금, 지분율, 순위 같은 dashboard projection 변화
-- `SETTLEMENT_STATUS_CHANGED` — 정산 상태 또는 결과 조회 가능 상태 변화
-- `AI_MISSION_RECOMMENDATION_COMPLETED` — AI 미션 추천 초안 생성 완료
-
-이 catalog는 DB enum이나 notification persistence schema를 의미하지 않는다. 새 eventType은 기존 REST API 화면으로 source-of-truth 상태를 다시 조회할 수 있는 도메인 변화에만 추가한다.
+- SSE `eventType`, `resourceType`, `resourceId`, message/ui hint가 있더라도 canonical 화면 상태는 REST API refetch 결과가 결정한다.
+- SSE 연결 실패는 핵심 도메인 transaction 실패로 해석하지 않는다.
 
 Reconnect / delivery semantics:
 
 - SSE delivery는 best-effort realtime UX delivery다.
 - 서버 재시작, 네트워크 단절, 브라우저 재연결 중 이벤트가 누락될 수 있다.
 - missed event 복구는 settlement replay가 아니라 기존 REST API 화면 재조회로 처리한다.
+- stale/duplicate/out-of-order event가 있어도 reconnect 또는 화면 진입 시 authoritative REST state가 우선한다.
 - 이벤트 순서, durable delivery, cross-device unread state를 보장하지 않는다.
-- 같은 `eventId`가 다시 수신될 수 있으므로 클라이언트는 동일 세션에서 중복 이벤트를 idempotent하게 처리해야 한다.
-
-Client reaction expectations:
-
-- 클라이언트는 `message` 문자열만 해석하지 않고 `eventType`, `resourceType`, `resourceId`, `uiHint`를 기준으로 필요한 REST API를 다시 조회한다.
-- SSE payload와 `uiHint`는 상태 snapshot이나 source of truth가 아니다. DB/API state가 source of truth다.
-- notification persistence/read-state/unread sync는 MVP API 계약에 포함되지 않는다.
-
-Error / close policy:
-
-- 인증이 없거나 만료된 사용자는 stream에 연결할 수 없다.
-- logout 또는 token invalidation 시 클라이언트는 SSE 연결을 닫아야 한다.
-- SSE 연결 실패는 핵심 도메인 transaction 실패로 해석하지 않는다.
 
 ## 6. 상태 흐름 다이어그램
 
@@ -1911,9 +1977,9 @@ RUNNING
 - Dashboard projection과 최종 settlement 결과가 달라도 시스템 오류로 간주하지 않고, 차이 설명은 Settlement API의 `settlement_item.calculation_reason`을 기준으로 한다.
 
 
-### SSE realtime UX handling
+### Notification click/refetch UX handling
 
-SSE realtime UX handling은 `GET /api/notifications/stream` 계약의 client reaction expectations와 reconnect / delivery semantics를 따른다.
+Android FCM push, notification inbox item, deferred SSE signal 모두 `deep_link` 또는 refetch target으로 이동한 뒤 canonical REST API state를 다시 조회한다. 알림 payload/list item/read state는 상태 snapshot이나 source of truth가 아니다. `GET /api/notifications/stream`은 Phase 2/deferred drift 후보로만 유지한다.
 
 ## 8. 구현 메모
 
@@ -1925,6 +1991,10 @@ SSE realtime UX handling은 `GET /api/notifications/stream` 계약의 client rea
 - 일반 정산 remainder는 deterministic remainder allocation rule로 처리한다. 이는 host 지급 권한, winner 지급, draw/random 지급이 아니라 replayable floor-remainder 규칙이다.
 - 취소형 정산에서도 조회 구조는 동일하고 `settlement_type = CANCELLED_BEFORE_START`만 달라진다.
 - 포인트 원장 기록과 `point_account.balance` 갱신은 participant 지급 단위로 같은 트랜잭션에서 처리하되, 전체 정산은 partial 복구가 가능하도록 이미 생성된 원장을 idempotency key로 재사용한다.
+- Replay/retry는 finality를 약화하지 않는다. Replay는 historical semantic truth reconstruction이고, retry는 missing item/linkage completion이다. 둘 다 succeeded settlement snapshot이나 point ledger overwrite 권한이 아니다.
+- Scheduler delay는 운영 감사 fact다. API/배치는 delayed execution을 기록할 수 있지만 contract lifecycle authority는 scheduled semantic anchor 기준이다.
+- Moderation persistence는 authoritative transition ledger와 non-authoritative operational context를 분리한다. Human memo/support note/UX wording은 REST/API 정산 truth가 아니다.
+- Phase 2 hardening registry: audit-grade notification durability, notification preference matrix, notification template CMS/table, SSE/Web realtime reliability, campaign/broadcast system, advanced notification analytics, full AI replay reproducibility, immutable event sourcing migration, provider-level AI determinism, distributed replay engine, full provenance governance는 MVP API active contract가 아니다.
 
 ## 9. 확정 메모
 

@@ -20,6 +20,7 @@
 
 - `Settlement.status = SUCCEEDED` 전 정산 계산 입력은 `mission_log`, `room_participant`, `mission_room`, `mission_rule`, `mission_schedule_day`다.
 - `settlement`와 `settlement_item`은 원천 로그를 다시 계산한 결과와 근거를 남기는 스냅샷이다.
+- Replay는 historical semantic truth reconstruction이다. `algorithm_version`, frozen participant baseline, deposit snapshot, recognized success counts, all-fail/remainder policy, cadence interpretation, timezone/cutoff semantics, lifecycle cutoff semantics, effective moderation state, append-only moderation chain reference, reason-code mapping version을 설명 가능하게 보존해야 한다.
 - `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item`과 연결된 `point_history`다. 이후 `MissionLog` 기반 replay는 감사/디버깅 검증용이지 지급 결과를 대체하거나 변경하는 기준이 아니다.
 - 현재 기준 지분율/projection, 통계성 캐시, `point_account.balance`는 source of truth가 아니다. 필요해도 정산 계산이나 분쟁 판단의 최종 기준으로 쓰지 않는다.
 
@@ -30,6 +31,8 @@
 - `NOTIFY-003`은 projection 기반 알림이며 final settlement guarantee가 아니다. ERD에서는 알림을 정산 source of truth로 모델링하지 않는다. 상세 event contract는 `API-spec`의 projection boundary를 따른다.
 - `point_history`는 authoritative append-only ledger이고, `point_account.balance`는 `point_history`에서 재계산 가능한 projection/cache layer다. 불일치 시 원장 기준으로 원인을 조사하고 캐시를 보정한다.
 - `APPROVED_LOCK_PENDING`은 capacity만 임시 예약한다. 최소 인원 baseline, activation eligibility, frozen participant baseline에는 `JOINED` participant만 포함한다.
+- Scheduler/runtime 실행 지연은 audit/recovery fact이며 lifecycle authority가 아니다. `start_at`, room timezone, daily cutoff, mission period end 같은 scheduled semantic anchor가 eligibility와 cutoff의 기준이다.
+- Authoritative moderation persistence는 effective state, transition, reason-code, actor, timestamp, append-only chain reference를 남기는 transition ledger 성격이다. Human memo/support note/UX wording/operational comment는 non-authoritative context로 분리한다.
 
 ### 1.4 논리 삭제 정책
 
@@ -69,7 +72,20 @@
 | 테이블명          | 역할                            | 포함 판단                                                             |
 | ----------------- | ------------------------------- | --------------------------------------------------------------------- |
 | `ai_habit_report` | 정산 이후 개인 회고 리포트 저장 | 첫 릴리스 필수. 단, 정산/환급/포인트 원장 source of truth는 아니다    |
-| 알림 전용 테이블  | SSE, 이메일 발송 이력 영속화    | MVP core에서는 제외한다. 이메일은 SMTP 발송 structured log, bounded retry, 운영자 수동 재발송으로 시작한다. 비즈니스 필수 고지로 격상되면 notification log/outbox를 별도 ADR로 재검토한다 |
+| `notification_device` / `push_token` 후보 | Android-first FCM token/device lifecycle 지원 | MVP notification transport 후보. 토큰 등록/갱신/비활성화 상태만 다루며 crew lifecycle, 인증, 검수, 정산, 포인트 원장 상태를 변경하지 않는다 |
+| `notification_event` / `notification_log` 후보 | 알림 inbox/read UX hint history 지원 | MVP notification list/read 후보. canonical history/audit/source of truth가 아니며 payload/list item은 refetch target metadata만 가진다 |
+| `notification_delivery_attempt` 후보 | FCM delivery attempt 관측 및 transport retry 지원 | MVP 운영 관측 후보. delivery success/failure/read 여부는 도메인 성공/실패나 settlement retry/replay/correction의 근거가 아니다 |
+| `notification_preference` 후보 | 채널/이벤트별 수신 설정 | Phase 2 deferred. MVP에서는 세부 preference matrix를 schema로 freeze하지 않는다 |
+| `notification_template` 후보 | 알림 문구/template 관리 | Phase 2 deferred. MVP에서는 template CMS/table을 schema로 freeze하지 않는다 |
+
+### 2.3 Notification / FCM candidate boundary
+
+- ERD의 notification 후보 엔티티는 Android-first FCM delivery와 inbox/read UX를 지원하기 위한 보조 persistence 후보이며, 결제/정산/포인트/인증/검수의 새 authority가 아니다.
+- `notification_device` 또는 `push_token`은 authenticated member의 FCM token/device lifecycle만 표현한다. invalid token, refresh, deactivate는 token/device 상태에만 영향을 주며 참여/인증/정산/원장 상태를 변경하지 않는다.
+- `notification_event` 또는 `notification_log`는 사용자가 놓친 알림을 다시 볼 수 있게 하는 UX hint history 후보일 뿐, audit-grade canonical domain history가 아니다. 읽음/미읽음은 사용자 UX 상태이며 미해결 정산·인증·검수 task를 뜻하지 않는다.
+- `notification_delivery_attempt`는 FCM send attempt, provider response, bounded transport retry 관측 후보로만 둔다. 실패/재시도는 settlement retry, replay, correction, payout mutation과 분리한다.
+- 알림 payload/list item에 필요한 canonical refetch metadata 후보는 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 수준으로 제한한다. authoritative payout/certification/ledger snapshot은 포함하지 않는다.
+- Preference matrix, template CMS/table, campaign/broadcast, advanced analytics, SSE/Web realtime reliability persistence는 Phase 2/deferred로 유지한다.
 
 ## 3. 테이블 상세
 
@@ -603,6 +619,8 @@ Unique / Index:
 | `remainder_winner_participant_id` | `BIGINT`       | Y        | deprecated/brownfield. winner/draw payout authority 아님 |
 | `failure_code`                    | `VARCHAR(50)`  | Y        | 실패 코드                       |
 | `failure_message`                 | `VARCHAR(500)` | Y        | 최근 실패 요약                  |
+| `algorithm_version`               | `VARCHAR(50)`  | N        | 정산 semantic version           |
+| `rule_context_snapshot`           | `JSON`         | N        | cadence/timezone/cutoff/lifecycle/remainder/reason mapping context |
 | `started_at`                      | `DATETIME(6)`  | Y        | 실행 시작 시각                  |
 | `finished_at`                     | `DATETIME(6)`  | Y        | 실행 종료 시각                  |
 | `created_at`                      | `DATETIME(6)`  | N        | 생성 시각                       |
@@ -640,6 +658,8 @@ Unique / Index:
 - 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. Brownfield winner/draw/top-contributor 필드는 deprecated visibility일 뿐 지급액 결정 authority가 아니며, host discretion이나 random payout을 허용하지 않는다.
 - 일부 participant 지급만 완료된 partial 상태는 `RETRY_WAIT` 또는 `FAILED`로 남으며, 모든 `settlement_item.point_history_id` 연결과 대응 `point_history` 존재가 검증된 경우에만 `SUCCEEDED`가 된다.
 - MVP에서는 별도 `total_active_participants` 컬럼을 두지 않는다.
+- `algorithm_version`과 `rule_context_snapshot`은 versioned semantic replay를 위한 context다. v2 runtime이 v1 settlement를 해석할 수 있게 하는 장치이지 v1 결과를 현재 규칙으로 덮어쓰는 migration-forward reinterpretation hook이 아니다.
+- Retry는 기존 `settlement` row의 unfinished execution completion만 수행한다. `rule_context_snapshot`, frozen participant baseline, 이미 append된 item/ledger는 retry 중 교체하지 않는다.
 
 ### `settlement_item`
 
@@ -675,6 +695,8 @@ Unique / Index:
 | `draw_key_snapshot`           | `CHAR(64)`      | Y        | non-payout 표시/설명 ordering key |
 | `tie_break_rank`              | `INT`           | Y        | non-payout 표시/설명 순위 |
 | `calculation_reason`          | `JSON`          | N        | 포함/제외 근거          |
+| `effective_moderation_snapshot` | `JSON`          | Y        | 정산 시점 effective moderation state 설명 context |
+| `moderation_chain_ref`         | `JSON`          | Y        | append-only moderation transition chain reference |
 | `point_history_id`            | `BIGINT`        | Y        | 환급 원장 FK            |
 | `created_at`                  | `DATETIME(6)`   | N        | 생성 시각               |
 
@@ -706,6 +728,8 @@ Unique / Index:
 - 같은 방에서 한 `member`가 하나의 `participant`만 가진다는 불변식이 있으므로 계산과 지급 연결이 안정적이다.
 - `calculation_reason`은 `DAILY` 중복 제외, `SPECIFIC_DAYS` 비유효 요일 제외, resolved certification state, Phase 2/deferred cadence/withdrawal reference를 설명해야 한다.
 - `calculation_reason` 값 공간은 정산 스냅샷의 설명/QA 검색성을 위한 vocabulary이며, DB 제약이나 API 응답 enum으로 승격하지 않는다.
+- `calculation_reason`은 reason-code mapping version과 함께 해석한다. 과거 정산 설명은 현재 UX wording이 아니라 당시 vocabulary 기준으로 reconstruction되어야 한다.
+- `effective_moderation_snapshot`과 `moderation_chain_ref`는 settlement input truth를 설명하기 위한 minimum context다. Human memo/support note/운영 comment를 settlement truth로 승격하지 않는다.
 - `settlement_item`은 참여자별 deterministic 계산 snapshot이고, `point_history`는 그 결과를 실제 잔액에 반영하는 authoritative append-only ledger다. `Settlement.status = SUCCEEDED` 이후에는 frozen snapshot과 연결된 `point_history`가 운영/분쟁/조회 기준이며 post-freeze mutation은 금지된다.
 - 정산 실행에서는 `settlement_item`을 먼저 생성해 계산 결과를 고정하고, 이후 `point_history`를 생성한 뒤 `point_history_id`를 연결한다.
 - 두 단계는 participant별 `idempotency_key`를 통해 느슨하게 연결되므로, partial 재시도 시 이미 반영된 환급은 재사용하고 누락된 환급만 안전하게 이어서 처리할 수 있어야 한다.
@@ -762,6 +786,7 @@ Unique / Index:
 - `FAILED`는 저장된 리포트 상태이며, 같은 POST는 자동 재시도하거나 새 row를 만들지 않는다.
 - 리포트는 저장/재조회 가능해야 하며, `PENDING`, `SUCCEEDED`, `FAILED` 상태를 그대로 노출할 수 있어야 한다.
 - 리포트 생성 실패 또는 재시도는 정산 성공을 취소하거나 `Settlement.status`, `settlement_item`, `point_history`, 환급 상태를 바꾸지 않는다.
+- AI 리포트는 version/stale/invalidation-aware artifact로 발전할 수 있으나, MVP active contract에서는 `unique(settlement_id, member_id)`와 create-or-return-existing semantics를 유지한다. Regeneration append lifecycle, provider determinism, full AI replay reproducibility는 Phase 2 hardening이며 정산/replay/payout authority가 아니다.
 
 ## 4. 핵심 관계
 
@@ -806,6 +831,10 @@ Unique / Index:
 - `draw_key`와 `idempotency_key` 모두 런타임 PK가 아니라 입력 기반 식별자를 사용한다.
 - `point_history.idempotency_key`는 `NOT NULL`이며, 이벤트 종류마다 재현 가능한 규칙으로 생성한다.
 - 동일 키 + 동일 payload는 기존 원장 재사용/연결 대상이고, 동일 키 + 다른 payload는 멱등성 충돌로 저장하지 않는다.
+- `settlement.algorithm_version`과 `rule_context_snapshot`은 historical semantic replay context이며 current-engine reinterpretation이나 payout mutation에 사용하지 않는다.
+- Runtime delay가 있더라도 lifecycle/cutoff 판단은 scheduled semantic anchor 기준이다. 실제 실행 시각은 운영 로그/감사 fact로만 남긴다.
+- Notification 저장/전달/inbox/read/delivery attempt는 정산 source of truth가 아니다. Reconnect/deep-link/refetch 시 authoritative REST/API state가 stale/duplicate/out-of-order notification보다 우선한다.
+- Notification retry는 FCM transport retry이며 settlement retry/replay/correction과 분리한다. 알림 성공/실패/읽음 상태는 crew lifecycle, certification, moderation, settlement, point ledger/history를 변경하지 않는다.
 
 ## 6. Mermaid ERD
 
@@ -968,5 +997,6 @@ erDiagram
 ## 7. 남은 결정 사항
 
 - 현재 MVP 구현 전 필수 결정 사항은 없다.
+- Phase 2 hardening registry: audit-grade notification durability, notification preference matrix, notification template CMS/table, campaign/broadcast system, SSE/Web realtime reliability persistence, full AI replay reproducibility, AI report append-regeneration/invalidation lifecycle, immutable event sourcing migration, provider-level AI determinism, distributed replay engine, full provenance governance는 ERD MVP active schema로 freeze하지 않는다.
 - `mission_log_reaction` 외 feed-status 테이블/컬럼은 만들지 않는다. 성공/실패/미제출 일자 상태는 API projection으로 계산한다.
 - `point_history.reference_type`의 MVP enum은 `POINT_CHARGE`, `ROOM_PARTICIPANT`, `SETTLEMENT_ITEM`로 고정한다. ERD는 DB enum/constraint 언어의 source of truth이고, API-spec은 FE/BE 소비자 계약에 필요한 동일 enum과 매핑만 반복한다.

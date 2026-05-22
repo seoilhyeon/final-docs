@@ -189,7 +189,7 @@ Hardening은 engagement mechanics 제거가 아니다. 실시간 지분율, 상�
 | Settlement | Settlement engine + settlement snapshot | input freeze, deterministic calculation, item snapshot, ledger link, succeeded | all-fail zero-refund brownfield drift; host remainder as authority; duplicate payout | UC-A15, UC-A16, UC-A17 |
 | Replay / Audit | Audit/reconciliation process | replay inputs, version/snapshot, comparison result | replay confused with recalculation; version drift breaks reproducibility | UC-A18 |
 | Retry / Recovery | Admin recovery + idempotent system constraints | failed/retry-wait, partial point_history, missing item link | retry treated as correction or rerun payout | UC-A17, UC-A18 |
-| Notification / State Drift | Non-authoritative delivery | send, receive, stale payload, reconnect, canonical refresh | notification implies final state; failure triggers settlement retry | UC-A19 |
+| Notification / State Drift | Non-authoritative delivery | send, receive, stale payload, reconnect, canonical refresh | notification implies final state; failure is mistaken for settlement retry | UC-A19 |
 | Support / Explanation | Support follows source-of-truth hierarchy | pre-settlement explanation vs post-settlement explanation | support cites projection as final; correction/replay promises too much | UC-A20 |
 | Emotional / Trust UX | Product semantics / UX | estimate changes, rejection, contribution visibility, tie, shame, warning density | deceptive certainty, punitive/legalistic product feel, or adversarial ranking | PF-001, PF-004, PF-015–PF-017 |
 | Brownfield Conflicts | Canonical semantic register until resolved | manual start, old enums, deferred endpoints, mismatched examples | legacy wording silently becomes active semantics | UC-A04, UC-A12, UC-A16 |
@@ -443,13 +443,13 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Participant, system, client
 - **Classification**: cross-cutting non-authoritative semantics (notification = hint only; canonical API is source of truth)
 - **Preconditions**: Notification/SSE/FCM/event delivery exists.
-- **Main Flow**: Notification arrives as hint; client opens/refetches canonical state.
-- **Failure Flow**: Late notification contradicts current canonical state; notification failure triggers domain retry.
-- **Authority Boundary**: Notification is non-authoritative.
-- **Projection Impact**: UI may refresh estimates or final state.
-- **Settlement Impact**: None; notification failure cannot rollback settlement.
-- **UX Risk**: User thinks no notification means no payout or stale success means final state.
-- **Related Domain Objects**: notification event/log candidate, canonical API response.
+- **Main Flow**: Notification arrives as a best-effort re-entry hint; the client follows `deep_link` and refetches canonical API state before rendering current truth.
+- **Failure Flow**: Late, missed, duplicate, or out-of-order notification contradicts current canonical state; canonical API state wins and notification failure does **not** trigger domain retry.
+- **Authority Boundary**: Notification, FCM delivery state, inbox/read state, and delivery attempt state are non-authoritative UX/transport surfaces. They do not own crew lifecycle, certification, moderation, settlement, or point ledger truth.
+- **Projection Impact**: UI may refresh estimates or final state after canonical refetch; notification payload/list text is not a projection or final settlement snapshot.
+- **Settlement Impact**: None; notification failure cannot rollback settlement and notification retry is transport retry, not settlement retry/replay/correction.
+- **UX Risk**: User thinks no notification means no payout, stale success means final state, unread means unresolved certification/settlement work, or inbox history is an audit ledger.
+- **Related Domain Objects**: notification event/log candidate, notification delivery attempt candidate, canonical API response.
 
 ### UC-A20 — Support Explanation by Lifecycle State
 
@@ -669,7 +669,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 | replay vs recalculation | Replay verifies past result. Recalculation must not mutate final payout. |
 | upload object vs mission-log authority | Upload object is evidence. MissionLog/server validation is certification event boundary. |
 | moderation vs settlement authority | Host review can affect input before freeze; host cannot decide money. |
-| notification vs canonical API state | Notification hints. Canonical API/state records decide current truth. |
+| notification/inbox/read vs canonical API state | Notification hints and inbox/read UX history are non-authoritative. Canonical API/state records decide current truth after deep-link/refetch. |
 | append-only history vs visible latest state | Latest state may be summarized, but history must remain auditable. |
 | competitive mechanics vs competitive framing | Contribution/progress visibility is allowed; adversarial “winner/profit from failure” framing is not. |
 | all-fail refund vs punishment | All-fail equal principal refund prevents monetizing everyone’s failure; zero-refund/punitive wording is brownfield drift only. |
@@ -745,7 +745,7 @@ Avoid:
 | Retry | “기존 정산 복구를 이어서 처리 중입니다.” | “정산을 다시 계산합니다.” |
 | Replay | “감사용으로 당시 기준 결과를 재현합니다.” | “결과를 다시 산정합니다.” |
 | Correction | “최종 정산 이후 별도 운영 기준으로 진행되는 보정/지원 처리입니다.” | “정산 결과를 수정했습니다 / 몰래 보정했습니다” |
-| Notification | “알림을 눌러 최신 상태를 확인하세요.” | “이 알림이 최종 상태입니다.” |
+| Notification | “알림을 눌러 최신 상태를 확인하세요.” / “알림은 놓치지 않도록 돕는 안내이며, 최신 상태는 앱에서 다시 확인합니다.” | “이 알림이 최종 상태입니다.” / “알림 실패로 정산을 재시도합니다.” |
 | All-fail | “이번 미션에서는 인정된 성공 기록이 없어, 누군가의 실패가 다른 참여자의 수익으로 이어지지 않도록 원금을 기준으로 정산되었습니다.” | “전원 0원 / 환급 없음 / 실패자 몰수” |
 | Tie/remainder | “정해진 deterministic rule에 따라 처리됩니다.” | “방장에게 임의 지급됩니다.” |
 | Contribution visibility | “현재 상위 기여 그룹입니다 / 크루 평균 이상 달성 중입니다.” | “1위 수익자 / 지분왕 / 실패자 덕분에 상승” |

@@ -41,7 +41,7 @@
 - final settlement 이후 payout rewrite, hidden mutation, support/admin override workflow
 - MVP 범위를 넘어서는 분산 실행 조정 전략, batch infrastructure topology의 신규 결정
 - `point_account` physical balance shape(`available`, `locked`, `pending`, `total` 등) 재설계
-- SSE/FCM 같은 notification transport 결정
+- Android-first FCM MVP를 넘어서는 notification transport architecture 결정(SSE/Web realtime reliability, campaign/broadcast 등)
 - settlement amount unit 재검토 결정
 
 ## 3. 고정할 비즈니스 규칙
@@ -779,8 +779,9 @@ settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cance
 - `settlement_item.point_history_id`가 non-null인데 대응 `point_history`가 없으면 `INVALID_INCONSISTENT`로 취급하고 `SUCCEEDED`로 보지 않는다.
 - retry는 item-level idempotent recovery만 수행한다. 기존 snapshot을 폐기하거나 current engine 산출값으로 payout을 교체하는 동작은 retry가 아니라 금지된 hidden mutation이다.
 - 모든 item의 `point_history_id`와 대응 `point_history` 존재가 검증되기 전까지 parent `Settlement.status`를 `SUCCEEDED`로 바꾸지 않는다.
-- Email/AI/SSE 같은 후속 이벤트 실패는 settlement, settlement_item, point_history를 rollback하지 않는다.
-- Notification은 reconciled UX signal이다. SSE/알림 payload가 누락·중복·역순 수신되어도 authoritative REST state와 `Settlement`/`settlement_item`/`point_history`가 우선한다.
+- Email/AI/FCM/SSE 같은 후속 이벤트 실패는 settlement, settlement_item, point_history를 rollback하지 않는다.
+- Notification은 best-effort re-entry hint이자 reconciled UX signal이다. FCM/SSE/알림 payload, inbox/read state, delivery attempt가 누락·중복·역순·실패 상태여도 authoritative REST state와 `Settlement`/`settlement_item`/`point_history`가 우선한다.
+- Notification retry는 FCM delivery transport retry이며 settlement retry/replay/correction이 아니다. notification delivery/read/failure 상태는 `Settlement.status`, settlement item, point ledger/history를 변경하지 않는다.
 - AI report/explanation은 non-authoritative 후행 artifact다. AI 산출물은 settlement authority, replay authority, payout truth가 아니며, version/stale/invalidation-aware artifact lifecycle이나 regeneration append semantics는 Phase 2 hardening guardrail로 남긴다.
 
 ## 11. 실패/재시도 정책
@@ -986,7 +987,7 @@ remainderPolicy
 
 정산 커밋 이후에만 아래 후속 작업을 수행한다.
 
-1. 인앱 알림
+1. Android FCM/in-app notification hint 발송
 2. 정산 완료 이메일
 3. AI 습관 리포트 생성
 4. 운영 모니터링 지표 적재
@@ -995,11 +996,12 @@ remainderPolicy
 
 - 후속 작업 실패는 정산 성공을 되돌리지 않는다.
 - 따라서 정산 트랜잭션 밖에서 `SettlementCompleted` 이벤트를 소비하게 한다.
-- 정산 완료 이메일 실패는 `Settlement.status`, `settlement_item`, `point_history`, 결제 충전 원장을 수정하거나 롤백하지 않는다.
-- 이메일 발송은 SMTP 기반 best-effort 후속 작업이다.
-- MVP에서는 notification log/outbox를 필수 테이블로 두지 않는다.
-- 이메일 실패는 structured log, bounded retry, 운영자 수동 재발송 대상으로만 다룬다.
-- structured log는 최소 `settlement_id`, `member_id`, `email_type`, `recipient_hash`, `attempt`, `result`, `smtp_error_code`, `created_at`을 포함한다.
+- 정산 완료 이메일/FCM notification 실패는 `Settlement.status`, `settlement_item`, `point_history`, 결제 충전 원장을 수정하거나 롤백하지 않는다.
+- 이메일 발송은 SMTP 기반 best-effort 후속 작업이고, FCM 발송은 Android push transport 후속 작업이다.
+- notification event/log, inbox/read, delivery attempt log는 UX/transport observability 후보로 둘 수 있지만 settlement evidence, audit-grade 정산 이력, outbox authority가 아니다.
+- notification retry는 FCM delivery attempt recovery로만 제한하고 settlement retry/replay/correction 또는 payout mutation으로 연결하지 않는다.
+- 이메일 실패는 structured log, bounded retry, 운영자 수동 재발송 대상으로만 다룬다. notification delivery attempt 실패는 token/device invalidation 또는 transport retry 판단에만 사용한다.
+- structured email log는 최소 `settlement_id`, `member_id`, `email_type`, `recipient_hash`, `attempt`, `result`, `smtp_error_code`, `created_at`을 포함한다. notification delivery attempt log 후보는 settlement/ledger truth를 복제하지 않고 refetch metadata와 transport result만 남긴다.
 
 ## 16. 골든 데이터 예시
 

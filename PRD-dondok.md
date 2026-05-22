@@ -216,6 +216,7 @@ P1 이후 프로토타입 후보:
   `이번 미션에서는 인정된 성공 기록이 없어, 누군가의 실패가 다른 참여자의 수익으로 이어지지 않도록 원금을 기준으로 정산되었습니다.`
 - 알림 UX에는 아래 문구를 적용한다.
   `알림은 놓치지 않도록 돕는 best-effort 안내이며, 인증 제출과 정산 기준은 앱 내 기록과 final batch를 따릅니다.`
+  Android-first MVP에서는 FCM을 background/off-app 재진입 transport로 사용한다. FCM payload, 알림 목록, 읽음 상태, 발송/수신/실패 상태는 canonical history나 audit source가 아니며, 알림 클릭 시 클라이언트는 `deep_link`로 이동한 뒤 관련 canonical API state를 다시 조회해야 한다.
 - 결과 카드/공유 UX에는 아래 문구 방향을 적용한다.
   `이번 크루에서 꾸준히 참여한 기록입니다. 함께 목표를 향해 버틴 과정을 확인해보세요.`
 
@@ -255,7 +256,7 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 | 실시간 현황 / 기여 visibility | 현재 기준 지분율, 상대적 위치, 예상 환급 흐름, 기여도를 보여준다. | Projection/current-basis UX다. final settlement, ledger, payout certainty가 아니다.       |
 | 운영 탭                      | 검토 대기/거절/누락 등 상태를 설명한다.                          | Contextual visibility, not ledger control.                                               |
 | 최종 결과 entry point        | final settlement 이후 완주 기록과 공동 성취를 다시 보게 한다.     | 결과 카드 intent는 유지하되 저장/공유 polish는 P1 가능. Projection 공유 카드는 금지한다. |
-| 알림                         | 모집/인증/검토/정산 주의가 필요한 순간을 best-effort로 알려준다. | Notification failure must not block certification or settlement.                         |
+| 알림                         | Android-first FCM, 인앱 토스트, 알림 목록/읽음 UX로 모집/인증/검토/정산 주의가 필요한 순간을 재진입시킨다. | Notification, inbox/read, delivery attempt는 UX/transport state이며 certification, moderation, settlement, ledger authority가 아니다. 클릭 시 canonical API refetch가 필수다. |
 | 반응형 UX                    | 모바일/데스크톱에서 핵심 trust loop를 수행할 수 있게 한다.       | Presentation requirement, not authority semantics.                                       |
 | Host badge/counter           | Host 역할과 검토 책임을 이해시킨다.                              | Host badge는 activation/settlement authority가 아니다.                                   |
 
@@ -268,6 +269,23 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 | AI 습관 리포트                          | 개인 습관 요약/코칭                                 | Settlement input이 아니므로 Phase 1 이후 가능                                   |
 | Retention visual / social richness 확장 | 배지, streak, 외부 공유 등                          | P0 authority와 직접 무관                                                        |
 | 제품 내 dispute workflow                | 앱 내 이의제기/중재 워크플로                        | MVP에서는 운영 문의 fallback만 둠                                               |
+
+#### Notification / FCM MVP Boundary
+
+| 범위 | MVP 판단 | Boundary |
+| --- | --- | --- |
+| Android FCM push | 포함 | Background/off-app 재진입 transport. Delivery success/failure는 domain success/failure가 아니다. |
+| 인앱 토스트 | 포함 | Foreground 즉시 피드백. Durable history나 canonical state가 아니다. |
+| 알림 목록/읽음 | 포함 | UX hint history/read affordance. Audit history, certification history, settlement history, ledger history가 아니다. |
+| notification event/log | 후보 포함 | 알림 목록과 운영 추적을 위한 non-authoritative 기록 후보. |
+| delivery attempt observability | 후보 포함 | FCM 발송/실패/transport retry 관측 후보. Settlement retry/replay/correction과 분리한다. |
+| notification preference matrix | Phase 2 | OS permission 또는 최소 설정 이상은 후속 결정으로 둔다. |
+| notification template CMS/table | Phase 2 | MVP는 문서/코드 상수로 시작할 수 있으며 문구 안정화 전 table을 freeze하지 않는다. |
+| SSE/Web realtime reliability | Phase 2/drift candidate | Android-first FCM MVP를 역으로 결정하지 않는다. 기존 SSE 문구는 재사용 가능한 non-authority semantics만 흡수한다. |
+| campaign/broadcast/advanced analytics | Phase 2 | Trust-loop MVP 이후 확장 후보. |
+
+Notification payload/list item은 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 같은 refetch hint 중심으로 제한한다. 최종 환급금, 인증 truth, ledger truth, settlement retry/replay 상태를 notification-owned truth로 싣지 않는다.
+
 
 #### Phase 2 Defer
 
@@ -528,7 +546,7 @@ Phase 2 후보는 아래와 같다.
 - host가 돈을 나누거나 정산한다는 표현을 쓰지 않는다. “방장은 인증 상태를 moderation하고, final batch가 정산한다”로 설명한다.
 - 방장 승인/반려가 원장 수정 권한처럼 읽히는 표현을 금지한다.
 - 반려/거절을 “몰수”, “처벌”, “수익 박탈”, “문제 사용자”, “부정행위 확정”처럼 표현하지 않는다. 정산 입력에 반영될 인증 상태와 사유로 설명한다.
-- retry/replay/correction을 “정산을 다시 계산”, “결과를 다시 산정”, “몰래 수정”처럼 표현하지 않는다.
+- retry/replay/correction을 “정산을 다시 계산”, “결과를 다시 산정”, “몰래 수정”처럼 표현하지 않는다. Notification retry는 FCM delivery attempt 복구일 뿐 settlement retry/replay/correction이 아니다.
 - AI 크루 생성 도우미는 P0 Engagement UX로 둘 수 있지만, manual fallback 없는 mandatory flow나 policy/settlement authority처럼 표현하지 않는다.
 - 도딘은 보증금·환급 UX를 표현하는 user-facing app-money branding으로 설명하되, 외부 교환·인출 가능 자산이나 별도 ledger처럼 표현하지 않는다.
 
@@ -543,6 +561,7 @@ Phase 2 후보는 아래와 같다.
 - “방장 승인으로 환급 확정” 금지.
 - “retry/replay로 정산을 다시 계산한다” 금지.
 - 현재 기준 projection을 최종 환급금 확인처럼 표현 금지.
+- 알림 목록/읽음/미수신을 canonical history, audit log, unresolved settlement/certification task처럼 표현 금지.
 
 ### 비개발 직군 설명용 단순화
 
