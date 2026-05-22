@@ -23,10 +23,10 @@
 | B-04  | P0                              | Crew           | 비공개 참여 코드 조회             | 초대받은 사용자가 비공개 크루에 진입할 수 있다.                                              | B-01, B-02                 | US-04         | S    |
 | B-05  | P0                              | Wallet         | 포인트 충전과 충전 이력           | 사용자가 보증금을 예치할 수 있는 잔액을 만든다.                                              | B-01                       | US-05         | M    |
 | B-06  | P0                              | Wallet / Crew  | 크루 입장과 보증금 예치           | 모집 마감 전 참여 시점에 보증금을 잠그고 정산 전까지 보관한다.                               | B-02, B-03 또는 B-04, B-05 | US-06         | M    |
-| B-06A | P0                              | Crew           | 방장 수동 미션 시작               | 최소 인원 충족 후 방장이 미션 시작을 눌러 실제 ACTIVE 전이를 확정한다.                       | B-02, B-06                 | US-06A        | S    |
+| B-06A | P0                              | Crew           | 시스템 자동 미션 시작             | `start_at` 시스템 lifecycle 평가가 실제 ACTIVE 전이를 확정한다.                            | B-02, B-06                 | US-06A        | S    |
 | B-07  | P0                              | Mission        | 이미지 인증 업로드                | 사용자가 정해진 규칙에 맞춰 미션 수행 기록을 남긴다.                                         | B-01, B-06                 | US-07         | M    |
 | B-08  | P0                              | Mission        | Exif 검증과 인증 실패 처리        | 조작 가능성을 줄이고 실패 사유를 명확히 남긴다.                                              | B-07                       | US-08         | M    |
-| B-09  | P0                              | Dashboard      | 실시간 지분율 대시보드            | 사용자가 현재 성과와 예상 환급금을 바로 이해한다.                                            | B-06, B-08                 | US-09         | M    |
+| B-09  | P0                              | Dashboard      | 현재 기준 지분율 대시보드         | 사용자가 현재 진행 상황과 예상 환급금을 바로 이해한다.                                      | B-06, B-08                 | US-09         | M    |
 | B-10  | P0                              | Settlement     | 정산 배치와 환급 처리             | 종료 또는 시작 전 취소 후 공정한 계산/환급을 끝낸다.                                         | B-06, B-06A, B-08, B-09    | US-10         | L    |
 | B-11  | P0                              | Settlement     | 정산 결과 / 포인트 히스토리 조회  | 사용자가 무엇을 얼마나 돌려받았는지 확인한다.                                                | B-10                       | US-11         | S    |
 | B-12  | P1                              | Notification   | SSE 인앱 알림                     | 인증 결과와 지분 변화 인지를 빠르게 만든다.                                                  | B-08, B-09                 | US-12         | S    |
@@ -44,13 +44,13 @@
 | Phase                | 포함 항목                                       | 목표                                                                                            | 체크포인트                                                                                                                                                                          |
 | -------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Phase 1. 기반        | B-01, B-02, B-05                                | 사용자, 크루, 포인트의 기본 모델을 세운다.                                                      | 회원가입 후 로그인하고, 포인트를 충전한 뒤 크루를 생성할 수 있어야 한다.                                                                                                            |
-| Phase 2. 참여와 인증 | B-03, B-04, B-06, B-06A, B-07, B-08, B-17, B-18 | 사용자가 실제 챌린지에 들어가고 host가 미션 시작을 확정한 뒤 인증하고 피드/리액션으로 확인한다. | 공개/비공개 경로 모두에서 보증금 예치 후 host `StartRoom`으로 `ACTIVE` 전이가 확정되고, 인증 성공/실패 구분, feed-eligible 인증 로그의 피드 노출과 리액션 멱등성이 검증되어야 한다. |
+| Phase 2. 참여와 인증 | B-03, B-04, B-06, B-06A, B-07, B-08, B-17, B-18 | 사용자가 실제 챌린지에 들어가고 시스템 자동 activation 이후 인증하고 피드/리액션으로 확인한다. | 공개/비공개 경로 모두에서 보증금 예치 후 `start_at` 시스템 lifecycle 규칙으로 `ACTIVE` 전이가 확정되고, 인증 성공/실패 구분, feed-eligible 인증 로그의 피드 노출과 리액션 멱등성이 검증되어야 한다. |
 | Phase 3. 정산과 결과 | B-09, B-10, B-11                                | 성과 집계와 환급 흐름을 완성한다.                                                               | 지분율 계산, 0회 성공, 동점, 인원 미달 같은 예외 케이스가 모두 검증되어야 한다.                                                                                                     |
 | Phase 4. 유지와 운영 | B-12, B-13, B-14, B-15, B-16                    | 알림, AI, 운영 가시성을 붙인다.                                                                 | AI 기능은 첫 릴리스 기능 gate를 통과하되, 실패가 수동 생성/정산/환급/원장 흐름을 막지 않아야 한다.                                                                                  |
 
 ## 4. 검증 포인트
 
-- 정산 핵심 회귀 세트: `전체 성공 횟수 0`, `절사 후 잔액 발생`, `1위 동점`, `중도 탈퇴`, `인원 미달 전액 환급`
+- 정산 핵심 회귀 세트: `전체 성공 횟수 0 equal-principal refund`, `절사 후 deterministic remainder`, `동점 표시 ordering`, `중도 탈퇴 brownfield/deferred`, `인원 미달 전액 환급`
 - 인증 회귀 세트: `Exif 없음`, `촬영 시각 불일치`, `허용 시간 외 업로드`, `비회원 업로드`
 - 포인트 회귀 세트: `충전 실패`, `잔액 부족 입장`, `중복 입장`, `환급 후 히스토리 누락`
 - 비기능 최소 기준:
@@ -62,11 +62,11 @@
 
 ### US-01. 회원가입과 로그인
 
-**Priority:** P0  
-**Card:** 신규 사용자는 계정을 만들고 로그인해서 크루와 포인트 기능을 사용할 수 있어야 한다.  
+**Priority:** P0
+**Card:** 신규 사용자는 계정을 만들고 로그인해서 크루와 포인트 기능을 사용할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 전체 MVP의 진입점이다. 가입과 로그인 자체보다 중요한 것은 보호된 기능 접근 제어와 JWT 기반 세션 처리다. 인증 실패 메시지는 사용자가 이해할 수 있어야 하지만, 내부 정보를 과하게 노출하면 안 된다.
 
 **Confirmation:**
@@ -79,11 +79,11 @@
 
 ### US-01A. 사용자 프로필
 
-**Priority:** P0  
-**Card:** 로그인 사용자는 서비스 안에서 표시될 닉네임과 프로필 이미지를 관리할 수 있어야 한다.  
+**Priority:** P0
+**Card:** 로그인 사용자는 서비스 안에서 표시될 닉네임과 프로필 이미지를 관리할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 Auth backlog(`B-01`)에 포함되는 사용자 identity 범위다. 프로필은 닉네임과 프로필 이미지만 다루며, 크루 참여자 표시, 인증 피드 작성자 표시, 마이페이지의 기본 사용자 표시 정보로 사용된다. 팔로우, 친구, 소셜 그래프, 공개 범위 설정, 인증 방식 변경은 포함하지 않는다.
 
 **Confirmation:**
@@ -96,31 +96,31 @@
 
 ### US-02. 크루 생성과 규칙 설정
 
-**Priority:** P0  
-**Card:** 크루 주최자는 미션 규칙과 보증금 조건을 입력해 공개 또는 비공개 크루를 만들 수 있어야 한다.  
+**Priority:** P0
+**Card:** 크루 주최자는 미션 규칙과 보증금 조건을 입력해 공개 또는 비공개 크루를 만들 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
-이 story는 크루의 계약서를 만드는 역할을 한다. 기간은 `1주~3개월`, 인원은 `최대 10명`, 보증금은 `1,000원~100만원`이며 `1,000원 단위`만 허용한다. 주최자는 `min_participants`, `recruitment_deadline`, 예정 시작 시각인 `start_at`을 설정한다. 비공개 크루는 `6자리 참여 코드`가 필요하다. 주최자는 생성 직후 운영 권한을 가지며, 최소 인원 충족 후 `StartRoom`을 실행할 수 있다.
+**Conversation:**
+이 story는 크루의 계약서를 만드는 역할을 한다. 기간은 `1주~3개월`, 인원은 `최대 15명`, 보증금은 `1,000원~100,000원`이며 `1,000원 단위`만 허용한다. 주최자는 `min_participants`, `recruitment_deadline`, 예정 시작 시각이자 시스템 자동 activation anchor인 `start_at`을 설정한다. 비공개 크루는 `6자리 참여 코드`가 필요하다. 주최자는 생성 직후 방 설정/모집/인증 검수 권한을 가지지만 activation, participant baseline, settlement amount, ledger authority는 갖지 않는다.
 
 **Confirmation:**
 
 1. 주최자는 크루 이름, 설명, 기간, 인증 주기, 보증금, 공개 여부를 입력해 크루를 생성할 수 있다.
 2. 기간이 `1주` 미만이거나 `3개월` 초과이면 생성할 수 없다.
-3. 최대 인원이 `10명`을 넘거나 보증금이 허용 범위를 벗어나면 생성할 수 없다.
+3. 최대 인원이 `15명`을 넘거나 보증금이 허용 범위를 벗어나면 생성할 수 없다.
 4. 보증금이 `1,000원 단위`가 아니면 생성할 수 없다.
 5. 비공개 크루를 만들면 시스템은 고유한 `6자리 참여 코드`를 발급한다.
 6. 생성 완료 후 주최자는 해당 크루의 운영자로 저장되고 상세 화면으로 이동할 수 있다.
-7. `min_participants`는 자동 시작 트리거가 아니라 host start command의 precondition으로 안내된다.
-8. `recruitment_deadline`은 신규 참여 마감이고, `start_at`은 예정 시작 및 MVP 수동 시작 가능 만료 시각으로 저장된다.
+7. `min_participants`는 host command precondition이 아니라 시스템 자동 activation eligibility condition으로 안내된다.
+8. `recruitment_deadline`은 신규 참여 마감이고, `start_at`은 예정 시작 및 MVP system auto-activation anchor로 저장된다.
 
 ### US-03. 공개 크루 탐색과 상세 조회
 
-**Priority:** P0  
-**Card:** 사용자는 공개 크루를 둘러보고 참여할 만한 크루인지 판단할 수 있어야 한다.  
+**Priority:** P0
+**Card:** 사용자는 공개 크루를 둘러보고 참여할 만한 크루인지 판단할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story의 목표는 공개 크루의 모집 퍼널을 여는 것이다. 사용자는 목록과 상세 화면에서 기간, 보증금, 현재 인원, 인증 방식 같은 핵심 규칙을 이해해야 한다. 비공개 크루는 이 목록에 노출되면 안 된다.
 
 **Confirmation:**
@@ -133,11 +133,11 @@
 
 ### US-04. 참여 코드로 비공개 크루 찾기
 
-**Priority:** P0  
-**Card:** 초대받은 사용자는 참여 코드를 입력해 비공개 크루 정보를 확인할 수 있어야 한다.  
+**Priority:** P0
+**Card:** 초대받은 사용자는 참여 코드를 입력해 비공개 크루 정보를 확인할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 공개 탐색과 분리된 비공개 유입 경로다. 사용자는 `6자리 참여 코드`로 크루에 접근한다. 코드가 맞아도 이미 가득 찼거나 모집이 종료된 크루라면 입장할 수 없어야 한다.
 
 **Confirmation:**
@@ -150,11 +150,11 @@
 
 ### US-05. 포인트 충전과 충전 이력 확인
 
-**Priority:** P0  
-**Card:** 사용자는 포인트를 충전해 크루 보증금을 낼 수 있어야 한다.  
+**Priority:** P0
+**Card:** 사용자는 포인트를 충전해 크루 보증금을 낼 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 토스페이먼츠 샌드박스 기반 충전 흐름을 다룬다. 충전 성공과 실패는 잔액과 이력에 정확히 반영되어야 한다. 포인트는 실제 현금 출금이 아니라 예치와 환급을 위한 내부 수단으로 취급한다.
 
 **Confirmation:**
@@ -167,12 +167,12 @@
 
 ### US-06. 크루 입장과 보증금 예치
 
-**Priority:** P0  
-**Card:** 사용자는 충분한 포인트가 있을 때만 크루에 입장하고 보증금을 예치할 수 있어야 한다.  
+**Priority:** P0
+**Card:** 사용자는 충분한 포인트가 있을 때만 크루에 입장하고 보증금을 예치할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
-입장과 동시에 보증금은 사용 가능 잔액에서 빠지고 잠금 상태가 된다. 이 잠금 금액은 정산 전까지 일반 사용 가능 포인트와 분리되어야 한다. 참여는 `RECRUITING` 상태이고 `recruitment_deadline` 전일 때만 가능하다. 최소 인원이 모여도 자동 시작되지 않으며, host가 `start_at`까지 시작하지 않거나 인원 미달로 시작되지 못하면 예치금은 취소형 정산으로 전액 환급되어야 한다.
+**Conversation:**
+입장과 동시에 보증금은 사용 가능 잔액에서 빠지고 잠금 상태가 된다. 이 잠금 금액은 정산 전까지 일반 사용 가능 포인트와 분리되어야 한다. 참여는 `RECRUITING` 상태이고 `recruitment_deadline` 전일 때만 가능하다. `start_at`에 시스템이 `JOINED` baseline과 `min_participants`를 평가해 자동 activation하며, eligibility 미달로 시작되지 못하면 예치금은 취소형 정산으로 전액 환급되어야 한다.
 
 **Confirmation:**
 
@@ -184,32 +184,32 @@
 6. 크루가 `start_at`까지 시작되지 못해 무산되면 예치된 보증금은 전액 환급된다.
 7. 사용자는 내가 참여 중인 크루와 예치된 금액을 확인할 수 있다.
 
-### US-06A. 방장 수동 미션 시작
+### US-06A. 시스템 자동 미션 시작
 
-**Priority:** P0  
-**Card:** 방장은 최소 인원이 충족된 크루를 직접 시작해 실제 미션 진행 상태를 확정할 수 있어야 한다.  
+**Priority:** P0
+**Card:** 시스템은 `start_at`에 최소 인원이 충족된 크루를 자동으로 시작해 실제 미션 진행 상태를 확정할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
-MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작되지 않는다. 방장이 `미션 시작`을 누르면 서버는 그 순간의 조건을 다시 검증하고 `RECRUITING -> ACTIVE` 전이를 확정한다. 이때 기록되는 `activated_at`이 인증 가능 시점, projection/log eligibility, 정산 replay 기준이 된다.
+**Conversation:**
+MVP에서 크루는 host command가 아니라 `start_at`의 시스템 lifecycle 규칙으로 시작된다. 서버는 `start_at`에 `JOINED` participant baseline, 예치 Lock 완료, `min_participants` 충족 여부를 검증하고 `RECRUITING -> ACTIVE` 전이를 확정한다. MVP에서는 `activated_at = start_at`이며 이 값이 인증 가능 시점, projection/log eligibility, settlement replay 기준이 된다.
 
 **Confirmation:**
 
-1. host만 미션 시작을 요청할 수 있다.
-2. 시작 요청 시 방은 `RECRUITING` 상태여야 한다.
-3. 시작 요청 시점의 eligible participant 수가 `min_participants` 이상이어야 한다.
-4. 서버 시간이 `start_at`을 넘으면 시작할 수 없다.
-5. 성공 시 방은 `ACTIVE`가 되고 `activated_at`이 기록된다.
-6. 이미 `ACTIVE`인 방에 대한 중복 시작 요청은 멱등 성공/no-op으로 처리된다.
-7. `StartRoom`과 시작 만료 취소 batch가 경합하면 하나의 조건부 전이만 성공한다.
+1. Host는 activation authority가 아니며 직접 미션 시작을 요청하지 않는다.
+2. 시스템 activation 평가 시 방은 `RECRUITING` 상태여야 한다.
+3. `start_at` 평가 시점의 eligible `JOINED` participant 수가 `min_participants` 이상이어야 한다.
+4. 성공 시 방은 `ACTIVE`가 되고 `activated_at = start_at`이 기록된다.
+5. 이미 `ACTIVE`인 방에 대한 중복 lifecycle 평가는 멱등 no-op으로 처리된다.
+6. 자동 activation과 시작 만료/인원 미달 취소 batch가 경합하면 하나의 조건부 전이만 성공한다.
+7. Brownfield `StartRoom` endpoint/command는 MVP active contract가 아니며 host settlement authority로 해석하지 않는다.
 
 ### US-07. 사진 인증 업로드
 
-**Priority:** P0  
-**Card:** 크루 참여자는 정해진 시간 안에 사진을 올려 미션 수행을 증명할 수 있어야 한다.  
+**Priority:** P0
+**Card:** 크루 참여자는 정해진 시간 안에 사진을 올려 미션 수행을 증명할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 이미지 파일 업로드와 서버 수신 시각 기록을 다룬다. 업로드 자체는 성공했더라도 다음 story의 Exif 검증에서 실패할 수 있다. 회원이 아니거나 허용 시간 밖에서 올린 인증은 실패 처리되어야 한다.
 
 **Confirmation:**
@@ -222,11 +222,11 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 
 ### US-08. Exif 검증과 인증 실패 안내
 
-**Priority:** P0  
-**Card:** 시스템은 업로드된 사진의 Exif를 검사해 유효한 인증만 성공으로 인정해야 한다.  
+**Priority:** P0
+**Card:** 시스템은 업로드된 사진의 Exif를 검사해 유효한 인증만 성공으로 인정해야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 인증 공정성의 핵심이다. Exif가 없거나 촬영 시각이 규칙과 맞지 않으면 실패다. 실패한 인증은 왜 실패했는지 사용자가 이해할 수 있어야 하고, 성공 횟수 집계에서 제외되어야 한다.
 
 **Confirmation:**
@@ -238,68 +238,68 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 5. 실패한 인증은 사용자와 크루의 성공 횟수 집계에 반영되지 않는다.
 6. 사용자는 실패 사유를 이해하기 쉬운 문장으로 확인할 수 있다.
 
-### US-09. 실시간 지분율 대시보드
+### US-09. 현재 기준 지분율 대시보드
 
-**Priority:** P0  
-**Card:** 참여자는 지금까지의 성공 횟수와 예상 환급금을 한눈에 볼 수 있어야 한다. 단, 대시보드 값은 최종 정산 결과가 아니라 현재 기준 estimated projection이다.  
+**Priority:** P0
+**Card:** 참여자는 지금까지의 성공 횟수와 예상 환급금을 한눈에 볼 수 있어야 한다. 단, 대시보드 값은 최종 정산 결과가 아니라 현재 기준 estimated projection이다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
-대시보드는 갓세이빙의 차별 포인트다. 사용자는 자신의 누적 raw 성공 횟수, 정산 규칙을 반영한 현재 기준 추정 인정 성공 횟수, 크루 전체 추정 인정 성공 횟수, 현재 기준 추정 지분율, 예상 환급금을 이해할 수 있어야 한다. 이 값들은 `MissionLog.server_time`과 `Asia/Seoul` 기준으로 계산되는 deterministic estimated projection이며 최종 정산 결과가 아니다. 크루 전체 추정 인정 성공 횟수가 `0`이면 나눗셈이 아니라 균등 환급 base estimate를 보여줘야 한다. `Settlement.status = SUCCEEDED` 이후 최종 인정 횟수, 지분율, 환급금은 Dashboard projection이 아니라 Settlement API 기준으로 표시한다.
+**Conversation:**
+대시보드는 Dondok의 진행 상황 설명 포인트다. 사용자는 자신의 누적 raw 성공 횟수, 정산 규칙을 반영한 현재 기준 추정 인정 성공 횟수, 크루 전체 추정 인정 성공 횟수, 현재 기준 추정 지분율, 예상 환급금을 이해할 수 있어야 한다. 이 값들은 `MissionLog.server_time`과 `Asia/Seoul` 기준으로 계산되는 deterministic current-basis projection이며 최종 정산 결과가 아니다. 크루 전체 추정 인정 성공 횟수가 `0`이면 나눗셈이 아니라 all-fail equal-principal refund estimate를 보여줘야 한다. `Settlement.status = SUCCEEDED` 이후 최종 인정 횟수, 지분율, 환급금은 Dashboard projection이 아니라 Settlement API 기준으로 표시한다.
 
 **Confirmation:**
 
 1. 참여자는 내 raw 성공 횟수와 현재 기준 추정 인정 성공 횟수를 구분해 볼 수 있다.
-2. 시스템은 현재 기준 추정 지분율, 예상 환급금, 예상 손익을 deterministic estimated projection으로 보여준다.
-3. 예상 환급금은 정산 remainder/draw를 반영하지 않는 base estimate로 안내된다.
+2. 시스템은 현재 기준 추정 지분율, 예상 환급금, 보증금 대비 예상 차이를 deterministic current-basis projection으로 보여준다.
+3. 예상 환급금은 정산 remainder/winner/draw를 반영하지 않는 explanation estimate로 안내된다.
 4. 최근 인증 결과가 반영되면 대시보드 projection도 함께 갱신된다.
-5. 크루 전체 추정 인정 성공 횟수가 `0`이면 균등 환급 추정 규칙이 표시되고 오류가 발생하지 않는다.
+5. 크루 전체 추정 인정 성공 횟수가 `0`이면 all-fail equal-principal refund estimate가 표시되고 오류가 발생하지 않는다.
 6. 참여자는 현재 기준 추정 수행 순위와 상대적인 진행 상황을 확인할 수 있다.
 7. `Settlement.status = SUCCEEDED` 이후에는 대시보드 projection이 아니라 Settlement API 결과를 최종값으로 표시한다.
 
 ### US-10. 미션 종료/시작 전 취소 후 정산과 환급
 
-**Priority:** P0  
-**Card:** 미션이 끝나거나 시작 전 취소되면 시스템은 정해진 규칙으로 환급을 끝내야 한다.  
+**Priority:** P0
+**Card:** 미션이 끝나거나 시작 전 취소되면 시스템은 정해진 규칙으로 환급을 끝내야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
-정산은 MVP의 가장 위험한 구간이다. 일반 정산 배치는 `종료 익일 새벽`에 돌아야 하고, 시작 전 취소 방은 취소형 정산으로 전액 환급되어야 한다. 계산은 `BigDecimal`, `원 단위 절사`, `잔액 처리 규칙`을 따라야 한다. `전체 성공 횟수 0`, `절사 후 잔액`, `1위 동점`, `중도 탈퇴`, `start_at`까지 미시작 취소 같은 예외를 다뤄야 한다.
+**Conversation:**
+정산은 MVP의 가장 위험한 구간이다. 일반 정산 배치는 Settlement-design의 final settlement product anchor 이후 운영 창 안에 실행되어야 하고, 시작 전 취소 방은 취소형 정산으로 전액 환급되어야 한다. 계산은 `BigDecimal`, `원 단위 절사`, deterministic remainder allocation rule을 따라야 한다. `전체 성공 횟수 0 equal-principal refund`, `절사 후 잔액`, `동점 표시 ordering`, `중도 탈퇴 brownfield/deferred`, `start_at` 자동 activation 실패 취소 같은 예외를 다뤄야 한다.
 
 **Confirmation:**
 
-1. 미션 종료 후 시스템은 `익일 새벽`에 일반 정산 배치를 실행한다.
+1. 미션 종료 후 시스템은 Settlement-design의 final settlement product anchor 이후 운영 창 안에 일반 정산 배치를 실행한다.
 2. `start_at`까지 시작되지 않은 `RECRUITING` 방은 `CANCELLED`로 전이되고 취소형 정산으로 보증금을 전액 환급한다.
 3. 일반 정산은 사용자별 성공 횟수와 크루 전체 성공 횟수를 기준으로 지분율을 계산한다.
 4. 계산은 `BigDecimal` 기반으로 처리되고 금액은 `원 단위`로 절사된다.
-5. 크루 전체 성공 횟수가 `0`이면 전원 균등 환급한다.
-6. 절사 후 남은 잔액은 기여도 1위에게 지급하고, 동점이면 `성공 횟수 우선 -> 그래도 같으면 랜덤` 규칙을 따른다.
+5. 크루 전체 성공 횟수가 `0`이면 all-fail equal-principal refund를 적용해 각 참여자의 자기 보증금을 환급한다.
+6. 일반 정산의 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리하며 legacy top-contributor/winner/draw/random/host discretion 지급 규칙을 사용하지 않는다.
 7. 배치 실패 시 최대 `3회` 재시도하고, 계속 실패하면 어드민 알림 대상으로 남긴다.
 
 ### US-11. 정산 결과와 포인트 히스토리 조회
 
-**Priority:** P0  
-**Card:** 사용자는 정산이 끝난 뒤 얼마를 돌려받았는지 이유와 함께 확인할 수 있어야 한다.  
+**Priority:** P0
+**Card:** 사용자는 정산이 끝난 뒤 얼마를 돌려받았는지 이유와 함께 확인할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 사용자 입장에서 정산은 숫자가 아니라 신뢰의 문제다. 그래서 결과 화면은 성공 횟수, 지분율, 환급금, 예치금 이동 이력을 함께 보여줘야 한다. 인원 미달 취소나 예외 환급도 같은 화면에서 이해할 수 있어야 한다.
 
 **Confirmation:**
 
 1. 사용자는 미션 종료 후 내 성공 횟수, 지분율, 환급금을 확인할 수 있다.
 2. 정산으로 발생한 환급 내역은 `Point_History`에 기록되고 조회 가능해야 한다.
-3. 인원 미달 취소나 전원 균등 환급 같은 예외 결과도 사유와 함께 표시된다.
+3. 인원 미달 취소나 all-fail equal-principal refund 같은 예외 결과도 사유와 함께 표시된다.
 4. 정산이 끝난 뒤에도 사용자는 마이페이지나 크루 결과 화면에서 기록을 다시 볼 수 있다.
 5. 중도 탈퇴자의 결과는 탈퇴 전까지의 인정 성공 횟수를 기준으로 표시된다.
 
 ### US-12. SSE 인앱 알림
 
-**Priority:** P1  
-**Card:** 사용자는 인증 결과와 지분 변화 같은 중요한 상태 변화를 인앱 알림으로 빠르게 확인할 수 있어야 한다.  
+**Priority:** P1
+**Card:** 사용자는 인증 결과와 지분 변화 같은 중요한 상태 변화를 인앱 알림으로 빠르게 확인할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 `SSE 인앱 알림` 자체에 집중한다. 알림은 사용자가 중요한 상태 변화를 빠르게 인지하도록 돕는 realtime UX signal이다. 상세 SSE 계약과 client reaction expectation은 `API-spec-dondok.md`의 알림/SSE 섹션을 따른다. 알림이 실패해도 인증 성공/실패 집계나 정산 흐름은 그대로 유지되어야 한다.
 
 **Confirmation:**
@@ -313,11 +313,11 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 
 ### US-13. 정산 완료 이메일
 
-**Priority:** P1  
-**Card:** 사용자는 정산이 끝난 뒤 이메일로 결과를 받아 다시 앱에 돌아올 수 있어야 한다.  
+**Priority:** P1
+**Card:** 사용자는 정산이 끝난 뒤 이메일로 결과를 받아 다시 앱에 돌아올 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 정산 결과 전달 채널을 앱 밖으로 확장한다. 이메일은 정산 완료 이후 한 번만 발송되어야 하며, 메일 발송 실패가 정산 트랜잭션을 되돌리면 안 된다. 사용자는 메일을 못 받아도 앱 안에서는 같은 결과를 볼 수 있어야 한다.
 
 **Confirmation:**
@@ -330,11 +330,11 @@ MVP에서 크루는 최소 인원이 모였다는 사실만으로 자동 시작�
 
 ### US-14. AI 미션 추천 챗봇
 
-**Priority:** FR-Required / Non-transactional  
-**Card:** 크루 주최자는 AI 제안을 받아 더 쉽게 미션 규칙을 정할 수 있어야 한다.  
+**Priority:** FR-Required / Non-transactional
+**Card:** 크루 주최자는 AI 제안을 받아 더 쉽게 미션 규칙을 정할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 AI 미션 추천은 첫 릴리스 필수 사용자 기능이지만 방 생성 트랜잭션의 source of truth는 아니다. 추천 결과는 바로 저장되는 것이 아니라, 사용자가 검토하고 수정할 수 있는 초안이어야 한다. AI 응답 실패나 이상 응답은 실패 UI로 설명되고, 수동 입력 흐름을 막지 않아야 한다.
 
 **Confirmation:**
@@ -348,11 +348,11 @@ AI 미션 추천은 첫 릴리스 필수 사용자 기능이지만 방 생성 �
 
 ### US-15. AI 습관 리포트
 
-**Priority:** FR-Required / Non-transactional  
-**Card:** 사용자는 미션이 끝난 뒤 AI가 정리한 내 습관 리포트를 볼 수 있어야 한다.  
+**Priority:** FR-Required / Non-transactional
+**Card:** 사용자는 미션이 끝난 뒤 AI가 정리한 내 습관 리포트를 볼 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 정산 이후 재방문 가치를 만든다. 리포트는 실제 성공/실패 데이터와 정산 결과를 바탕으로 생성되어야 하며, 정산 완료 이후에만 노출된다. AI 리포트는 저장/재조회 가능한 첫 릴리스 필수 사용자 기능이지만, 실패가 정산 완료, 환급, 포인트 원장 상태를 바꾸면 안 된다.
 
 **Confirmation:**
@@ -367,11 +367,11 @@ AI 미션 추천은 첫 릴리스 필수 사용자 기능이지만 방 생성 �
 
 ### US-16. 어드민 정산 모니터링
 
-**Priority:** P1  
-**Card:** 운영자는 어떤 정산이 성공했고 어떤 정산이 실패했는지 빠르게 파악할 수 있어야 한다.  
+**Priority:** P1
+**Card:** 운영자는 어떤 정산이 성공했고 어떤 정산이 실패했는지 빠르게 파악할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 수동 대응의 출발점이다. 운영자는 미션별 배치 상태, 재시도 횟수, 실패 요약을 보고 우선 대응 대상을 골라야 한다. 이 화면은 일반 사용자와 엄격히 분리된 권한이어야 한다.
 
 **Confirmation:**
@@ -384,11 +384,11 @@ AI 미션 추천은 첫 릴리스 필수 사용자 기능이지만 방 생성 �
 
 ### US-17. 인증 피드 조회
 
-**Priority:** FR-Required / Non-transactional  
-**Card:** 사용자는 크루의 성공 인증을 피드로 보고, 실패나 미제출 같은 일자 상태는 별도 상태 목록으로 확인할 수 있어야 한다.  
+**Priority:** FR-Required / Non-transactional
+**Card:** 사용자는 크루의 성공 인증을 피드로 보고, 실패나 미제출 같은 일자 상태는 별도 상태 목록으로 확인할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 `B-17 → US-17 → T-33` traceability를 고정한다. `feed_items`는 `mission_log.is_success = true`인 성공 인증 로그만 포함한다. 실패 인증과 미제출 상태는 피드 게시물이 아니라 `day_statuses` 또는 동등한 일자 상태 projection으로 표현한다. 피드 조회는 소셜 표시 기능이며 정산, 포인트, 환급, AI 리포트, 방/참여 상태를 변경하지 않는다.
 
 **Confirmation:**
@@ -401,11 +401,11 @@ AI 미션 추천은 첫 릴리스 필수 사용자 기능이지만 방 생성 �
 
 ### US-18. 인증 피드 리액션
 
-**Priority:** FR-Required / Non-transactional  
-**Card:** 사용자는 성공 인증 피드 항목에 이모지 리액션을 남기거나 취소할 수 있어야 한다.  
+**Priority:** FR-Required / Non-transactional
+**Card:** 사용자는 성공 인증 피드 항목에 이모지 리액션을 남기거나 취소할 수 있어야 한다.
 **Design:** 미정. 기준 문서: [PRD-dondok.md](./PRD-dondok.md)
 
-**Conversation:**  
+**Conversation:**
 이 story는 `B-18 → US-18 → T-34` traceability를 고정한다. 리액션은 성공 인증 로그에 대한 비거래성 상호작용이다. 같은 사용자는 같은 인증 로그에 하나의 리액션만 가진다. 리액션은 정산, 포인트, 환급, 상태에 영향을 주지 않는다.
 
 **Confirmation:**

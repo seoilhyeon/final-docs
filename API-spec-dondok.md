@@ -16,8 +16,8 @@
 - 비즈니스 시간대는 `Asia/Seoul`이고, API 시각 값은 timezone offset이 포함된 `ISO-8601` 문자열로 주고받는다.
 - 금액은 모두 `integer` 원 단위다.
 - 보증금은 별도 자산 이동이 아니라 `lock` 모델이다.
-- `Settlement.status = SUCCEEDED` 전 정산 계산 입력은 `MissionLog`, frozen `JOINED` participant baseline, resolved certification state 재계산 결과다.
-- `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item` 계산 스냅샷과 연결된 `point_history` 원장이다. 이후 `MissionLog` 재계산은 감사/디버깅용 검증에만 사용한다.
+- `Settlement.status = SUCCEEDED` 전 정산 계산 입력은 `MissionLog`, frozen `JOINED` participant baseline, resolved certification state 기반 계산 결과다.
+- `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item` 계산 스냅샷과 연결된 `point_history` 원장이다. 이후 `MissionLog` 기반 replay는 감사/디버깅용 검증에만 사용하며 지급 결과를 변경하지 않는다.
 - `point_history`는 포인트 금액의 source of truth이고, `point_account.balance`는 재계산 가능한 현재값 캐시다.
 - `Settlement.status = SUCCEEDED`는 모든 `settlement_item.point_history_id` 연결과 대응 `point_history` 존재 검증까지 완료된 경우에만 가능하다.
 - 정산 재시도와 포인트 중복 지급 방지는 deterministic `idempotency_key`와 DB 제약을 함께 사용한다.
@@ -227,7 +227,7 @@
 | 미션 인증   | `POST`   | `/api/mission-logs`                             | 인증 제출                                |
 | 미션 인증   | `GET`    | `/api/rooms/{roomId}/mission-logs/me`           | 내 인증 기록 조회                        |
 | 피드/리액션 | `GET`    | `/api/rooms/{roomId}/feed`                      | 방 인증 피드와 파생 일자 상태 조회       |
-| 대시보드    | `GET`    | `/api/rooms/{roomId}/dashboard`                 | 방 내 성과/보상 실시간 추정 projection 조회 |
+| 대시보드    | `GET`    | `/api/rooms/{roomId}/dashboard`                 | 진행 상황/환급 설명용 current-basis projection 조회 |
 | 피드/리액션 | `POST`   | `/api/mission-logs/{missionLogId}/reactions`    | 내 리액션 멱등 upsert                    |
 | 피드/리액션 | `DELETE` | `/api/mission-logs/{missionLogId}/reactions/me` | 내 리액션 멱등 삭제                      |
 | 정산        | `GET`    | `/api/rooms/{roomId}/settlement`                | 방 기준 정산 상태/요약 조회              |
@@ -854,8 +854,8 @@ Error:
 - MVP 인증 API에서 `OUT_OF_SCHEDULE`는 사용하지 않는다.
 - 최종 정산에서의 인정 여부는 `is_success`가 아니라 `Settlement` 계산 단계에서 결정된다.
 - `SPECIFIC_DAYS`, `DAILY` 중복처럼 인증은 성공했지만 정산에서 제외되는 경우는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`으로만 표현한다. `WEEKLY_N` 초과는 Phase 2/deferred reference다.
-- 따라서 인증 시점 성공 로그도 최종 정산에서 제외될 수 있다. 예: `DAILY` 중복, `SPECIFIC_DAYS` 비유효 요일, host moderation override 결과 resolved certification state가 미인정인 경우.
-- 실시간 대시보드는 추정값이고, `SUCCEEDED` 전 정산 계산값은 `MissionLog`, frozen `JOINED` participant baseline, resolved certification state 기준으로 확정한다.
+- 따라서 인증 시점 성공 로그도 최종 정산에서 제외될 수 있다. 예: `DAILY` 중복, `SPECIFIC_DAYS` 비유효 요일, pre-freeze host moderation으로 resolved certification state가 미인정인 경우.
+- Dashboard projection은 추정값이고, `SUCCEEDED` 전 정산 계산값은 `MissionLog`, frozen `JOINED` participant baseline, resolved certification state 기준으로 확정한다.
 
 ### `GET /api/rooms/{roomId}/mission-logs/me`
 
@@ -1082,8 +1082,8 @@ Error:
 
 역할:
 
-- 미션 방 화면에서 내 현재 수행 현황, 추정 인정 성공 횟수, 예상 환급금, 예상 손익, 추정 지분율, 추정 순위를 보여주는 UX용 projection API다.
-- Dashboard는 단순 `MissionLog` 조회가 아니라 `MissionLog` 기반 성과/보상 estimated projection API다.
+- 미션 방 화면에서 내 현재 수행 현황, 추정 인정 성공 횟수, 현재 기준 예상 환급금, 보증금 대비 예상 차이, 추정 지분율, 진행/참여도 표시 순서를 보여주는 UX용 projection API다.
+- Dashboard는 단순 `MissionLog` 조회가 아니라 `MissionLog` 기반 진행 상황/환급 설명용 current-basis projection API다.
 - Dashboard 값은 `Settlement.status = SUCCEEDED` 전까지 최종 정산 결과가 아니며, 정산 source of truth가 아니다.
 - `Settlement.status = SUCCEEDED` 이후 최종 인정 성공 횟수, 최종 환급금, 최종 지분율은 `GET /api/settlements/{settlementId}`의 `settlement_item` 기준으로 표시한다.
 - Dashboard projection과 최종 settlement 결과가 달라도 그 자체를 시스템 오류로 간주하지 않는다.
@@ -1105,7 +1105,7 @@ Response `200 OK`:
   "total_recognized_success_count_estimated": 31,
   "my_share_ratio_estimated": "0.12903200",
   "my_expected_refund_amount": 8000,
-  "my_expected_net_profit_amount": 1200,
+  "my_expected_refund_delta_amount": 1200,
   "rank_estimated": 3,
   "updated_at": "2026-05-11T00:00:00+09:00"
 }
@@ -1128,25 +1128,25 @@ Error:
 
 | 값 | 의미 |
 | --- | --- |
-| `NOT_STARTED` | `RECRUITING` 등 미션 수행 전 상태라 성과/보상 projection이 아직 시작되지 않았다. |
-| `LIVE` | `ACTIVE` 상태에서 현재 `MissionLog`와 참여자 상태를 기준으로 실시간 추정값을 계산했다. |
-| `FROZEN` | `CLOSED` 상태에서 `room.end_at` cutoff로 매 요청 시 deterministic하게 재계산한 frozen projection을 보여준다. 저장된 dashboard snapshot이 아니며 최종값도 아니다. |
-| `NOT_PROVIDED` | `CANCELLED` 등 수행 성과 projection을 제공하지 않는 상태다. 환급/정산 안내는 Settlement API 기준이다. |
+| `NOT_STARTED` | `RECRUITING` 등 미션 수행 전 상태라 진행/환급 projection이 아직 시작되지 않았다. |
+| `LIVE` | `ACTIVE` 상태에서 현재 `MissionLog`와 참여자 상태를 기준으로 current-basis estimate를 계산했다. |
+| `FROZEN` | `CLOSED` 상태에서 `room.end_at` cutoff로 매 요청 시 deterministic하게 계산한 frozen projection을 보여준다. 저장된 dashboard snapshot이 아니며 최종값도 아니다. |
+| `NOT_PROVIDED` | `CANCELLED` 등 수행 projection을 제공하지 않는 상태다. 환급/정산 안내는 Settlement API 기준이다. |
 | `SETTLEMENT_SUCCEEDED` | 최종 정산이 성공했다. Dashboard는 최종값을 복제하지 않고 `settlement_id`로 Settlement API 조회를 유도한다. |
 
 #### ProjectionNotice
 
 | 값 | 의미 |
 | --- | --- |
-| `ESTIMATED_NOT_FINAL` | 현재 값은 실시간 참고용 추정값이며 최종 정산 결과가 아니다. |
+| `ESTIMATED_NOT_FINAL` | 현재 값은 참고용 current-basis estimate이며 최종 정산 결과가 아니다. |
 | `NOT_STARTED` | 미션 수행 전이라 성과/보상 projection이 아직 시작되지 않았다. |
-| `NOT_PROVIDED` | 현재 방 상태에서는 Dashboard 성과/보상 projection을 제공하지 않는다. |
+| `NOT_PROVIDED` | 현재 방 상태에서는 Dashboard 진행/환급 projection을 제공하지 않는다. |
 | `SETTLEMENT_RESULT_AVAILABLE` | 최종 정산 결과가 존재하므로 `settlement_id`로 Settlement API를 조회해야 한다. |
 | `INSUFFICIENT_PROJECTION_INPUT` | projection 계산에 필요한 참여자/보증금 입력을 충분히 확정할 수 없어 일부 추정 필드를 `null`로 반환한다. |
 
 #### 상태별 필드 계약
 
-| `projection_status` | 일반 room status | `settlement_id` | `my_deposit_amount` | `my_success_count` | `my_recognized_success_count_estimated` | `total_recognized_success_count_estimated` | `my_share_ratio_estimated` | `my_expected_refund_amount` | `my_expected_net_profit_amount` | `rank_estimated` | `updated_at` |
+| `projection_status` | 일반 room status | `settlement_id` | `my_deposit_amount` | `my_success_count` | `my_recognized_success_count_estimated` | `total_recognized_success_count_estimated` | `my_share_ratio_estimated` | `my_expected_refund_amount` | `my_expected_refund_delta_amount` | `rank_estimated` | `updated_at` |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `NOT_STARTED` | `RECRUITING` | `null` | value | `0` | `0` | `0` | `null` | `null` | `null` | `null` | value |
 | `LIVE` | `ACTIVE` | nullable | value | value | value | value | value 또는 `null` | value 또는 `null` | value 또는 `null` | value 또는 `null` | value |
@@ -1188,13 +1188,13 @@ Error:
 - `total_recognized_success_count_estimated`는 참여자별 추정 인정 성공 수 합계다.
 - `my_share_ratio_estimated`는 소수 정밀도 오해를 줄이기 위해 문자열 decimal로 반환한다.
 - `my_expected_refund_amount`는 deterministic base UX estimate다. `total_recognized_success_count_estimated > 0`이면 `FLOOR(total_locked_amount × my_share_ratio_estimated)`로 계산한다.
-- Dashboard는 정산의 `remainder`, `remainder_policy`, deterministic host remainder, 1원 단위 잔액 처리를 계산하거나 반영하지 않는다. 해당 최종 지급 차이는 `Settlement.status = SUCCEEDED` 이후 Settlement API에서만 확인한다.
-- `my_expected_net_profit_amount = my_expected_refund_amount - my_deposit_amount`다.
-- `rank_estimated`는 예상 환급금/예상 손익/지분율/보증금 기준 순위가 아니라 추정 수행 순위다. 정렬 기준은 `recognized_success_count_estimated DESC`, 동률이면 `participant_id ASC`다.
-- `total_recognized_success_count_estimated = 0`인 `LIVE` / `FROZEN` projection은 0으로 나누지 않고 균등 환급 base estimate를 적용한다.
-- 균등 환급 추정 denominator는 현재 normal settlement projection에 포함되는 frozen `JOINED` participant baseline이다. `WITHDRAWN`/ACTIVE withdrawal은 brownfield-deferred semantics다.
-- zero-total base estimate의 `my_expected_refund_amount`는 `FLOOR(total_locked_amount / participant_count)`이며, 이 경우에도 deterministic host remainder는 Dashboard에서 수행하지 않는다.
-- denominator를 확정할 수 없으면 `my_share_ratio_estimated`, `my_expected_refund_amount`, `my_expected_net_profit_amount`, `rank_estimated`는 `null`이고 `projection_notice = INSUFFICIENT_PROJECTION_INPUT`이다.
+- Dashboard는 정산의 `remainder`, `remainder_policy`, deterministic remainder allocation, 1원 단위 잔액 처리를 계산하거나 반영하지 않는다. 해당 최종 지급 차이는 `Settlement.status = SUCCEEDED` 이후 Settlement API에서만 확인한다.
+- `my_expected_refund_delta_amount = my_expected_refund_amount - my_deposit_amount`다. 이 값은 수익 권위값이 아니라 현재 기준 환급 설명용 차이값이다.
+- `rank_estimated`는 예상 환급금/수익/지분율/보증금 기준 순위가 아니라 추정 수행/참여도 표시 순서다. 정렬 기준은 `recognized_success_count_estimated DESC`, 동률이면 `participant_id ASC`다.
+- `total_recognized_success_count_estimated = 0`인 `LIVE` / `FROZEN` projection은 0으로 나누지 않고 all-fail equal-principal refund estimate를 적용한다.
+- 전체 인정 성공 추정값이 `0`인 경우 Dashboard는 all-fail equal-principal refund 철학에 맞춰 각 참여자의 `deposit_amount`를 current-basis refund estimate로 보여준다. `WITHDRAWN`/ACTIVE withdrawal은 brownfield-deferred semantics다.
+- zero-total base estimate의 `my_expected_refund_amount = my_deposit_amount`이며, 이 경우 Dashboard에서도 host/winner/draw remainder를 수행하지 않는다.
+- denominator를 확정할 수 없으면 `my_share_ratio_estimated`, `my_expected_refund_amount`, `my_expected_refund_delta_amount`, `rank_estimated`는 `null`이고 `projection_notice = INSUFFICIENT_PROJECTION_INPUT`이다.
 - `Settlement.status = SUCCEEDED` 이후 최종 인정 성공 횟수, 최종 환급금, 최종 지분율은 Dashboard projection보다 Settlement API가 우선하며, `settlement_item`과 연결된 `point_history`가 final source of truth다.
 - Dashboard projection과 최종 settlement 결과가 달라도 시스템 오류로 보지 않는다.
 
@@ -1202,9 +1202,9 @@ Error:
 
 | Room status | Dashboard 동작 |
 | --- | --- |
-| `RECRUITING` | 성과/보상 projection은 시작 전이다. 보증금, 방 규칙, `recruitment_deadline`, `start_at` 중심으로 표시한다. |
-| `ACTIVE` | 실시간 estimated projection을 계산한다. 모든 금액/비율/순위는 추정값이다. |
-| `CLOSED` | `room.end_at` cutoff로 query-time deterministic frozen projection을 재계산해 보여준다. 저장된 snapshot이 아니며, `Settlement.status = SUCCEEDED` 전까지 최종값이 아니므로 pending/running/retry 상태 안내를 함께 제공한다. |
+| `RECRUITING` | 진행/환급 projection은 시작 전이다. 보증금, 방 규칙, `recruitment_deadline`, `start_at` 중심으로 표시한다. |
+| `ACTIVE` | current-basis estimated projection을 계산한다. 모든 금액/비율/표시 순서는 추정값이다. |
+| `CLOSED` | `room.end_at` cutoff로 query-time deterministic frozen projection을 계산해 보여준다. 저장된 snapshot이 아니며, `Settlement.status = SUCCEEDED` 전까지 최종값이 아니므로 pending/running/retry 상태 안내를 함께 제공한다. |
 | `CANCELLED` | 수행 성과 projection을 제공하지 않는다. 시작 전 취소 정산/환급은 Settlement API 기준으로 안내한다. |
 
 #### locked_balance와의 관계
@@ -1253,7 +1253,7 @@ Response `200 OK`:
   "retry_count": 1,
   "failure_code": null,
   "failure_message": null,
-  "started_at": "2026-06-01T00:05:10+09:00",
+  "started_at": "2026-06-01T13:12:10+09:00",
   "finished_at": null
 }
 ```
@@ -1288,12 +1288,12 @@ Response `200 OK`:
   "total_recognized_success": 390,
   "total_base_refund_amount": 499996,
   "total_remainder_amount": 4,
-  "remainder_policy": "HOST_REMAINDER",
+  "remainder_policy": "DETERMINISTIC_REMAINDER_ALLOCATION",
   "remainder_winner_participant_id": null,
   "failure_code": null,
   "failure_message": null,
-  "started_at": "2026-06-01T00:05:10+09:00",
-  "finished_at": "2026-06-01T00:05:18+09:00",
+  "started_at": "2026-06-01T13:12:10+09:00",
+  "finished_at": "2026-06-01T13:12:18+09:00",
   "items": [
     {
       "settlement_item_id": 7001,
@@ -1334,11 +1334,11 @@ Error:
 
 - `settlement_item`은 참여자별 계산 스냅샷의 source of truth다.
 - `point_history`는 그 결과를 실제 잔액에 반영한 금액 source of truth다.
-- `SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item + point_history`이며, `MissionLog` 재계산은 감사/디버깅용 검증에만 사용한다.
+- `SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item + point_history`이며, `MissionLog` 기반 replay는 감사/디버깅용 검증에만 사용하고 지급 결과를 변경하지 않는다.
 - `SUCCEEDED`는 모든 `settlement_item.point_history_id`가 채워지고 대응 `point_history` 존재가 검증된 상태를 뜻한다.
 - partial 상태에서는 일부 item의 `point_history_id`가 `null`일 수 있고, 이 경우 `status`는 `SUCCEEDED`가 아니라 `RETRY_WAIT` 또는 `FAILED`다.
-- 일반 정산에서 절사 후 남은 잔액은 deterministic host remainder rule로 host에게 귀속한다. 이는 host payout authority가 아니라 replayable floor-remainder 처리 규칙이다.
-- 전체 인정 성공 `0`이면 equal-principal refund를 적용하고, 남은 잔액도 deterministic host remainder rule로 처리한다.
+- 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. Brownfield `HOST_REMAINDER` 명칭은 fixed rule alias일 뿐 host 지급 권한이 아니다.
+- 전체 인정 성공 `0`이면 all-fail equal-principal refund를 적용한다. 각 참여자는 자기 `deposit_amount`를 환급받고 host/winner/draw remainder 수익은 발생하지 않는다.
 
 ### `GET /api/admin/settlements`
 
@@ -1365,8 +1365,8 @@ Response `200 OK`:
       "retry_count": 3,
       "failure_code": "POINT_CREDIT_FAILED",
       "failure_message": "point_history insert timeout",
-      "started_at": "2026-06-01T00:05:10+09:00",
-      "finished_at": "2026-06-01T00:05:20+09:00"
+      "started_at": "2026-06-01T13:12:10+09:00",
+      "finished_at": "2026-06-01T13:12:20+09:00"
     }
   ]
 }
@@ -1408,8 +1408,8 @@ Error:
 - 이미 생성된 `point_history`는 deterministic `idempotency_key`로 중복 지급이 차단된다.
 - 동일 `idempotency_key`와 동일 payload의 중복은 기존 `point_history`를 재사용하거나 연결하고, 동일 키에 다른 payload가 확인되면 idempotency conflict로 실패 처리한다.
 - partial 상태에서는 미지급 participant만 이어서 처리하거나, 이미 원장이 있으나 FK만 누락된 경우 기존 `point_history`를 재사용해 연결만 보정한다.
-- admin retry는 admin correction이 아니다. Retry는 기존 `Settlement`/`settlement_item` 기준의 interrupted execution 복구이며, frozen certification outcome, succeeded settlement snapshot, authoritative daily/final result를 변경하지 않는다.
-- replay가 필요하더라도 replay는 historical reproducibility 검증용이며 payout mutation이나 recalculation endpoint가 아니다.
+- admin retry는 별도 support adjustment 경로가 아니다. Retry는 기존 `Settlement`/`settlement_item` 기준의 interrupted execution 복구이며, frozen certification outcome, succeeded settlement snapshot, authoritative daily/final result를 변경하지 않는다.
+- replay가 필요하더라도 replay는 historical reproducibility 검증용이며 payout mutation이나 payout rewrite endpoint가 아니다.
 
 ## 5.7 AI
 
@@ -1917,12 +1917,12 @@ SSE realtime UX handling은 `GET /api/notifications/stream` 계약의 client rea
 
 ## 8. 구현 메모
 
-- 인증 시점에는 과도한 분산 락보다 `MissionLog append-only 저장 + 캐시 원자 연산 + 최종 재계산`을 우선한다.
+- 인증 시점에는 과도한 분산 락보다 `MissionLog append-only 저장 + 캐시 원자 연산 + 최종 계산/replay 가능성`을 우선한다.
 - `SUCCEEDED` 전 최종 정산 계산은 `MissionLog.server_time`, frozen `JOINED` participant baseline, resolved certification state를 기준으로 수행한다.
 - `exif_taken_at`은 서버가 S3 object에서 추출/검증한 이미지 조작 또는 촬영 시각 이상 여부 검증 보조 정보이며, 인정 횟수 계산 기준 시간으로 사용하지 않는다.
 - 정산 시점에는 DB 조건부 `Settlement(PENDING/RETRY_WAIT -> RUNNING)` claim을 1차 기준으로 사용하고, Redisson room lock은 보조 수단, DB unique 제약과 `point_history.idempotency_key`는 최종 방어선으로 사용한다.
 - `total_locked_amount`는 정산 시점의 `room_participant.deposit_amount` 합계 스냅샷이며, `point_account`나 `point_history`를 다시 합산하지 않는다.
-- 일반 정산 remainder는 deterministic host remainder rule로 처리한다. 이는 host payout authority가 아니라 replayable floor-remainder 규칙이다.
+- 일반 정산 remainder는 deterministic remainder allocation rule로 처리한다. 이는 host 지급 권한, winner 지급, draw/random 지급이 아니라 replayable floor-remainder 규칙이다.
 - 취소형 정산에서도 조회 구조는 동일하고 `settlement_type = CANCELLED_BEFORE_START`만 달라진다.
 - 포인트 원장 기록과 `point_account.balance` 갱신은 participant 지급 단위로 같은 트랜잭션에서 처리하되, 전체 정산은 partial 복구가 가능하도록 이미 생성된 원장을 idempotency key로 재사용한다.
 

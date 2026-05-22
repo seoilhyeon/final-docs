@@ -20,20 +20,20 @@
 
 - `Settlement.status = SUCCEEDED` 전 정산 계산 입력은 `mission_log`, `room_participant`, `mission_room`, `mission_rule`, `mission_schedule_day`다.
 - `settlement`와 `settlement_item`은 원천 로그를 다시 계산한 결과와 근거를 남기는 스냅샷이다.
-- `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item`과 연결된 `point_history`다. 이후 `MissionLog` 재계산은 감사/디버깅 검증용이지 지급 결과를 대체하는 기준이 아니다.
-- 실시간 지분율, 통계성 캐시, `point_account.balance`는 source of truth가 아니다. 필요해도 정산 계산이나 분쟁 판단의 최종 기준으로 쓰지 않는다.
+- `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item`과 연결된 `point_history`다. 이후 `MissionLog` 기반 replay는 감사/디버깅 검증용이지 지급 결과를 대체하거나 변경하는 기준이 아니다.
+- 현재 기준 지분율/projection, 통계성 캐시, `point_account.balance`는 source of truth가 아니다. 필요해도 정산 계산이나 분쟁 판단의 최종 기준으로 쓰지 않는다.
 
 ### 1.3 Canonical Freeze v1 데이터 경계
 
 - Host moderation authority는 settlement authority가 아니다. 방장 검수/조정 이력은 정산 입력을 설명할 수는 있어도 freeze 이후의 정산/일별 결과를 직접 수정하는 권한으로 모델링하지 않는다.
-- 72h grace는 pre-freeze correction window다. 최종 3일 미션 결과는 grace 없이 즉시 freeze되며, post-freeze mutation은 금지된다. 이 세부 workflow/API 문구는 `Settlement-design`과 `API-spec` 후속 propagation에서 정렬한다.
-- `NOTIFY-003`은 projection 기반 알림이며 final settlement guarantee가 아니다. ERD에서는 알림을 정산 source of truth로 모델링하지 않는다. 상세 event contract는 `API-spec` 후속 propagation 대상이다.
+- 72h grace는 pre-freeze certification review/correction window다. 최종 3일 미션 결과는 grace 없이 즉시 freeze되며, post-freeze hidden mutation은 금지된다. Support correction은 별도 운영 의미 후보이며 settlement snapshot/ledger overwrite로 모델링하지 않는다.
+- `NOTIFY-003`은 projection 기반 알림이며 final settlement guarantee가 아니다. ERD에서는 알림을 정산 source of truth로 모델링하지 않는다. 상세 event contract는 `API-spec`의 projection boundary를 따른다.
 - `point_history`는 authoritative append-only ledger이고, `point_account.balance`는 `point_history`에서 재계산 가능한 projection/cache layer다. 불일치 시 원장 기준으로 원인을 조사하고 캐시를 보정한다.
 - `APPROVED_LOCK_PENDING`은 capacity만 임시 예약한다. 최소 인원 baseline, activation eligibility, frozen participant baseline에는 `JOINED` participant만 포함한다.
 
 ### 1.4 논리 삭제 정책
 
-- `room_participant`는 물리 삭제하지 않고 participation lifecycle 상태로 관리한다. MVP 활성 기준에서는 `APPROVED_LOCK_PENDING`과 `JOINED`의 counting semantics를 구분하고, `WITHDRAWN`/active withdrawal/rejoin은 후속 propagation에서 Phase 2 여부를 정렬한다.
+- `room_participant`는 물리 삭제하지 않고 participation lifecycle 상태로 관리한다. MVP 활성 기준에서는 `APPROVED_LOCK_PENDING`과 `JOINED`의 counting semantics를 구분하고, `WITHDRAWN`/active withdrawal/rejoin은 Phase 2/deferred brownfield visibility로만 남긴다.
 - `mission_log`, `settlement`, `settlement_item`, `point_history`는 감사 추적을 위해 append-only에 가깝게 다룬다.
 - `mission_room.settlement_status`는 필요 시 조회 최적화용 비정규화 필드로 둘 수 있지만, 원천 상태는 항상 `settlement.status`다.
 
@@ -209,7 +209,7 @@ Unique / Index:
 - MVP에서 `point_account`의 현재값 컬럼은 현재 사용 가능 잔액 캐시인 `balance` 하나만 두며, `pending_balance`, `waiting_balance`, `locked_balance`, `available_balance` 같은 별도 현재값 컬럼은 두지 않는다.
 - 사용자별 묶인 금액은 `point_account`에 저장하지 않고, `room_participant.deposit_amount`와 `mission_room.status`를 이용해 API projection으로 계산한다.
 - MVP 기준 `GET /api/points.locked_balance` projection은 양수 `room_participant.deposit_amount`를 가진 참여 건 중 `mission_room.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')`인 방의 합계로 시작한다.
-- `WITHDRAWN` 참여자도 정산 완료 전까지는 즉시 환급되지 않으므로 projection 합계에 포함된다.
+- `WITHDRAWN`은 brownfield/deferred visibility다. MVP locked balance projection은 frozen `JOINED` baseline과 room/settlement 상태를 기준으로 하며 withdrawal wording이 즉시 환급 또는 final settlement mutation authority로 해석되면 안 된다.
 - 이 projection은 정산 전 UX 표시용이며 현재 환급 가능 금액, 출금 가능 여부, 분쟁 처리, 정산 결과 판단 기준이 아니다.
 - 보증금 잠금 차감은 `WHERE balance >= deposit_amount` 조건을 포함한 조건부 update로 수행하고, row count가 `1`일 때만 성공으로 간주한다.
 - 보증금 잠금 처리, `room_participant` 생성, `ROOM_DEPOSIT_LOCK point_history` 기록은 반드시 하나의 트랜잭션으로 처리한다.
@@ -334,7 +334,7 @@ Unique / Index:
 - `index(status, recruitment_deadline)`
 - `index(status, start_at, end_at)`
 - `index(status, activated_at)`
-- `check(min_participants >= 2 and min_participants <= max_participants and max_participants <= 10)`
+- `check(min_participants >= 2 and min_participants <= max_participants and max_participants <= 15)`
 
 상태값 / Enum:
 
@@ -345,7 +345,7 @@ Unique / Index:
 주의사항:
 
 - 신규 참여는 `RECRUITING` 상태이면서 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
-- `min_participants` 기본값은 `2`고, `2 <= min_participants <= max_participants <= 10`을 만족해야 한다. MVP activation eligibility는 system authority가 `start_at`에 평가하며, `APPROVED_LOCK_PENDING`은 제외하고 `JOINED` participant만 최소 인원 baseline에 포함한다. 참가자 상한 수치 변경은 후속 propagation 대상이다.
+- `min_participants` 기본값은 `2`고, PRD synthesis 기준 `2 <= min_participants <= max_participants <= 15`를 만족해야 한다. MVP activation eligibility는 system authority가 `start_at`에 평가하며, `APPROVED_LOCK_PENDING`은 제외하고 `JOINED` participant만 최소 인원 baseline에 포함한다.
 - `start_at`은 예정 시작 시각이자 MVP system auto-activation 기준 시각이다. 실제 lifecycle/정산/log/projection anchor는 `activated_at`이며, MVP invariant는 `activated_at = start_at` 또는 system auto-activation timestamp다.
 - `activated_at`은 host command timestamp가 아니다. `ACTIVE`/`CLOSED` 방에서는 system authority에 의해 ACTIVE가 된 시각이어야 하며, host moderation authority와 settlement/activation authority를 혼동하지 않는다.
 - `end_at`은 계획된 미션 종료 cutoff이며 activation 지연으로 자동 이동하지 않는다.
@@ -392,7 +392,7 @@ Unique / Index:
 상태값 / Enum:
 
 - MVP activation/counting 관련 `status`: `APPLIED`, `APPROVED_LOCK_PENDING`, `JOINED`, `REJECTED`, `CANCELLED`, `EXPIRED`
-- `WITHDRAWN`/active withdrawal/rejoin은 Canonical Freeze v1의 MVP activation baseline에 포함하지 않으며, 필요 시 Phase 2/deferred semantics로 후속 문서에서 정렬한다.
+- `WITHDRAWN`/active withdrawal/rejoin은 Canonical Freeze v1의 MVP activation baseline에 포함하지 않으며 Phase 2/deferred semantics로만 보존한다.
 
 주의사항:
 
@@ -401,7 +401,7 @@ Unique / Index:
 - `APPROVED_LOCK_PENDING`은 host approval 이후 보증금 lock 완료 전 임시 예약 상태다. 이 상태는 max participant capacity만 임시로 예약하며, `min_participants` baseline, activation eligibility, frozen participant baseline에는 포함하지 않는다.
 - `JOINED`는 보증금 lock 완료 후의 MVP 참여 확정 상태다. 최소 인원 baseline, activation eligibility, frozen participant baseline에는 `JOINED`만 포함한다.
 - `REJECTED`, `CANCELLED`, `EXPIRED`는 pre-start exit 상태이며 정산 대상 baseline이 아니다.
-- `WITHDRAWN`/active withdrawal/rejoin은 MVP activation baseline에 포함하지 않는다. 기존 row 재사용/Phase 2 여부는 API-spec과 Settlement-design 후속 propagation에서 정렬한다.
+- `WITHDRAWN`/active withdrawal/rejoin은 MVP activation baseline에 포함하지 않는다. 기존 row 재사용/withdrawal 재도입은 Phase 2/deferred brownfield semantics다.
 - 보증금은 별도 계좌로 이동하지 않으며, `point_account.balance` projection/cache에서 차감되고 append-only `ROOM_DEPOSIT_LOCK point_history`가 원장 이벤트로 남은 뒤 `room_participant.deposit_amount`로 잠긴 상태를 표현한다.
 - `deposit_amount`는 `JOINED` participant 단위 잠금 금액의 source of truth다. 기본적으로 `mission_room.deposit_amount`를 복사해 저장한다.
 - 참여 확정 처리에서는 보증금 잠금, `JOINED` 전이, `ROOM_DEPOSIT_LOCK point_history` 기록이 하나의 트랜잭션으로 함께 성공하거나 함께 롤백되어야 한다.
@@ -451,7 +451,7 @@ Unique / Index:
 역할:
 
 - `SPECIFIC_DAYS` 미션의 허용 요일을 저장한다.
-- 요일 규칙을 별도 row로 저장해 정산 재계산과 API 검증에서 같은 원본을 사용한다.
+- 요일 규칙을 별도 row로 저장해 정산 계산/replay와 API 검증에서 같은 원본을 사용한다.
 
 주요 컬럼:
 
@@ -488,7 +488,7 @@ Unique / Index:
 역할:
 
 - 인증 업로드의 원본 로그를 저장한다.
-- 최종 정산 재계산의 직접 입력값이다.
+- `SUCCEEDED` 전 최종 정산 계산과 `SUCCEEDED` 후 replay/audit 검증의 직접 입력값이다.
 
 주요 컬럼:
 
@@ -527,9 +527,9 @@ Unique / Index:
 - `exif_taken_at`은 클라이언트가 제출한 값을 신뢰해 저장하는 컬럼이 아니다. 서버가 S3에 업로드된 object에서 EXIF를 추출/검증한 결과를 저장한다.
 - EXIF가 없거나 유효하지 않으면 `failure_reason`은 `EXIF_MISSING` 또는 `EXIF_TIME_INVALID`가 된다.
 - 정산 인정 횟수 계산 기준 시간은 `exif_taken_at`이 아니라 `server_time`이다.
-- `withdrawn_at` 이후 인증 차단은 API에서 한 번, 정산 시 `server_time < withdrawn_at` 필터로 한 번 더 적용한다.
+- `withdrawn_at` cutoff는 brownfield/deferred reference다. MVP active settlement에서는 frozen `JOINED` baseline과 resolved certification state를 소급 변경하는 규칙으로 사용하지 않는다.
 - `DAILY` 중복, `SPECIFIC_DAYS` 제외, `WEEKLY_N` 상한 제외 같은 최종 인정 제외 근거는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`에 남긴다.
-- 실시간 성공 여부와 최종 인정 횟수는 다를 수 있으므로, 최종 결과는 `settlement_item`에서 설명한다.
+- 조회 시점 성공 표시와 최종 인정 횟수는 다를 수 있으므로, 최종 결과는 `settlement_item`에서 설명한다.
 
 ### `mission_log_reaction`
 
@@ -600,7 +600,7 @@ Unique / Index:
 | `total_base_refund_amount`        | `BIGINT`       | N        | 절사 합계                       |
 | `total_remainder_amount`          | `BIGINT`       | N        | 잔액 합계                       |
 | `remainder_policy`                | `VARCHAR(30)`  | N        | 잔액 분배 방식                  |
-| `remainder_winner_participant_id` | `BIGINT`       | Y        | 일반 정산 잔액 귀속 대상        |
+| `remainder_winner_participant_id` | `BIGINT`       | Y        | deprecated/brownfield. winner/draw payout authority 아님 |
 | `failure_code`                    | `VARCHAR(50)`  | Y        | 실패 코드                       |
 | `failure_message`                 | `VARCHAR(500)` | Y        | 최근 실패 요약                  |
 | `started_at`                      | `DATETIME(6)`  | Y        | 실행 시작 시각                  |
@@ -626,7 +626,7 @@ Unique / Index:
 
 - `settlement_type`: `NORMAL`, `CANCELLED_BEFORE_START`
 - `status`: `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `RETRY_WAIT`
-- `remainder_policy`: `TOP_1_ALL`, `DRAW_SPLIT_ONE_WON`
+- `remainder_policy`: `DETERMINISTIC_REMAINDER_ALLOCATION`. Brownfield `HOST_REMAINDER`, `TOP_1_ALL`, `DRAW_SPLIT_ONE_WON` 값은 legacy/deprecated alias로만 해석하며 host/winner/draw authority가 아니다.
 - `failure_code`: `INPUT_LOAD_FAILED`, `CALCULATION_FAILED`, `POINT_CREDIT_FAILED`, `DUPLICATE_SETTLEMENT`, `LOCK_ACQUIRE_FAILED`, `UNKNOWN`
 
 주의사항:
@@ -634,10 +634,10 @@ Unique / Index:
 - `Settlement(PENDING)`는 종료/취소 감지 시 선생성하며, 아직 워커가 claim하지 않은 실행 전 상태다.
 - `Settlement.status`가 정산 상태의 원천이고, `mission_room.settlement_status`는 projection이다. Host moderation authority는 settlement authority가 아니며, freeze 이후 정산/일별 결과 mutation은 금지된다.
 - 같은 방의 같은 `settlement_type`은 하나만 허용한다.
-- `total_participants`는 frozen participant baseline에 포함된 `JOINED` participant 중 정산 대상 locked deposit이 존재하는 수다. `APPROVED_LOCK_PENDING`은 capacity reservation일 뿐 정산 baseline에 포함하지 않는다. `WITHDRAWN`/active withdrawal 정산 포함 여부는 Phase 2/deferred 후속 propagation 대상이다.
+- `total_participants`는 frozen participant baseline에 포함된 `JOINED` participant 중 정산 대상 locked deposit이 존재하는 수다. `APPROVED_LOCK_PENDING`은 capacity reservation일 뿐 정산 baseline에 포함하지 않는다. `WITHDRAWN`/active withdrawal 정산 포함 여부는 Phase 2/deferred brownfield semantics다.
 - `total_locked_amount`는 정산 실행 시점에 정산 대상 participant `room_participant.deposit_amount` 합계를 스냅샷으로 고정한 값이다.
 - `total_locked_amount`는 `point_history`나 `point_account`를 다시 합산해 계산하지 않는다.
-- 일반 정산에서 절사 후 남은 잔액은 기여도 1위 참여자에게 지급한다. 기여도 1위가 동점인 경우 성공 횟수를 비교하고, 그래도 동일하면 재현 가능한 draw 규칙으로 1명을 결정한다.
+- 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. Brownfield winner/draw/top-contributor 필드는 deprecated visibility일 뿐 지급액 결정 authority가 아니며, host discretion이나 random payout을 허용하지 않는다.
 - 일부 participant 지급만 완료된 partial 상태는 `RETRY_WAIT` 또는 `FAILED`로 남으며, 모든 `settlement_item.point_history_id` 연결과 대응 `point_history` 존재가 검증된 경우에만 `SUCCEEDED`가 된다.
 - MVP에서는 별도 `total_active_participants` 컬럼을 두지 않는다.
 
@@ -668,12 +668,12 @@ Unique / Index:
 | `share_ratio`                 | `DECIMAL(18,8)` | N        | 지분율                  |
 | `raw_refund_amount`           | `DECIMAL(18,2)` | N        | 절사 전 금액            |
 | `base_refund_amount`          | `BIGINT`        | N        | 절사 금액               |
-| `remainder_bonus_amount`      | `BIGINT`        | N        | 잔액 가산분             |
+| `remainder_bonus_amount`      | `BIGINT`        | N        | deterministic remainder allocation 설명용 잔액 가산분. all-fail equal-principal refund에서는 `0` |
 | `reward_amount`               | `BIGINT`        | N        | 잠긴 보증금 초과 환급분 |
 | `refund_amount`               | `BIGINT`        | N        | 실제 환급 총액          |
 | `final_amount`                | `BIGINT`        | N        | 최종 지급 금액          |
-| `draw_key_snapshot`           | `CHAR(64)`      | Y        | tie-break 키            |
-| `tie_break_rank`              | `INT`           | Y        | draw 순위               |
+| `draw_key_snapshot`           | `CHAR(64)`      | Y        | non-payout 표시/설명 ordering key |
+| `tie_break_rank`              | `INT`           | Y        | non-payout 표시/설명 순위 |
 | `calculation_reason`          | `JSON`          | N        | 포함/제외 근거          |
 | `point_history_id`            | `BIGINT`        | Y        | 환급 원장 FK            |
 | `created_at`                  | `DATETIME(6)`   | N        | 생성 시각               |
@@ -697,14 +697,14 @@ Unique / Index:
 
 상태값 / Enum:
 
-- `participant_status_snapshot`: `JOINED`, `WITHDRAWN`
+- `participant_status_snapshot`: MVP active settlement에서는 frozen `JOINED`; `WITHDRAWN`은 brownfield/deferred visibility
 - `calculation_reason` vocabulary는 JSON 내부 진단 코드 문자열이며 DB enum/constraint나 public API enum이 아니다. MVP discoverability 목적의 대표 값은 `DAILY_DUPLICATE`, `INVALID_SCHEDULE_DAY`, `WEEKLY_N_OVERFLOW`, `AFTER_WITHDRAWN_AT`, `BEFORE_START`, `AFTER_END`다.
 
 주의사항:
 
 - 정산 계산 단위는 `participant_id`고, 실제 포인트 지급 단위는 `member_id`다.
 - 같은 방에서 한 `member`가 하나의 `participant`만 가진다는 불변식이 있으므로 계산과 지급 연결이 안정적이다.
-- `calculation_reason`은 `DAILY` 중복 제외, `SPECIFIC_DAYS` 비유효 요일 제외, `WEEKLY_N` 상한 제외, `withdrawn_at` cutoff를 설명해야 한다.
+- `calculation_reason`은 `DAILY` 중복 제외, `SPECIFIC_DAYS` 비유효 요일 제외, resolved certification state, Phase 2/deferred cadence/withdrawal reference를 설명해야 한다.
 - `calculation_reason` 값 공간은 정산 스냅샷의 설명/QA 검색성을 위한 vocabulary이며, DB 제약이나 API 응답 enum으로 승격하지 않는다.
 - `settlement_item`은 참여자별 deterministic 계산 snapshot이고, `point_history`는 그 결과를 실제 잔액에 반영하는 authoritative append-only ledger다. `Settlement.status = SUCCEEDED` 이후에는 frozen snapshot과 연결된 `point_history`가 운영/분쟁/조회 기준이며 post-freeze mutation은 금지된다.
 - 정산 실행에서는 `settlement_item`을 먼저 생성해 계산 결과를 고정하고, 이후 `point_history`를 생성한 뒤 `point_history_id`를 연결한다.
@@ -800,7 +800,7 @@ Unique / Index:
 
 정산 계산 관련 입력 원칙:
 
-- `draw_key = SHA-256(room_id + ":" + settlement_type + ":" + member_id)`
+- `draw_key = SHA-256(room_id + ":" + settlement_type + ":" + member_id)`은 non-payout 표시/설명 ordering 전용이다.
 - `point_history.idempotency_key = settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:refund`
 - `point_history.idempotency_key`는 이벤트별 고정 규칙을 따른다. 예: `charge:{paymentKey}`, `deposit:room:{roomId}:participant:{participantId}`, `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:refund`, `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cancel_refund`
 - `draw_key`와 `idempotency_key` 모두 런타임 PK가 아니라 입력 기반 식별자를 사용한다.
