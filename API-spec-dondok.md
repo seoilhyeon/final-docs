@@ -8,7 +8,7 @@
 
 ## 1. 목적
 
-이 문서는 갓세이빙 MVP에서 FE와 BE가 병렬 개발할 수 있도록 API 계약을 고정하기 위한 문서다.
+이 문서는 Dondok MVP에서 FE와 BE가 병렬 개발할 수 있도록 API 계약을 고정하기 위한 문서다.
 
 고정 원칙:
 
@@ -138,13 +138,32 @@
 
 ### 3.8 MissionLogFailureReason
 
+- system/timing/upload validation axis다. 호스트 검수자 거절 사유와 의미 vocabulary가 다르다.
 - `EXIF_MISSING` (risk/review signal only; automatic final failure 아님)
 - `EXIF_TIME_INVALID` (risk/review signal only; automatic final failure 아님)
 - `BEFORE_START`
 - `AFTER_END`
 - `AFTER_WITHDRAWN` (brownfield/deferred; MVP ACTIVE withdrawal 정산 규칙으로 사용하지 않음)
 
-### 3.9 SettlementFailureCode
+### 3.9 DailySettlementType
+
+- `A`: 일일 인증 마감 `09:00 KST`, 일일 정산 batch `12:00 KST`
+- `B`: 일일 인증 마감 `21:00 KST`, 일일 정산 batch `00:00 KST` (익일)
+- `C`: 일일 인증 마감 `23:59 KST`, 일일 정산 batch `익일 12:00 KST`
+- 방 생성 시 필수. cadence anchor는 `Settlement-design.md`이 소유한다.
+
+### 3.10 MissionLogDecisionType
+
+- host moderation 결정 type. 정확한 enum 값은 deferred decision이며 이 contract에서 freeze하지 않는다.
+- API 응답에는 string으로 노출하되, 클라이언트는 알려진 값 외 unknown 값에 대해 graceful degradation으로 처리한다.
+
+### 3.11 MissionLogRejectReasonCode
+
+- host moderation rejection reason axis. `MissionLogFailureReason`(system axis)과 의미 vocabulary가 분리된다.
+- 6종 enum + `OTHER` 존재만 freeze한다. 정확한 5개 enum 이름은 deferred decision이다.
+- `OTHER` 결정 시 `reject_memo` (최대 50자 free-text)가 함께 채워질 수 있다.
+
+### 3.12 SettlementFailureCode
 
 - `INPUT_LOAD_FAILED`
 - `CALCULATION_FAILED`
@@ -153,13 +172,13 @@
 - `LOCK_ACQUIRE_FAILED`
 - `UNKNOWN`
 
-### 3.10 AiHabitReportStatus
+### 3.13 AiHabitReportStatus
 
 - `PENDING`
 - `SUCCEEDED`
 - `FAILED`
 
-### 3.11 AiHabitReportFailureCode
+### 3.14 AiHabitReportFailureCode
 
 `ai_habit_report.failure_code`의 MVP catalog다.
 
@@ -169,7 +188,7 @@
 - `AI_RESPONSE_INVALID`
 - `UNKNOWN`
 
-### 3.12 ProjectionStatus
+### 3.15 ProjectionStatus
 
 대시보드 projection 응답 전용 상태값이다.
 
@@ -181,7 +200,7 @@
 - `NOT_PROVIDED`
 - `SETTLEMENT_SUCCEEDED`
 
-### 3.13 ProjectionNotice
+### 3.16 ProjectionNotice
 
 대시보드 projection 응답의 현재 상태를 설명하기 위한 안내 값이다.
 
@@ -193,13 +212,13 @@
 - `SETTLEMENT_RESULT_AVAILABLE`
 - `INSUFFICIENT_PROJECTION_INPUT`
 
-### 3.14 PointHistoryReferenceType
+### 3.17 PointHistoryReferenceType
 
 - `POINT_CHARGE`
 - `ROOM_PARTICIPANT`
 - `SETTLEMENT_ITEM`
 
-### 3.15 MissionLogReactionType
+### 3.18 MissionLogReactionType
 
 - `CHEER`
 - `CLAP`
@@ -226,6 +245,7 @@
 | 크루/참여   | `POST`   | `/api/rooms/{roomId}/start`                     | Brownfield/removed manual start          |
 | 미션 인증   | `POST`   | `/api/mission-logs`                             | 인증 제출                                |
 | 미션 인증   | `GET`    | `/api/rooms/{roomId}/mission-logs/me`           | 내 인증 기록 조회                        |
+| 미션 인증   | `GET`    | `/api/rooms/{roomId}/moderation-logs`           | 방장 검수 audit 조회                     |
 | 피드/리액션 | `GET`    | `/api/rooms/{roomId}/feed`                      | 방 인증 피드와 파생 일자 상태 조회       |
 | 대시보드    | `GET`    | `/api/rooms/{roomId}/dashboard`                 | 진행 상황/환급 설명용 current-basis projection 조회 |
 | 피드/리액션 | `POST`   | `/api/mission-logs/{missionLogId}/reactions`    | 내 리액션 멱등 upsert                    |
@@ -273,7 +293,7 @@ Response `201 Created`:
 {
   "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "email": "user@example.com",
-  "nickname": "갓세이빙러",
+  "nickname": "돈독러",
   "status": "ACTIVE",
   "created_at": "2026-05-07T09:00:00+09:00"
 }
@@ -311,7 +331,7 @@ Response `200 OK`:
   "member": {
     "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
     "email": "user@example.com",
-    "nickname": "갓세이빙러",
+    "nickname": "돈독러",
     "status": "ACTIVE"
   }
 }
@@ -389,8 +409,11 @@ Response `200 OK`:
 {
   "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "email": "user@example.com",
-  "nickname": "갓세이빙러",
+  "nickname": "돈독러",
   "profile_image_url": "https://cdn.example.com/profile/018f4fd2-6d7a-7a41-9f58-6d07f5c3c901/avatar.jpg",
+  "status_message": "오늘도 한 걸음 더",
+  "is_host_ever": true,
+  "hosted_crew_count": 2,
   "status": "ACTIVE",
   "created_at": "2026-05-01T12:00:00+09:00"
 }
@@ -398,8 +421,10 @@ Response `200 OK`:
 
 정책:
 
-- 프로필은 `nickname`과 `profile_image_url`만 노출한다.
+- 프로필은 `nickname`, `profile_image_url`, `status_message`만 사용자 수정 가능 영역으로 노출한다.
 - `profile_image_url`은 저장된 `member.profile_image_s3_key`에서 파생한 접근 URL이며, 이미지가 없으면 `null`일 수 있다.
+- `status_message`는 자유 입력 한 줄 상태 메시지다. 최대 100자.
+- `is_host_ever`, `hosted_crew_count`는 서버 derived projection이다. 클라이언트 입력값으로 받지 않고, 호스트 활동 이력에서 파생한다. mutable counter로 다루지 않는다.
 - 소셜 프로필 기능은 이 계약에 포함하지 않는다.
 
 ### `PATCH /api/me/profile`
@@ -418,6 +443,7 @@ Request:
 | ---------------------- | ---------------- | ---- | -------------------------------------------------------------------- |
 | `nickname`             | `string`         | N    | 수정할 노출 이름                                                     |
 | `profile_image_s3_key` | `string \| null` | N    | 사전 업로드된 프로필 이미지 키. `null`이면 프로필 이미지를 제거한다. |
+| `status_message`       | `string \| null` | N    | 자유 입력 상태 메시지(최대 100자). `null`이면 상태 메시지를 제거한다. |
 
 Response `200 OK`:
 
@@ -425,8 +451,11 @@ Response `200 OK`:
 {
   "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "email": "user@example.com",
-  "nickname": "saving-cat",
+  "nickname": "돈독러",
   "profile_image_url": "https://cdn.example.com/profile/018f4fd2-6d7a-7a41-9f58-6d07f5c3c901/avatar.jpg",
+  "status_message": "오늘도 한 걸음 더",
+  "is_host_ever": true,
+  "hosted_crew_count": 2,
   "status": "ACTIVE",
   "updated_at": "2026-05-01T12:10:00+09:00"
 }
@@ -439,9 +468,10 @@ Error:
 
 정책:
 
-- 요청에는 `nickname` 또는 `profile_image_s3_key` 중 하나 이상이 있어야 한다.
+- 요청에는 `nickname`, `profile_image_s3_key`, `status_message` 중 하나 이상이 있어야 한다.
 - 프로필 이미지는 별도 presigned upload 흐름으로 먼저 업로드된 S3 key만 참조한다.
-- 수정 범위는 닉네임과 프로필 이미지로 한정한다.
+- 수정 범위는 닉네임, 프로필 이미지, 상태 메시지로 한정한다.
+- `is_host_ever`, `hosted_crew_count`는 derived projection이라 이 API로 수정할 수 없다. 응답에는 동기화된 현재 값만 노출한다.
 - 인증/session 로직에 영향을 주지 않는다.
 - 정산/포인트 시스템에 영향을 주지 않는다.
 - 환급, 상태 생명주기는 변경하지 않는다.
@@ -504,6 +534,7 @@ Request:
 | ----------------------- | ---------- | ---- | ------------------------------------------------------- |
 | `title`                 | `string`   | Y    | 방 제목                                                 |
 | `description`           | `string`   | N    | 방 설명                                                 |
+| `category`              | `string`   | Y    | 방 카테고리. 값 catalog는 deferred decision이며 string으로 받는다. 자세한 사항은 §3 enum 정책을 따른다. |
 | `visibility`            | `string`   | Y    | `PUBLIC` / `PRIVATE`                                    |
 | `deposit_amount`        | `integer`  | Y    | 기본 보증금                                             |
 | `min_participants`      | `integer`  | N    | 기본값 `2`                                              |
@@ -511,6 +542,8 @@ Request:
 | `frequency_type`        | `string`   | Y    | MVP: `DAILY` / `SPECIFIC_DAYS`; `WEEKLY_N`은 Phase 2/deferred |
 | `frequency_count`       | `integer`  | N    | Phase 2 `WEEKLY_N` reference 전용                       |
 | `mission_schedule_days` | `string[]` | N    | `SPECIFIC_DAYS`일 때 필수. 예: `["MONDAY","WEDNESDAY"]` |
+| `daily_settlement_type` | `string`   | Y    | `A` / `B` / `C`. 일일 정산 cadence. §3.9 참조 |
+| `host_agreement`        | `object`   | Y    | 방장 동의/약관 스냅샷 payload. payload shape는 deferred decision이며 서버는 시점 스냅샷으로 보관한다. |
 | `recruitment_deadline`  | `string`   | Y    | ISO-8601. 신규 참여 마감 시각                           |
 | `start_date`            | `string`   | Y    | `YYYY-MM-DD`. 예정 시작일                               |
 | `end_date`              | `string`   | Y    | `YYYY-MM-DD`. 계획된 종료일                             |
@@ -521,6 +554,7 @@ Response `201 Created`:
 {
   "room_id": 42,
   "title": "새벽 기상 챌린지",
+  "category": "EXERCISE",
   "visibility": "PRIVATE",
   "join_code": "A1B2C3",
   "status": "RECRUITING",
@@ -530,6 +564,9 @@ Response `201 Created`:
   "frequency_type": "SPECIFIC_DAYS",
   "frequency_count": null,
   "mission_schedule_days": ["MONDAY", "WEDNESDAY", "FRIDAY"],
+  "daily_settlement_type": "A",
+  "host_agreement_version": "v1",
+  "host_agreed_at": "2026-05-07T09:00:00+09:00",
   "recruitment_deadline": "2026-05-09T23:59:59+09:00",
   "start_at": "2026-05-10T00:00:00+09:00",
   "activated_at": null,
@@ -543,6 +580,9 @@ Error:
 - `VALIDATION_ERROR`
 - `INVALID_DEPOSIT_AMOUNT`
 - `INVALID_FREQUENCY_RULE`
+- `INVALID_CATEGORY`
+- `INVALID_DAILY_SETTLEMENT_TYPE`
+- `HOST_AGREEMENT_REQUIRED`
 
 정책:
 
@@ -552,6 +592,9 @@ Error:
 - `recruitment_deadline`은 신규 참여 마감 시각이며 activation/settlement 기준이 아니다.
 - `start_date`, `end_date`는 서버에서 `Asia/Seoul` 기준 `start_at`, `end_at`으로 정규화한다. `start_at`은 시스템 자동 activation anchor이며 MVP에서 `activated_at = start_at`이다.
 - `end_at`은 계획된 미션 종료 cutoff이며 activation 지연으로 자동 이동하지 않는다.
+- `category`는 필수다. 정확한 enum 값 catalog는 deferred decision이라 contract에서 freeze하지 않는다. 서버는 알려진 값만 통과시키고 unknown 값은 `INVALID_CATEGORY`로 거절한다.
+- `daily_settlement_type`은 필수다. cadence anchor는 `Settlement-design.md`가 소유한다.
+- `host_agreement`는 방 생성 시점 약관/규칙 동의의 스냅샷이다. 서버는 `host_agreement_snapshot`(JSON), `host_agreement_version`, `host_agreed_at`을 함께 저장한다. 이후 약관 본문이 바뀌어도 이 방의 동의 컨텍스트는 변하지 않는다.
 
 ### `GET /api/rooms/{roomId}`
 
@@ -567,6 +610,7 @@ Response `200 OK`:
   "host_member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "title": "새벽 기상 챌린지",
   "description": "매일 아침 6시 전에 인증",
+  "category": "EXERCISE",
   "visibility": "PUBLIC",
   "status": "ACTIVE",
   "settlement_status": "NONE",
@@ -576,6 +620,9 @@ Response `200 OK`:
   "frequency_type": "DAILY",
   "frequency_count": null,
   "mission_schedule_days": [],
+  "daily_settlement_type": "A",
+  "host_agreement_version": "v1",
+  "host_agreed_at": "2026-05-07T09:00:00+09:00",
   "recruitment_deadline": "2026-05-09T23:59:59+09:00",
   "start_at": "2026-05-10T00:00:00+09:00",
   "activated_at": "2026-05-10T00:00:00+09:00",
@@ -599,6 +646,8 @@ Error:
 - `settlement_status`는 조회 최적화용 projection이다.
 - 정산 처리의 원천 상태는 `Settlement.status`다.
 - `my_participation`이 없으면 아직 참여하지 않은 회원이다.
+- `category`, `daily_settlement_type`, `host_agreement_version`, `host_agreed_at`은 방 생성 시점 컨텍스트의 read-only 노출이며 변경할 수 없다.
+- `host_agreement_snapshot` JSON 본문은 본 응답에서 직접 노출하지 않는다. 본문 노출 방식은 deferred decision이다.
 
 ### `GET /api/rooms/join-code/{joinCode}`
 
@@ -788,9 +837,13 @@ Response `201 Created`:
   "participant_id": 101,
   "image_url": "https://cdn.example.com/mission/9001.jpg",
   "image_s3_key": "mission/42/101/9001.jpg",
+  "image_hash": "9b74c9897bac770ffc029102a200c5de8c0e9e5b9d3c9c7e5f4f5c1a2b3c4d5e",
   "server_time": "2026-05-11T05:58:10+09:00",
   "is_success": true,
-  "failure_reason": null
+  "failure_reason": null,
+  "decision_type": null,
+  "reject_reason_code": null,
+  "reject_memo": null
 }
 ```
 
@@ -843,6 +896,7 @@ Error:
 - 서버는 S3 object를 직접 조회해 존재 여부, size, content-type, ownership, EXIF를 검증한다.
 - 클라이언트는 `exif_taken_at`을 authoritative source로 제출하지 않는다.
 - 서버는 S3 object에서 EXIF/hash 등 risk signal을 추출하고 가능한 범위에서 검증한다.
+- `image_hash`는 서버가 S3 object 바이트에서 직접 계산한 SHA-256 hex 값이다. 클라이언트가 제출한 hash를 신뢰하지 않고, 요청 body로도 받지 않는다. fraud/duplicate detection signal이며 authority가 아니다.
 - `MissionLog.exif_taken_at`은 서버가 추출한 보조 metadata 저장값이며 authoritative timing source가 아니다.
 - EXIF 부재나 이상은 단독 automatic failure가 아니라 fraud/risk signal이다. 필요한 경우 moderation/review flow로 라우팅한다.
 - 정산 인정 판단의 timing anchor는 `server_time` 기준으로 수행한다.
@@ -855,7 +909,9 @@ Error:
   - frozen baseline / participant 상태 적합성
 - `is_success = true`는 인증 성공을 뜻하지만, 최종 정산에서 인정된다는 의미는 아니다.
 - `is_success = false`여도 원본 로그는 저장할 수 있다.
-- `mission_log.failure_reason`은 인증 시점 실패 사유다.
+- `mission_log.failure_reason`은 인증 시점 실패 사유(system/timing axis)다.
+- `decision_type`, `reject_reason_code`, `reject_memo`는 호스트 검수자 결과 axis이며 시스템 `failure_reason`과 의미 vocabulary가 다르다. 자세한 사항은 §3.10/§3.11 참조.
+- POST 응답에서 `decision_type`, `reject_reason_code`, `reject_memo`는 검수가 일어나지 않은 시점에는 `null`이다. 검수 갱신은 별도 흐름이며 이 API는 검수 결과를 입력받지 않는다.
 - `settlement_item.calculation_reason`은 정산 시점 포함/제외 근거다.
 - MVP 인증 API에서 `OUT_OF_SCHEDULE`는 사용하지 않는다.
 - 최종 정산에서의 인정 여부는 `is_success`가 아니라 `Settlement` 계산 단계에서 결정된다.
@@ -878,10 +934,13 @@ Response `200 OK`:
       "mission_log_id": 9001,
       "participant_id": 101,
       "image_url": "https://cdn.example.com/mission/9001.jpg",
+      "image_hash": "9b74c9897bac770ffc029102a200c5de8c0e9e5b9d3c9c7e5f4f5c1a2b3c4d5e",
       "server_time": "2026-05-11T05:58:10+09:00",
       "exif_taken_at": "2026-05-11T05:57:58+09:00",
       "is_success": true,
-      "failure_reason": null
+      "failure_reason": null,
+      "decision_type": null,
+      "reject_reason_code": null
     }
   ]
 }
@@ -897,9 +956,61 @@ Error:
 - 이 API는 원시 인증 기록 조회용이다.
 - 정산 인정 판단 기준 시간은 `MissionLog.server_time`이다.
 - `exif_taken_at`은 서버가 S3 object에서 추출/검증한 촬영 시각 보조 정보이며, 최종 정산 인정 시각 기준으로 사용하지 않는다.
+- `image_hash`는 서버 계산 SHA-256 결과의 read-only 노출이며, 동일 인증 사진 중복 의심 신호일 뿐 authority가 아니다.
 - `is_success`는 인증 요청의 유효성 통과 여부를 의미하며, 정산에서 인정된 횟수를 나타내는 값이 아니다.
+- `decision_type`, `reject_reason_code`는 현재 latest-effective 검수 결과 projection이다. `reject_memo`는 본 응답에 포함하지 않는다(참여자 노출 정책: deferred decision).
 - FE는 이 값을 `최종 성공 횟수` 또는 `정산 인정 횟수`로 사용하면 안 된다.
 - 최종 인정 여부와 인정 횟수는 반드시 정산 결과 API `GET /api/settlements/{settlementId}`를 기준으로 판단해야 한다.
+
+### `GET /api/rooms/{roomId}/moderation-logs`
+
+역할:
+
+- 방장 검수 audit trail을 read-only로 조회한다.
+- `moderation_history` append-only 레코드를 기반으로 한다.
+
+Query:
+
+| 필드             | 타입       | 필수 | 설명                                  |
+| ---------------- | ---------- | ---- | ------------------------------------- |
+| `mission_log_id` | `integer`  | N    | 특정 인증 로그로 필터                 |
+| `cursor`         | `string`   | N    | 페이지네이션 커서                     |
+| `limit`          | `integer`  | N    | 기본 50, 최대 200                     |
+
+Response `200 OK`:
+
+```json
+{
+  "items": [
+    {
+      "moderation_history_id": 7001,
+      "mission_log_id": 9001,
+      "before_state": { "decision_type": null },
+      "after_state": { "decision_type": "MANUAL_APPROVE" },
+      "decision_type": "MANUAL_APPROVE",
+      "reject_reason_code": null,
+      "moderator_member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
+      "changed_at": "2026-05-12T11:00:00+09:00"
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+Error:
+
+- `ROOM_NOT_FOUND`
+- `FORBIDDEN`
+
+정책:
+
+- 본 API는 read-only audit 조회 전용이다. 검수 결정을 새로 만들거나 수정하지 않는다.
+- `moderation_history`는 append-only다. 본 API는 기존 레코드를 변경/삭제하지 않는다.
+- 조회 권한 매트릭스(누가 어디까지 볼 수 있는지)는 deferred decision이다. MVP 1차 구현 범위는 호스트 본인 + 본인 인증 로그에 대한 본인 참여자로 한정한다.
+- `reject_memo`는 본 응답에 노출하지 않는다. 참여자 노출 정책은 deferred decision이다.
+- `before_state`, `after_state`는 검수 결정 시점의 latest-effective snapshot JSON이다. 정산 결과를 재계산하는 입력으로 사용하지 않는다.
+- 검수자 식별은 `moderator_member_uuid`로만 노출한다. internal FK `moderator_id`는 응답에 포함하지 않는다.
+- 이 API는 운영 admin 권한 endpoint가 아니다. MVP에서는 admin/correction workflow를 발명하지 않는다.
 
 ## 5.4 인증 피드 / 리액션
 
@@ -938,7 +1049,7 @@ Response `200 OK`:
       "mission_log_id": 9001,
       "participant_id": 101,
       "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
-      "nickname": "saving-cat",
+      "nickname": "돈독러",
       "image_url": "https://cdn.example.com/mission/9001.jpg",
       "server_time": "2026-05-11T05:58:10+09:00",
       "created_at": "2026-05-11T05:58:10+09:00",
@@ -1348,6 +1459,7 @@ Error:
 - partial 상태에서는 일부 item의 `point_history_id`가 `null`일 수 있고, 이 경우 `status`는 `SUCCEEDED`가 아니라 `RETRY_WAIT` 또는 `FAILED`다.
 - 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. Brownfield `HOST_REMAINDER` 명칭은 fixed rule alias일 뿐 host 지급 권한이 아니다.
 - 전체 인정 성공 `0`이면 all-fail equal-principal refund를 적용한다. 각 참여자는 자기 `deposit_amount`를 환급받고 host/winner/draw remainder 수익은 발생하지 않는다.
+- `settlement.algorithm_version`, `settlement.rule_context_snapshot`, `settlement_item.effective_moderation_snapshot`, `settlement_item.moderation_chain_ref`은 정산 시점 컨텍스트 스냅샷 source-of-truth다(ERD §정산/Settlement-design §7 참조). 이 컨텍스트를 API 응답에 어떤 모양으로 노출할지는 deferred decision이다. 노출하더라도 read-only replay/audit 컨텍스트이고, 현재 엔진으로의 reinterpretation/recalculation 권한이 아니다.
 
 ### `GET /api/admin/settlements`
 

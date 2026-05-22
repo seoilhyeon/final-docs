@@ -4,7 +4,7 @@
 
 1. 최신 기획안 및 accepted semantic freeze 결과 — L1 intent authority
 2. [PRD-dondok.md](./PRD-dondok.md) — canonical synthesis layer
-3. `docs/Dondok_요구사항명세서_v0.1.xlsx` — requirement detail reference
+3. `docs/Dondok_요구사항명세서_v0.7.xlsx` — requirement detail reference
 
 이 문서는 위 SoT의 하위 운영/runtime semantics 문서이며, 제품 의미를 새로 정의하거나 PRD synthesis를 override하지 않는다. `API-spec`, 요구사항 명세서, 외부 WBS/GitHub Issues는 downstream 구현/계약 참고 자료로만 교차 확인한다.
 
@@ -58,6 +58,11 @@
 - Final settlement batch의 제품 기준 시점은 `마지막 인증 주기의 일일 정산 완료 시점 + 24시간`이다.
 - 배치 스케줄러의 실제 실행 시각, 지연 버퍼, 운영 창은 구현/runtime metadata이며 정산 금액이나 product authority를 바꾸지 않는다.
 - 목표 SLA는 위 product anchor 이후 정해진 운영 창 안에 final settlement batch가 완료되도록 관리한다.
+- 일일 인증/정산 cadence는 `mission_rule.daily_settlement_type`이 결정한다. MVP active anchor는 아래 세 가지이며, host 또는 admin이 이 cadence를 사후 변경하지 않는다.
+  - `A`: 일일 인증 마감 `09:00 KST`, 일일 정산 batch `12:00 KST`
+  - `B`: 일일 인증 마감 `21:00 KST`, 일일 정산 batch `00:00 KST` (익일)
+  - `C`: 일일 인증 마감 `23:59 KST`, 일일 정산 batch `익일 12:00 KST`
+- A/B/C cutoff은 scheduled semantic anchor이고, 배치 실행 시각 자체는 운영 metadata다. cutoff 이후 도착한 인증은 해당 일자의 settlement 입력에 포함하지 않는다.
 
 ### 3.2 정산 대상 참여자
 
@@ -102,6 +107,9 @@
 - Settlement input freeze 이후에는 frozen certification outcome과 authoritative daily/final result를 host/admin이 소급 변경하지 않는다.
 - Replay는 historical semantic truth reconstruction이다. Replay는 당시 algorithm semantics, cadence/timezone/cutoff interpretation, lifecycle cutoff semantics, effective moderation state, reason-code mapping을 설명 가능하게 복원하는 audit authority이며, current-engine reinterpretation이나 payout rewrite 권한이 아니다.
 - Host moderation은 certification input/state를 resolve하는 권한이며, settlement engine, refund amount, point ledger, final settlement snapshot을 직접 조작하는 권한이 아니다.
+- 일반 인증 일자는 인증 마감 이후 host에게 최대 `72시간` host moderation correction window가 주어진다. 이 window 안의 결정 변경은 pre-freeze certification input correction이며 settlement input freeze 이전에만 effective하다.
+- 미션 종료일 포함 마지막 `3일`의 인증 결과는 72h grace 없이 즉시 terminal/freeze 처리된다. 이 구간의 host moderation은 해당 일자 정산 batch 시각 이전에 완료되어야 하며, 이후 결정 변경은 frozen settlement snapshot에 반영되지 않는다.
+- 72h grace는 settlement input freeze 이전 host correction window 설명용이지, settlement input freeze 이후 결과를 변경하는 권한이 아니다. Projection cutoff는 이 window를 설명할 수 있지만 final settlement input freeze 이후 host/admin이 resolved certification state를 소급 변경하지 않는다.
 - Moderation persistence는 authoritative moderation transition ledger와 non-authoritative operational context를 분리한다. Settlement truth에 필요한 것은 effective state, state transition, reason-code, actor, timestamp, append-only chain reference이고, human memo/support note/UX wording/운영 코멘트는 정산 truth가 아니다.
 - Pre-freeze moderation resolution은 certification input을 정리하는 행위이고, post-freeze settlement recovery는 누락 row, FK linkage, payout execution failure만 append-only로 복구하는 행위다. 둘은 같은 권한이 아니다.
 - `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item` 계산 스냅샷과 연결된 `point_history` 원장이다. 이후 `MissionLog` 기반 replay는 감사/디버깅 검증용이지 지급 결과를 대체하거나 변경하는 기준이 아니다.
@@ -364,6 +372,8 @@ where id = :settlementId
 | `remainder_winner_participant_id` | deprecated/brownfield. MVP remainder는 participant draw winner/top contributor를 쓰지 않음 |
 | `failure_code`                    | 표준 실패 코드                                                                |
 | `failure_message`                 | 최근 실패 원인 요약                                                           |
+| `algorithm_version`               | 정산 semantic version (historical replay context)                              |
+| `rule_context_snapshot`           | cadence/timezone/cutoff/lifecycle/remainder/reason mapping context JSON         |
 | `started_at`                      | 실행 시작 시각                                                                |
 | `finished_at`                     | 실행 종료 시각                                                                |
 | `created_at`                      | 생성 시각                                                                     |
@@ -422,6 +432,8 @@ where id = :settlementId
 | `draw_key_snapshot`           | non-payout 표시/설명 ordering에 사용한 키. 지급액 결정 권한 아님       |
 | `tie_break_rank`              | non-payout 표시/설명 정렬 순위                                        |
 | `calculation_reason`          | 포함/제외 근거 JSON 또는 TEXT                                         |
+| `effective_moderation_snapshot` | 정산 시점 effective moderation state 설명 context (JSON)              |
+| `moderation_chain_ref`        | append-only moderation transition chain reference (JSON)              |
 | `point_history_id`            | 환급 원장 FK                                                          |
 | `created_at`                  | 생성 시각                                                             |
 
@@ -616,6 +628,13 @@ MVP `calculation_reason` vocabulary:
 - 인증은 성공했지만 정산 규칙상 제외된 경우에는 `mission_log.failure_reason` 없이 `calculation_reason`에만 남긴다.
 - 예를 들어 `DAILY` 중복은 `calculation_reason`만 기록하고, `BEFORE_START`/`AFTER_END`처럼 서버 시간 기준으로 인증 시점에 이미 실패한 건은 `failure_reason`과 `calculation_reason` 양쪽에 함께 남길 수 있다. EXIF/hash 부재·이상은 fraud/risk signal이며 단독 authoritative failure가 아니다.
 
+### 8.8 `failure_reason`(system axis)과 `reject_reason_code`(moderation axis) 분리
+
+- `mission_log.failure_reason`은 system/timing/upload validation axis다. 서버가 인증 시점에 결정하는 system 실패 사유(예: `BEFORE_START`, `AFTER_END`, EXIF risk signal)를 저장한다.
+- `mission_log.reject_reason_code`는 host moderation rejection axis다. 호스트 검수자가 결정하는 거절 사유 코드이며, 6종 enum + `OTHER` 존재만 freeze되고 정확한 값 이름은 deferred decision이다.
+- 두 axis는 서로 다른 의미 vocabulary다. 한쪽 enum 값을 다른 쪽에 재사용하거나 한쪽 컬럼에 다른 axis의 값을 저장하지 않는다.
+- host 거절은 `mission_log.failure_reason`에 기록하지 않고 `reject_reason_code` + `decision_type` + `moderator_*` 컬럼과 `moderation_history` append로 표현한다.
+
 ## 9. 정산 알고리즘
 
 ### 9.1 기본 공식
@@ -768,7 +787,7 @@ settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cance
 
 ### 10.7 Implementation guardrails (non-authoritative topology)
 
-구현 단계에서는 `docs/implementation-gates.md`의 Settlement PR Gate를 함께 적용한다. 이 절은 stack topology를 freeze하지 않고, 구현 편의나 batch metadata로 대체할 수 없는 semantic guardrail만 나열한다.
+이 절은 stack topology를 freeze하지 않고, 구현 편의나 batch metadata로 대체할 수 없는 semantic guardrail만 나열한다.
 
 - `Settlement.status` 조건부 claim(DB conditional claim)이 실행권의 최종 기준이다. 분산 실행 조정 계층은 MVP 실행권 authority나 finality proof가 아니다.
 - `settlement_item`은 먼저 생성되어 participant별 계산 snapshot을 고정하고, 이후 `point_history` 생성/재사용 결과를 `point_history_id`로 연결한다.

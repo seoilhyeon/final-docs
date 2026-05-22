@@ -107,6 +107,7 @@
 | `password_hash`        | `VARCHAR(255)` | Y        | 일반 로그인 사용 시 비밀번호 해시 |
 | `nickname`             | `VARCHAR(50)`  | N        | 노출 이름                         |
 | `profile_image_s3_key` | `VARCHAR(255)` | Y        | 프로필 이미지 S3 key              |
+| `status_message`       | `VARCHAR(100)` | Y        | 사용자 상태 메시지 (UX). 길이 상한은 deferred decision |
 | `status`               | `VARCHAR(20)`  | N        | 계정 상태                         |
 | `created_at`           | `DATETIME(6)`  | N        | 생성 시각                         |
 | `updated_at`           | `DATETIME(6)`  | N        | 수정 시각                         |
@@ -137,8 +138,9 @@ Unique / Index:
 - JWT와 SSE를 포함한 외부 계약에서 이 identifier를 사용하는 방식은 `API-spec-dondok.md`가 소유한다.
 - `member`는 계정의 기준 키고, 정산 계산 단위는 아니다.
 - `member`는 사용자 식별·인증·프로필 상태를 담당하며, 포인트 현재 잔액처럼 빈번히 변하는 금액 상태는 직접 보관하지 않는다.
-- 프로필은 닉네임 + 프로필 이미지로 제한된다.
+- 프로필은 닉네임 + 프로필 이미지 + 상태 메시지로 제한된다.
 - 별도의 social profile 테이블은 도입하지 않는다.
+- `is_host_ever`, `hosted_crew_count`는 별도 column으로 저장하지 않는다. `mission_room.host_member_id` 이력에서 derived projection으로 계산하며 authoritative counter source-of-truth가 아니다. 호스트 권한/뱃지/카운터는 settlement/lifecycle authority가 아니다.
 - 프로필 수정은 인증/JWT, 크루 참여, 포인트 원장, 정산, 환급, 상태 생명주기에 side effect를 만들지 않는다.
 - 정산 지급과 원장 기록은 항상 내부 FK인 `member_id -> member.id` 기준으로 연결한다.
 - MVP에서는 이메일/비밀번호 기반 가입만 지원하며, SMS 인증·이메일 인증·KYC 같은 별도 verification 상태는 도입하지 않는다.
@@ -321,6 +323,10 @@ Unique / Index:
 | `host_member_id`       | `BIGINT`       | N        | 방 생성자 FK                              |
 | `title`                | `VARCHAR(100)` | N        | 크루 제목                                 |
 | `description`          | `TEXT`         | Y        | 크루 설명                                 |
+| `category`             | `VARCHAR(30)`  | N        | 크루 카테고리. 값 catalog/shape는 deferred decision |
+| `host_agreement_snapshot` | `JSON`      | N        | 호스트 책임 동의 snapshot. payload shape는 deferred decision |
+| `host_agreement_version`  | `VARCHAR(20)` | N      | 호스트 책임 동의 version label             |
+| `host_agreed_at`          | `DATETIME(6)` | N      | 호스트 책임 동의 시각                       |
 | `visibility`           | `VARCHAR(20)`  | N        | 공개/비공개                               |
 | `join_code`            | `CHAR(6)`      | Y        | 비공개 참여 코드                          |
 | `status`               | `VARCHAR(20)`  | N        | 방 상태                                   |
@@ -367,6 +373,8 @@ Unique / Index:
 - `end_at`은 계획된 미션 종료 cutoff이며 activation 지연으로 자동 이동하지 않는다.
 - `settlement_status`는 있더라도 조회 최적화용이다. 정산 처리 원천 상태는 `settlement.status`다.
 - `deposit_amount`는 방 규칙의 기본 보증금이고, 실제 정산 원천 금액은 `room_participant.deposit_amount`를 사용한다.
+- `category`는 생성 시 필수이며 catalog/enum 형태(고정 enum / managed catalog / free string)는 deferred decision이다. 현재 ERD는 컬럼 존재만 freeze하고 값 catalog는 freeze하지 않는다.
+- `host_agreement_snapshot`은 호스트 책임 동의서의 당시 표현을 audit-grade로 저장한다. payload shape는 deferred decision이고, 이 컬럼은 호스트 권한 확장 근거나 settlement authority가 아니다. `host_agreement_version`은 시점별 약관 표현 추적용 label, `host_agreed_at`은 동의 시각이다.
 
 ### `room_participant`
 
@@ -427,18 +435,19 @@ Unique / Index:
 역할:
 
 - 방의 인증 주기 규칙을 정의한다.
-- `DAILY`, `SPECIFIC_DAYS`, `WEEKLY_N` 중 하나를 가진다.
+- MVP active는 `DAILY`, `SPECIFIC_DAYS` 중 하나를 가진다. `WEEKLY_N`은 Phase 2/deferred reference이며 MVP active strategy 아니다.
 
 주요 컬럼:
 
 | 컬럼              | 타입 제안     | nullable | 설명                          |
 | ----------------- | ------------- | -------- | ----------------------------- |
-| `id`              | `BIGINT`      | N        | 규칙 PK                       |
-| `room_id`         | `BIGINT`      | N        | 방 FK                         |
-| `frequency_type`  | `VARCHAR(20)` | N        | 인증 주기 타입                |
-| `frequency_count` | `INT`         | Y        | `WEEKLY_N`에서 주당 인정 횟수 |
-| `created_at`      | `DATETIME(6)` | N        | 생성 시각                     |
-| `updated_at`      | `DATETIME(6)` | N        | 수정 시각                     |
+| `id`                    | `BIGINT`      | N        | 규칙 PK                       |
+| `room_id`               | `BIGINT`      | N        | 방 FK                         |
+| `frequency_type`        | `VARCHAR(20)` | N        | 인증 주기 타입                |
+| `frequency_count`       | `INT`         | Y        | Phase 2 `WEEKLY_N` reference 전용. MVP active 미사용 |
+| `daily_settlement_type` | `CHAR(1)`     | N        | 일일 인증/정산 cadence type (A/B/C) |
+| `created_at`            | `DATETIME(6)` | N        | 생성 시각                     |
+| `updated_at`            | `DATETIME(6)` | N        | 수정 시각                     |
 
 PK:
 
@@ -454,13 +463,15 @@ Unique / Index:
 
 상태값 / Enum:
 
-- `frequency_type`: `DAILY`, `SPECIFIC_DAYS`, `WEEKLY_N`
+- `frequency_type`: MVP active `DAILY`, `SPECIFIC_DAYS`. `WEEKLY_N`은 Phase 2/deferred reference
+- `daily_settlement_type`: `A`, `B`, `C` (각 타입의 인증 마감/정산 cutoff는 `Settlement-design.md`이 소유)
 
 주의사항:
 
 - `DAILY`는 하루 최대 1회 인정 규칙을 애플리케이션 계산으로 처리한다.
 - `SPECIFIC_DAYS`는 특정 날짜가 아니라 반복 요일 규칙이며, 허용 요일 목록을 `mission_schedule_day`에서 읽는다.
-- `WEEKLY_N`는 `frequency_count`가 필수다.
+- Phase 2 `WEEKLY_N` reference에서는 `frequency_count`가 필수다. MVP active strategy 아님.
+- `daily_settlement_type`은 방 생성 시 필수다. A/B/C는 매일 인증 마감 시각과 정산 batch 시각의 cadence anchor이며, lifecycle/settlement authority는 `Settlement-design.md`이 소유한다.
 
 ### `mission_schedule_day`
 
@@ -510,15 +521,21 @@ Unique / Index:
 
 | 컬럼             | 타입 제안      | nullable | 설명                  |
 | ---------------- | -------------- | -------- | --------------------- |
-| `id`             | `BIGINT`       | N        | 로그 PK               |
-| `participant_id` | `BIGINT`       | N        | 참여 FK               |
-| `image_url`      | `VARCHAR(500)` | Y        | 조회용 이미지 URL     |
-| `image_s3_key`   | `VARCHAR(255)` | N        | 저장소 키             |
-| `server_time`    | `DATETIME(6)`  | N        | 서버 수신 시각        |
-| `exif_taken_at`  | `DATETIME(6)`  | Y        | 서버가 S3 object에서 추출/검증한 이미지 Exif 촬영 시각 |
-| `is_success`     | `TINYINT(1)`   | N        | 성공 여부             |
-| `failure_reason` | `VARCHAR(50)`  | Y        | 실패 사유 코드        |
-| `created_at`     | `DATETIME(6)`  | N        | 생성 시각             |
+| `id`                    | `BIGINT`       | N        | 로그 PK               |
+| `participant_id`        | `BIGINT`       | N        | 참여 FK               |
+| `image_url`             | `VARCHAR(500)` | Y        | 조회용 이미지 URL     |
+| `image_s3_key`          | `VARCHAR(255)` | N        | 저장소 키             |
+| `image_hash`            | `CHAR(64)`     | Y        | 서버가 S3 object에서 계산한 SHA-256 fraud/risk signal. 단독 final authority 아님 |
+| `server_time`           | `DATETIME(6)`  | N        | 서버 수신 시각        |
+| `exif_taken_at`         | `DATETIME(6)`  | Y        | 서버가 S3 object에서 추출/검증한 이미지 Exif 촬영 시각 |
+| `is_success`            | `TINYINT(1)`   | N        | 성공 여부             |
+| `failure_reason`        | `VARCHAR(50)`  | Y        | 시스템 실패/timing 사유 코드 (host moderation rejection 아님) |
+| `moderator_id`          | `BIGINT`       | Y        | host moderation 결정자 FK (member) |
+| `moderator_decided_at`  | `DATETIME(6)`  | Y        | host moderation 결정 시각 |
+| `decision_type`         | `VARCHAR(20)`  | Y        | host moderation 결정 type. enum 값은 deferred decision |
+| `reject_reason_code`    | `VARCHAR(30)`  | Y        | host moderation rejection reason code. 정확한 값 이름은 deferred decision |
+| `reject_memo`           | `VARCHAR(50)`  | Y        | `OTHER` rejection 시에만 사용하는 free-text 메모. non-authoritative context |
+| `created_at`            | `DATETIME(6)`  | N        | 생성 시각             |
 
 PK:
 
@@ -541,11 +558,15 @@ Unique / Index:
 
 - `participant_id` 기준으로만 기록한다. 방과 회원은 참여 엔티티를 통해 역추적한다.
 - `exif_taken_at`은 클라이언트가 제출한 값을 신뢰해 저장하는 컬럼이 아니다. 서버가 S3에 업로드된 object에서 EXIF를 추출/검증한 결과를 저장한다.
+- `image_hash`는 서버가 S3 object에서 직접 계산한 SHA-256이며 클라이언트 제출 hash를 신뢰해서 저장하는 컬럼이 아니다. 동일/유사 사진 식별에 사용하는 fraud/risk signal이며 단독으로 final 인정/거절 authority가 아니다.
 - EXIF가 없거나 유효하지 않으면 `failure_reason`은 `EXIF_MISSING` 또는 `EXIF_TIME_INVALID`가 된다.
 - 정산 인정 횟수 계산 기준 시간은 `exif_taken_at`이 아니라 `server_time`이다.
 - `withdrawn_at` cutoff는 brownfield/deferred reference다. MVP active settlement에서는 frozen `JOINED` baseline과 resolved certification state를 소급 변경하는 규칙으로 사용하지 않는다.
 - `DAILY` 중복, `SPECIFIC_DAYS` 제외, `WEEKLY_N` 상한 제외 같은 최종 인정 제외 근거는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`에 남긴다.
 - 조회 시점 성공 표시와 최종 인정 횟수는 다를 수 있으므로, 최종 결과는 `settlement_item`에서 설명한다.
+- `failure_reason`(system/timing axis)과 `reject_reason_code`(host moderation rejection axis)는 서로 다른 의미 axis다. 한쪽 enum을 다른 쪽에 재사용하지 않는다.
+- `moderator_id`, `moderator_decided_at`, `decision_type`, `reject_reason_code`, `reject_memo`는 host moderation input authority의 흔적이며 settlement/lifecycle/ledger authority를 가지지 않는다. 후속 변경은 새 row를 만들지 않고 latest-effective 컬럼 갱신 + `moderation_history` append로 표현한다.
+- `reject_memo`는 `reject_reason_code = OTHER`인 경우에만 채워지는 비식별 context이며 settlement truth/공개 노출 대상이 아니다.
 
 ### `mission_log_reaction`
 
@@ -592,6 +613,53 @@ Unique / Index:
 - 리액션 생성, 수정, 삭제는 `mission_log.is_success`, `failure_reason`, 이미지, 서버 시간 등 원본 로그를 변경하지 않는다.
 - 리액션은 `settlement`, `settlement_item`, `point_history`, 환급 상태, AI 리포트, `MissionRoom.status`, `Participant.status`, `Settlement.status`를 생성하거나 수정하거나 롤백하지 않는다.
 - 이 패치에서 추가하는 피드 관련 영속성은 `mission_log_reaction`뿐이다. feed status 테이블/컬럼은 두지 않는다.
+
+### `moderation_history`
+
+역할:
+
+- host moderation 결정 transition을 append-only로 저장하는 audit chain이다.
+- `mission_log`의 latest-effective moderation column을 보완해 결정 변화 이력을 보존한다.
+- settlement input freeze 이후에는 새 row가 append되더라도 frozen settlement snapshot/원장을 변경하지 않는다.
+
+주요 컬럼:
+
+| 컬럼                  | 타입 제안     | nullable | 설명                                       |
+| --------------------- | ------------- | -------- | ------------------------------------------ |
+| `id`                  | `BIGINT`      | N        | history PK                                 |
+| `mission_log_id`      | `BIGINT`      | N        | 대상 `mission_log` FK                      |
+| `before_state`        | `JSON`        | Y        | 변경 직전 effective moderation state snapshot |
+| `after_state`         | `JSON`        | N        | 변경 직후 effective moderation state snapshot |
+| `decision_type`       | `VARCHAR(20)` | N        | 결정 type. enum 값은 deferred decision     |
+| `reject_reason_code`  | `VARCHAR(30)` | Y        | rejection reason code. 정확한 이름은 deferred decision |
+| `reject_memo`         | `VARCHAR(50)` | Y        | `OTHER` 결정 시에만 사용하는 free-text 메모 |
+| `moderator_id`        | `BIGINT`      | N        | 결정자 FK (member)                          |
+| `changed_at`          | `DATETIME(6)` | N        | transition 시각                            |
+
+PK:
+
+- `id`
+
+FK:
+
+- `mission_log_id -> mission_log.id`
+- `moderator_id -> member.id`
+
+Unique / Index:
+
+- `index(mission_log_id, changed_at)`
+
+상태값 / Enum:
+
+- `decision_type` / `reject_reason_code` 값은 `mission_log`와 동일 vocabulary를 공유하며 둘 다 deferred decision이다.
+
+주의사항:
+
+- append-only다. UPDATE/DELETE를 허용하지 않으며 후속 결정 변경은 새 row append로 표현한다.
+- 운영 memo, support note, UX wording은 authoritative transition 정보가 아니다. `before_state`/`after_state`는 effective state, transition, reason code, actor, timestamp만 보존하고 free-form memo는 `reject_memo`로만 제한 저장한다.
+- host correction window 안의 결정 변경은 `mission_log` latest-effective 컬럼 갱신 + 이 테이블 append로 표현한다. settlement input freeze 이후에는 record가 추가되어도 frozen settlement/원장은 변경하지 않는다.
+- 이 테이블은 host moderation input authority의 audit 흔적이며 admin correction/dispute workflow, settlement authority가 아니다.
+- visibility (host-only / participant-self / role matrix)는 deferred decision이다. API/응답 노출 정책은 `API-spec`이 소유하며 ERD는 저장 schema만 freeze한다.
 
 ### `settlement`
 
@@ -720,7 +788,7 @@ Unique / Index:
 상태값 / Enum:
 
 - `participant_status_snapshot`: MVP active settlement에서는 frozen `JOINED`; `WITHDRAWN`은 brownfield/deferred visibility
-- `calculation_reason` vocabulary는 JSON 내부 진단 코드 문자열이며 DB enum/constraint나 public API enum이 아니다. MVP discoverability 목적의 대표 값은 `DAILY_DUPLICATE`, `INVALID_SCHEDULE_DAY`, `WEEKLY_N_OVERFLOW`, `AFTER_WITHDRAWN_AT`, `BEFORE_START`, `AFTER_END`다.
+- `calculation_reason` vocabulary는 JSON 내부 진단 코드 문자열이며 DB enum/constraint나 public API enum이 아니다. MVP discoverability 목적의 대표 값은 `DAILY_DUPLICATE`, `INVALID_SCHEDULE_DAY`, `BEFORE_START`, `AFTER_END`다. `WEEKLY_N_OVERFLOW`, `AFTER_WITHDRAWN_AT`은 Phase 2/deferred reference로만 남긴다.
 
 주의사항:
 
@@ -848,6 +916,7 @@ erDiagram
         VARCHAR password_hash
         VARCHAR nickname
         VARCHAR profile_image_s3_key
+        VARCHAR status_message
         VARCHAR status
     }
 
@@ -879,6 +948,10 @@ erDiagram
     MISSION_ROOM {
         BIGINT id PK
         BIGINT host_member_id FK
+        VARCHAR category
+        JSON host_agreement_snapshot
+        VARCHAR host_agreement_version
+        DATETIME host_agreed_at
         VARCHAR visibility
         VARCHAR status
         BIGINT deposit_amount
@@ -906,6 +979,7 @@ erDiagram
         BIGINT room_id FK
         VARCHAR frequency_type
         INT frequency_count
+        CHAR daily_settlement_type
     }
 
     MISSION_SCHEDULE_DAY {
@@ -918,10 +992,28 @@ erDiagram
         BIGINT id PK
         BIGINT participant_id FK
         VARCHAR image_s3_key
+        CHAR image_hash
         DATETIME server_time
         DATETIME exif_taken_at
         BOOLEAN is_success
         VARCHAR failure_reason
+        BIGINT moderator_id FK
+        DATETIME moderator_decided_at
+        VARCHAR decision_type
+        VARCHAR reject_reason_code
+        VARCHAR reject_memo
+    }
+
+    MODERATION_HISTORY {
+        BIGINT id PK
+        BIGINT mission_log_id FK
+        JSON before_state
+        JSON after_state
+        VARCHAR decision_type
+        VARCHAR reject_reason_code
+        VARCHAR reject_memo
+        BIGINT moderator_id FK
+        DATETIME changed_at
     }
 
     MISSION_LOG_REACTION {
@@ -987,6 +1079,8 @@ erDiagram
     MISSION_RULE ||--o{ MISSION_SCHEDULE_DAY : allows
     ROOM_PARTICIPANT ||--o{ MISSION_LOG : uploads
     MISSION_LOG ||--o{ MISSION_LOG_REACTION : receives
+    MISSION_LOG ||--o{ MODERATION_HISTORY : logs
+    MEMBER ||--o{ MODERATION_HISTORY : moderates
     ROOM_PARTICIPANT ||--o{ SETTLEMENT_ITEM : snapshots
 
     SETTLEMENT ||--o{ SETTLEMENT_ITEM : contains
@@ -1000,3 +1094,16 @@ erDiagram
 - Phase 2 hardening registry: audit-grade notification durability, notification preference matrix, notification template CMS/table, campaign/broadcast system, SSE/Web realtime reliability persistence, full AI replay reproducibility, AI report append-regeneration/invalidation lifecycle, immutable event sourcing migration, provider-level AI determinism, distributed replay engine, full provenance governance는 ERD MVP active schema로 freeze하지 않는다.
 - `mission_log_reaction` 외 feed-status 테이블/컬럼은 만들지 않는다. 성공/실패/미제출 일자 상태는 API projection으로 계산한다.
 - `point_history.reference_type`의 MVP enum은 `POINT_CHARGE`, `ROOM_PARTICIPANT`, `SETTLEMENT_ITEM`로 고정한다. ERD는 DB enum/constraint 언어의 source of truth이고, API-spec은 FE/BE 소비자 계약에 필요한 동일 enum과 매핑만 반복한다.
+
+## 8. Deferred / Candidate Modeling Notes
+
+이 절은 ERD에 컬럼/테이블 형태로만 freeze되고 값 catalog/정책/노출 정책은 freeze되지 않은 결정들을 명시한다. ERD는 "정책 결정 장소"가 아니라 "확정된 semantics의 물리적 반영"이므로, 아래 항목은 후속 결정 전까지 ERD가 enum/policy를 invent하지 않는다.
+
+- `mission_log.decision_type` enum 값은 freeze하지 않는다. host moderation 결정 type의 정확한 값(예: MANUAL_APPROVE/MANUAL_REJECT 등)은 source-of-truth 확정 후 별도 결정한다. AUTO 경로는 PRD/Usecase 확정 전 ERD가 발명하지 않는다.
+- `mission_log.reject_reason_code` 정확한 값 이름은 freeze하지 않는다. 6개 enum과 `OTHER` 존재만 확인됐고 나머지 5개 이름은 source 재확인 후 결정한다.
+- `mission_room.category` catalog 형태(고정 enum / managed catalog 테이블 / free string)는 deferred decision이다. 필수 컬럼 존재만 freeze한다.
+- `mission_room.host_agreement_snapshot` payload shape는 deferred decision이다. JSON column 존재만 freeze한다.
+- `moderation_history` visibility (host-only / participant-self / role matrix)는 deferred decision이다. 저장 schema만 freeze하고 노출 정책은 `API-spec`이 후속 propagation한다.
+- replay context (`algorithm_version`, `rule_context_snapshot`, `effective_moderation_snapshot`, `moderation_chain_ref`)의 public API exposure 정책은 deferred decision이다. ERD는 저장 schema만 freeze한다.
+- `member.is_host_ever`, `member.hosted_crew_count`는 별도 column으로 저장하지 않는 derived projection이며 authoritative counter source-of-truth가 아니다. host badge/카운터는 settlement/lifecycle authority가 아니다.
+- admin/correction/dispute workflow는 이 ERD가 발명하지 않는다. host moderation은 input authority이며 settlement/lifecycle/ledger authority가 아니다.
