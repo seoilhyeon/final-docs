@@ -81,7 +81,7 @@
 
 ### 2.7 상태값 원칙
 
-- `MissionRoom.status`는 방 상태다. MVP에서 `RECRUITING -> ACTIVE`는 host command가 아니라 시스템 lifecycle 규칙으로 발생하며, `activated_at = start_at`이다.
+- `Crew.status`는 방 상태다. MVP에서 `RECRUITING -> ACTIVE`는 host command가 아니라 시스템 lifecycle 규칙으로 발생하며, `activated_at = start_at`이다.
 - `Participant.status`는 참여 상태다.
 - `Settlement.status`는 정산 처리 상태의 원천이다.
 - `NONE`은 `Settlement` row가 아직 없는 상태를 보여주기 위한 API 응답용 값이다. DB `settlement.status`에는 저장하지 않는다.
@@ -90,14 +90,14 @@
 
 ## 3. 도메인 상태 / Enum
 
-### 3.1 RoomStatus
+### 3.1 CrewStatus
 
 - `RECRUITING`: 모집 중. `recruitment_deadline` 전에는 신청/승인/예치 Lock 흐름이 가능하고, 이후에는 신규 참여 불가.
 - `ACTIVE`: 시스템 lifecycle 규칙이 `start_at`에 frozen eligibility를 만족한다고 판단해 `activated_at = start_at`을 기록한 진행 중 상태.
 - `CLOSED`: 계획된 `end_at` 이후 정상 종료 상태.
 - `CANCELLED`: 시작 전 취소 상태. `start_at` 자동 activation eligibility를 만족하지 못하면 batch가 취소형 정산 대상으로 전이할 수 있다.
 
-### 3.2 RoomVisibility
+### 3.2 CrewVisibility
 
 - `PUBLIC`
 - `PRIVATE`
@@ -132,9 +132,9 @@
 ### 3.7 PointTransactionType
 
 - `POINT_CHARGE`
-- `ROOM_DEPOSIT_LOCK`
-- `ROOM_SETTLEMENT_REFUND`
-- `ROOM_CANCELLED_REFUND`
+- `CREW_DEPOSIT_LOCK`
+- `CREW_SETTLEMENT_REFUND`
+- `CREW_CANCELLED_REFUND`
 
 ### 3.8 MissionLogFailureReason
 
@@ -172,17 +172,17 @@
 - `LOCK_ACQUIRE_FAILED`
 - `UNKNOWN`
 
-### 3.13 AiHabitReportStatus
+### 3.13 AiHabitReportStatus — Phase 2 / Deferred
+
+> AI habit report는 ERD에서 MVP Core entity로부터 제거되고 Phase 2 candidate로 격리되었다. 아래 enum은 MVP First Release contract가 아니라 Phase 2 reference로만 유지한다.
 
 - `PENDING`
 - `SUCCEEDED`
 - `FAILED`
 
-### 3.14 AiHabitReportFailureCode
+### 3.14 AiHabitReportFailureCode — Phase 2 / Deferred
 
-`ai_habit_report.failure_code`의 MVP catalog다.
-
-이 값들은 API/FE/QA의 discoverability를 위한 문서화 목적이며, strict DB enum이나 상세 retry taxonomy를 의미하지 않는다.
+> AI habit report 격리에 따라 본 enum도 Phase 2 reference로만 유지한다. MVP active contract가 아니다.
 
 - `AI_REPORT_FAILED`
 - `AI_RESPONSE_INVALID`
@@ -215,7 +215,7 @@
 ### 3.17 PointHistoryReferenceType
 
 - `POINT_CHARGE`
-- `ROOM_PARTICIPANT`
+- `CREW_PARTICIPANT`
 - `SETTLEMENT_ITEM`
 
 ### 3.18 MissionLogReactionType
@@ -236,28 +236,28 @@
 | 인증/회원   | `POST`   | `/api/auth/logout`                              | 로그아웃                                 |
 | 인증/회원   | `GET`    | `/api/me`                                       | 내 계정/프로필 조회                      |
 | 인증/회원   | `PATCH`  | `/api/me/profile`                               | 내 최소 프로필 수정                      |
-| 크루/참여   | `GET`    | `/api/rooms`                                    | 공개 방 목록 조회                        |
-| 크루/참여   | `POST`   | `/api/rooms`                                    | 방 생성                                  |
-| 크루/참여   | `GET`    | `/api/rooms/{roomId}`                           | 방 상세 조회                             |
-| 크루/참여   | `GET`    | `/api/rooms/join-code/{joinCode}`               | 참여 코드로 방 조회                      |
-| 크루/참여   | `POST`   | `/api/rooms/{roomId}/participants`              | 방 참여 및 보증금 lock                   |
-| 크루/참여   | `POST`   | `/api/rooms/{roomId}/withdraw`                  | Brownfield/deferred withdrawal           |
-| 크루/참여   | `POST`   | `/api/rooms/{roomId}/start`                     | Brownfield/removed manual start          |
+| 크루/참여   | `GET`    | `/api/crews`                                    | 공개 방 목록 조회                        |
+| 크루/참여   | `POST`   | `/api/crews`                                    | 방 생성                                  |
+| 크루/참여   | `GET`    | `/api/crews/{crewId}`                           | 방 상세 조회                             |
+| 크루/참여   | `GET`    | `/api/crews/join-code/{joinCode}`               | 참여 코드로 방 조회                      |
+| 크루/참여   | `POST`   | `/api/crews/{crewId}/participants`              | 방 참여 및 보증금 lock                   |
+| 크루/참여   | `POST`   | `/api/crews/{crewId}/withdraw`                  | Brownfield/deferred withdrawal           |
+| 크루/참여   | `POST`   | `/api/crews/{crewId}/start`                     | Brownfield/removed manual start          |
 | 미션 인증   | `POST`   | `/api/mission-logs`                             | 인증 제출                                |
-| 미션 인증   | `GET`    | `/api/rooms/{roomId}/mission-logs/me`           | 내 인증 기록 조회                        |
-| 미션 인증   | `GET`    | `/api/rooms/{roomId}/moderation-logs`           | 방장 검수 audit 조회                     |
-| 피드/리액션 | `GET`    | `/api/rooms/{roomId}/feed`                      | 방 인증 피드와 파생 일자 상태 조회       |
-| 대시보드    | `GET`    | `/api/rooms/{roomId}/dashboard`                 | 진행 상황/환급 설명용 current-basis projection 조회 |
+| 미션 인증   | `GET`    | `/api/crews/{crewId}/mission-logs/me`           | 내 인증 기록 조회                        |
+| 미션 인증   | `GET`    | `/api/crews/{crewId}/moderation-logs`           | 방장 검수 audit 조회                     |
+| 피드/리액션 | `GET`    | `/api/crews/{crewId}/feed`                      | 방 인증 피드와 파생 일자 상태 조회       |
+| 대시보드    | `GET`    | `/api/crews/{crewId}/dashboard`                 | 진행 상황/환급 설명용 current-basis projection 조회 |
 | 피드/리액션 | `POST`   | `/api/mission-logs/{missionLogId}/reactions`    | 내 리액션 멱등 upsert                    |
 | 피드/리액션 | `DELETE` | `/api/mission-logs/{missionLogId}/reactions/me` | 내 리액션 멱등 삭제                      |
-| 정산        | `GET`    | `/api/rooms/{roomId}/settlement`                | 방 기준 정산 상태/요약 조회              |
+| 정산        | `GET`    | `/api/crews/{crewId}/settlement`                | 방 기준 정산 상태/요약 조회              |
 | 정산        | `GET`    | `/api/settlements/{settlementId}`               | 정산 결과 상세 조회                      |
 | 정산        | `GET`    | `/api/admin/settlements`                        | 관리자 정산 실패/대기 목록 조회          |
 | 정산        | `POST`   | `/api/admin/settlements/{settlementId}/retry`   | 관리자 정산 재시도                       |
-| AI          | `POST`   | `/api/ai/mission-recommendations`               | AI 미션 추천 초안 생성                   |
-| AI          | `POST`   | `/api/rooms/{roomId}/ai-habit-report`           | 정산 완료 후 내 AI 습관 리포트 생성/조회 |
-| AI          | `GET`    | `/api/rooms/{roomId}/ai-habit-report/me`        | 내 AI 습관 리포트 상태/결과 조회         |
-| AI          | `GET`    | `/api/ai-habit-reports/{reportId}`              | AI 습관 리포트 단건 조회                 |
+| AI          | `POST`   | `/api/ai/mission-recommendations`               | AI 크루 생성 도우미. MVP 유지            |
+| AI (Phase 2/Deferred) | `POST`   | `/api/crews/{crewId}/ai-habit-report`           | AI 습관 리포트 생성/조회. MVP 제외, Phase 2 격리 |
+| AI (Phase 2/Deferred) | `GET`    | `/api/crews/{crewId}/ai-habit-report/me`        | AI 습관 리포트 상태/결과 조회. MVP 제외, Phase 2 격리 |
+| AI (Phase 2/Deferred) | `GET`    | `/api/ai-habit-reports/{reportId}`              | AI 습관 리포트 단건 조회. MVP 제외, Phase 2 격리 |
 | 알림        | `POST`   | `/api/notification-devices`                    | Android FCM token/device 등록 후보         |
 | 알림        | `PATCH`  | `/api/notification-devices/{deviceId}`         | FCM token 갱신/상태 변경 후보              |
 | 알림        | `DELETE` | `/api/notification-devices/{deviceId}`         | FCM token/device 비활성화 후보             |
@@ -424,7 +424,7 @@ Response `200 OK`:
 - 프로필은 `nickname`, `profile_image_url`, `status_message`만 사용자 수정 가능 영역으로 노출한다.
 - `profile_image_url`은 저장된 `member.profile_image_s3_key`에서 파생한 접근 URL이며, 이미지가 없으면 `null`일 수 있다.
 - `status_message`는 자유 입력 한 줄 상태 메시지다. 최대 100자.
-- `is_host_ever`, `hosted_crew_count`는 서버 derived projection이다. 클라이언트 입력값으로 받지 않고, 호스트 활동 이력에서 파생한다. mutable counter로 다루지 않는다.
+- `is_host_ever`, `hosted_crew_count`는 `member` 저장 컬럼이 아니라 profile read-model projection이다. 호스트 활동 이력에서 read-time으로 계산하며, 클라이언트 입력값으로 받지 않고 mutable counter로 다루지 않는다.
 - 소셜 프로필 기능은 이 계약에 포함하지 않는다.
 
 ### `PATCH /api/me/profile`
@@ -471,15 +471,15 @@ Error:
 - 요청에는 `nickname`, `profile_image_s3_key`, `status_message` 중 하나 이상이 있어야 한다.
 - 프로필 이미지는 별도 presigned upload 흐름으로 먼저 업로드된 S3 key만 참조한다.
 - 수정 범위는 닉네임, 프로필 이미지, 상태 메시지로 한정한다.
-- `is_host_ever`, `hosted_crew_count`는 derived projection이라 이 API로 수정할 수 없다. 응답에는 동기화된 현재 값만 노출한다.
+- `is_host_ever`, `hosted_crew_count`는 `member` 저장 컬럼이 아닌 profile projection이라 이 API로 수정할 수 없다. 응답에는 호스트 이력에서 파생한 현재 값을 노출한다.
 - 인증/session 로직에 영향을 주지 않는다.
 - 정산/포인트 시스템에 영향을 주지 않는다.
 - 환급, 상태 생명주기는 변경하지 않는다.
 - 소셜 프로필 기능은 이 API에 포함하지 않는다.
 
-## 5.2 크루(방) / 참여
+## 5.2 크루 / 참여
 
-### `GET /api/rooms`
+### `GET /api/crews`
 
 역할:
 
@@ -498,7 +498,7 @@ Response `200 OK`:
 {
   "items": [
     {
-      "room_id": 42,
+      "crew_id": 42,
       "title": "새벽 기상 챌린지",
       "visibility": "PUBLIC",
       "status": "RECRUITING",
@@ -522,7 +522,7 @@ Response `200 OK`:
 - MVP 목록 API는 공개 방만 대상으로 시작한다.
 - 참여자 수 같은 집계 필드는 본 명세의 필수 응답에 포함하지 않는다.
 
-### `POST /api/rooms`
+### `POST /api/crews`
 
 역할:
 
@@ -532,8 +532,8 @@ Request:
 
 | 필드                    | 타입       | 필수 | 설명                                                    |
 | ----------------------- | ---------- | ---- | ------------------------------------------------------- |
-| `title`                 | `string`   | Y    | 방 제목                                                 |
-| `description`           | `string`   | N    | 방 설명                                                 |
+| `title`                 | `string`   | Y    | 크루 제목. 표시용 텍스트이며 lifecycle/moderation/settlement authority가 아니다. |
+| `description`           | `string`   | Y    | 크루 설명. 표시용 텍스트이며 lifecycle/moderation/settlement authority가 아니다. |
 | `category`              | `string`   | Y    | 방 카테고리. 값 catalog는 deferred decision이며 string으로 받는다. 자세한 사항은 §3 enum 정책을 따른다. |
 | `visibility`            | `string`   | Y    | `PUBLIC` / `PRIVATE`                                    |
 | `deposit_amount`        | `integer`  | Y    | 기본 보증금                                             |
@@ -552,8 +552,9 @@ Response `201 Created`:
 
 ```json
 {
-  "room_id": 42,
+  "crew_id": 42,
   "title": "새벽 기상 챌린지",
+  "description": "매일 새벽 6시 전 기상 인증",
   "category": "EXERCISE",
   "visibility": "PRIVATE",
   "join_code": "A1B2C3",
@@ -596,7 +597,7 @@ Error:
 - `daily_settlement_type`은 필수다. cadence anchor는 `Settlement-design.md`가 소유한다.
 - `host_agreement`는 방 생성 시점 약관/규칙 동의의 스냅샷이다. 서버는 `host_agreement_snapshot`(JSON), `host_agreement_version`, `host_agreed_at`을 함께 저장한다. 이후 약관 본문이 바뀌어도 이 방의 동의 컨텍스트는 변하지 않는다.
 
-### `GET /api/rooms/{roomId}`
+### `GET /api/crews/{crewId}`
 
 역할:
 
@@ -606,7 +607,7 @@ Response `200 OK`:
 
 ```json
 {
-  "room_id": 42,
+  "crew_id": 42,
   "host_member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "title": "새벽 기상 챌린지",
   "description": "매일 아침 6시 전에 인증",
@@ -628,7 +629,7 @@ Response `200 OK`:
   "activated_at": "2026-05-10T00:00:00+09:00",
   "end_at": "2026-05-31T23:59:59+09:00",
   "my_participation": {
-    "participant_id": 101,
+    "crew_participant_id": 101,
     "status": "JOINED",
     "deposit_locked_amount": 100000,
     "joined_at": "2026-05-08T13:00:00+09:00",
@@ -639,7 +640,7 @@ Response `200 OK`:
 
 Error:
 
-- `ROOM_NOT_FOUND`
+- `CREW_NOT_FOUND`
 
 정책:
 
@@ -649,7 +650,7 @@ Error:
 - `category`, `daily_settlement_type`, `host_agreement_version`, `host_agreed_at`은 방 생성 시점 컨텍스트의 read-only 노출이며 변경할 수 없다.
 - `host_agreement_snapshot` JSON 본문은 본 응답에서 직접 노출하지 않는다. 본문 노출 방식은 deferred decision이다.
 
-### `GET /api/rooms/join-code/{joinCode}`
+### `GET /api/crews/join-code/{joinCode}`
 
 역할:
 
@@ -659,7 +660,7 @@ Response `200 OK`:
 
 ```json
 {
-  "room_id": 42,
+  "crew_id": 42,
   "title": "새벽 기상 챌린지",
   "visibility": "PRIVATE",
   "status": "RECRUITING",
@@ -679,9 +680,9 @@ Response `200 OK`:
 Error:
 
 - `INVALID_JOIN_CODE`
-- `ROOM_NOT_FOUND`
+- `CREW_NOT_FOUND`
 
-### `POST /api/rooms/{roomId}/participants`
+### `POST /api/crews/{crewId}/participants`
 
 역할:
 
@@ -695,8 +696,8 @@ Response `201 Created`:
 
 ```json
 {
-  "participant_id": 101,
-  "room_id": 42,
+  "crew_participant_id": 101,
+  "crew_id": 42,
   "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
   "status": "JOINED",
   "deposit_locked_amount": 100000,
@@ -706,8 +707,8 @@ Response `201 Created`:
 
 Error:
 
-- `ROOM_NOT_FOUND`
-- `ROOM_NOT_RECRUITING`
+- `CREW_NOT_FOUND`
+- `CREW_NOT_RECRUITING`
 - `CAPACITY_FULL`
 - `ALREADY_JOINED`
 - `INSUFFICIENT_BALANCE`
@@ -715,18 +716,18 @@ Error:
 정책:
 
 - 신규 참여는 `RECRUITING` 상태이면서 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
-- `recruitment_deadline` 이후에는 `ROOM_RECRUITMENT_CLOSED` 또는 `ROOM_NOT_RECRUITING` 계열 오류로 거절한다.
+- `recruitment_deadline` 이후에는 `CREW_RECRUITMENT_CLOSED` 또는 `CREW_NOT_RECRUITING` 계열 오류로 거절한다.
 - 같은 `member`는 같은 방에 하나의 `participant`만 가질 수 있다.
 - 참여 lifecycle은 `APPLIED -> APPROVED_LOCK_PENDING -> JOINED`로 진행한다.
 - `APPROVED_LOCK_PENDING`은 capacity reservation만 의미하며, 아래 예치 Lock 트랜잭션이 성공해야 `JOINED`가 된다.
 - `JOINED` 전이에서는 아래 세 단계가 하나의 트랜잭션으로 함께 성공하거나 함께 롤백되어야 한다.
   - `point_account.balance` 조건부 차감
-  - `room_participant`의 JOINED 확정
-  - `ROOM_DEPOSIT_LOCK point_history` 생성
+  - `crew_participant`의 JOINED 확정
+  - `CREW_DEPOSIT_LOCK point_history` 생성
 - 잔액 차감은 반드시 `WHERE balance >= deposit_amount` 조건부 update로 수행하고, row count가 `1`일 때만 성공으로 간주한다.
 - `INSUFFICIENT_BALANCE`는 잔액 부족뿐 아니라 동시 요청으로 조건부 update row count가 `0`이 된 경우도 포함한다.
 
-### `POST /api/rooms/{roomId}/start` (Brownfield / removed from MVP active contract)
+### `POST /api/crews/{crewId}/start` (Brownfield / removed from MVP active contract)
 
 역할:
 
@@ -748,7 +749,7 @@ Canonical replacement:
 - Admin도 manual ACTIVE transition authority가 아니다.
 - 기존 클라이언트/구현 흔적이 이 endpoint를 참조하더라도, downstream propagation에서는 drift candidate로 취급하고 신규 ERD/API/QA authority로 확장하지 않는다.
 
-### `POST /api/rooms/{roomId}/withdraw` (Brownfield / deferred)
+### `POST /api/crews/{crewId}/withdraw` (Brownfield / deferred)
 
 역할:
 
@@ -762,7 +763,7 @@ Request/Response:
 
 Error:
 
-- `ROOM_NOT_FOUND`
+- `CREW_NOT_FOUND`
 - `PARTICIPANT_NOT_FOUND`
 - `WITHDRAW_NOT_ALLOWED`
 
@@ -790,8 +791,8 @@ Request:
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
 | `purpose` | `string` | Y | `MISSION_IMAGE` 또는 `PROFILE_IMAGE` |
-| `room_id` | `integer` | N | mission image 업로드 시 대상 방 |
-| `participant_id` | `integer` | N | mission image 업로드 시 대상 참여자 |
+| `crew_id` | `integer` | N | mission image 업로드 시 대상 방 |
+| `crew_participant_id` | `integer` | N | mission image 업로드 시 대상 참여자 |
 | `content_type` | `string` | Y | 허용된 이미지 content type |
 | `content_length` | `integer` | Y | 업로드 예정 파일 크기 |
 
@@ -808,9 +809,9 @@ Response `200 OK`:
 - S3 bucket/object는 private이다.
 - object key는 서버가 생성한다.
 - 사용자는 임의 S3 path/key를 지정할 수 없다.
-- mission 인증 이미지의 권장 key 형식은 `mission/{roomId}/{participantId}/{uuid}`다.
+- mission 인증 이미지의 권장 key 형식은 `mission/{crewId}/{crewParticipantId}/{uuid}`다. `{crewParticipantId}`는 `crew_participant.id`를 의미한다.
 - presigned URL은 upload delegation 수단이지 validation delegation 수단이 아니다.
-- 서버는 발급 시점에 사용자, room, participant 권한을 검증한다.
+- 서버는 발급 시점에 사용자, crew, participant 권한을 검증한다.
 - 클라이언트는 발급받은 URL로 S3에 직접 업로드한다.
 - 이후 클라이언트는 `image_s3_key`로 mission-log 생성 요청을 보낸다.
 - 서버는 mission-log 생성 시 S3 object를 직접 조회해 존재 여부, size, content-type, ownership, EXIF를 검증한다.
@@ -825,7 +826,7 @@ Request:
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| `room_id` | `integer` | Y | 대상 방 |
+| `crew_id` | `integer` | Y | 대상 방 |
 | `image_s3_key` | `string` | Y | presigned upload API로 발급되고 업로드 완료된 이미지 key |
 
 Response `201 Created`:
@@ -833,13 +834,13 @@ Response `201 Created`:
 ```json
 {
   "mission_log_id": 9001,
-  "room_id": 42,
-  "participant_id": 101,
+  "crew_id": 42,
+  "crew_participant_id": 101,
   "image_url": "https://cdn.example.com/mission/9001.jpg",
   "image_s3_key": "mission/42/101/9001.jpg",
   "image_hash": "9b74c9897bac770ffc029102a200c5de8c0e9e5b9d3c9c7e5f4f5c1a2b3c4d5e",
   "server_time": "2026-05-11T05:58:10+09:00",
-  "is_success": true,
+  "certification_status": "SUCCESS",
   "failure_reason": null,
   "decision_type": null,
   "reject_reason_code": null,
@@ -854,12 +855,12 @@ Response `201 Created`:
 ```json
 {
   "mission_log_id": 9003,
-  "room_id": 42,
-  "participant_id": 101,
+  "crew_id": 42,
+  "crew_participant_id": 101,
   "server_time": "2026-05-12T08:30:00+09:00",
-  "is_success": true,
+  "certification_status": "SUCCESS",
   "failure_reason": null,
-  "note": "SPECIFIC_DAYS 비해당 요일로 정산 시 제외될 수 있음"
+  "note": "SPECIFIC_DAYS 비해당 요일로 정산 시 제외될 수 있음. `certification_status`는 인증 성공 표시이며 settlement_item.calculation_reason이 최종 인정 여부를 결정한다."
 }
 ```
 
@@ -868,19 +869,19 @@ Response `201 Created`:
 ```json
 {
   "mission_log_id": 9002,
-  "room_id": 42,
-  "participant_id": 101,
+  "crew_id": 42,
+  "crew_participant_id": 101,
   "image_url": "https://cdn.example.com/mission/9002.jpg",
   "image_s3_key": "mission/42/101/9002.jpg",
   "server_time": "2026-05-11T00:01:02+09:00",
-  "is_success": false,
+  "certification_status": "FAILED",
   "failure_reason": "BEFORE_START"
 }
 ```
 
 Error:
 
-- `ROOM_NOT_FOUND`
+- `CREW_NOT_FOUND`
 - `PARTICIPANT_NOT_FOUND`
 - `PARTICIPANT_WITHDRAWN`
 
@@ -888,11 +889,11 @@ Error:
 
 정책:
 
-- 인증 시점에는 room 단위 Redisson 락을 기본으로 사용하지 않는다.
+- 인증 시점에는 crew 단위 Redisson 락을 기본으로 사용하지 않는다.
 - 인증은 `MissionLog` 원본 보존이 우선이다.
 - 이미지 업로드 자체는 별도 presigned upload 계약으로 처리하고, 이 API는 업로드 완료된 `image_s3_key`만 받는다.
 - Presigned URL은 upload delegation 수단이지 validation delegation 수단이 아니다.
-- 서버는 `image_s3_key`가 현재 사용자/participant/room 범위에 속하는지 검증한다.
+- 서버는 `image_s3_key`가 현재 사용자/participant/crew 범위에 속하는지 검증한다.
 - 서버는 S3 object를 직접 조회해 존재 여부, size, content-type, ownership, EXIF를 검증한다.
 - 클라이언트는 `exif_taken_at`을 authoritative source로 제출하지 않는다.
 - 서버는 S3 object에서 EXIF/hash 등 risk signal을 추출하고 가능한 범위에서 검증한다.
@@ -901,25 +902,27 @@ Error:
 - EXIF 부재나 이상은 단독 automatic failure가 아니라 fraud/risk signal이다. 필요한 경우 moderation/review flow로 라우팅한다.
 - 정산 인정 판단의 timing anchor는 `server_time` 기준으로 수행한다.
 - `server_time`은 서버가 인증 요청을 수신한 시각이다.
-- `is_success`는 인증 요청이 현재 validation/moderation state에서 성공으로 기록됐는지를 나타내지만, 최종 정산 인정 여부를 보장하지 않는다.
-- 아래 조건을 검토해 `is_success`를 기록한다.
+- `certification_status`는 인증 요청의 resolved certification state를 나타내며, 최종 정산 인정 여부를 보장하지 않는다. 권장 enum: `PENDING_REVIEW`, `SUCCESS`, `FAILED`.
+- 아래 조건을 검토해 `certification_status`를 결정한다.
   - 업로드 object의 소유/범위/기본 무결성
   - EXIF/hash risk signal과 review 필요 여부
   - 미션 기간 내 요청 여부(`server_time` 기준)
   - frozen baseline / participant 상태 적합성
-- `is_success = true`는 인증 성공을 뜻하지만, 최종 정산에서 인정된다는 의미는 아니다.
-- `is_success = false`여도 원본 로그는 저장할 수 있다.
+- `certification_status = SUCCESS`는 인증 성공 표시이며, 최종 정산에서 인정된다는 의미는 아니다.
+- `certification_status = FAILED`여도 원본 로그는 저장할 수 있다.
+- `certification_status = PENDING_REVIEW`는 업로드 직후 검수/판정 대기 상태다.
+- `certification_status`는 인증 피드 badge, dashboard projection, 알림 input에 쓰이는 resolved state이며 EXIF/hash raw signal이나 host moderation `decision_type`/`reject_reason_code`와 동일 axis로 해석하지 않는다.
 - `mission_log.failure_reason`은 인증 시점 실패 사유(system/timing axis)다.
 - `decision_type`, `reject_reason_code`, `reject_memo`는 호스트 검수자 결과 axis이며 시스템 `failure_reason`과 의미 vocabulary가 다르다. 자세한 사항은 §3.10/§3.11 참조.
 - POST 응답에서 `decision_type`, `reject_reason_code`, `reject_memo`는 검수가 일어나지 않은 시점에는 `null`이다. 검수 갱신은 별도 흐름이며 이 API는 검수 결과를 입력받지 않는다.
 - `settlement_item.calculation_reason`은 정산 시점 포함/제외 근거다.
 - MVP 인증 API에서 `OUT_OF_SCHEDULE`는 사용하지 않는다.
-- 최종 정산에서의 인정 여부는 `is_success`가 아니라 `Settlement` 계산 단계에서 결정된다.
+- 최종 정산에서의 인정 여부는 `certification_status`가 아니라 `Settlement` 계산 단계에서 결정된다.
 - `SPECIFIC_DAYS`, `DAILY` 중복처럼 인증은 성공했지만 정산에서 제외되는 경우는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`으로만 표현한다. `WEEKLY_N` 초과는 Phase 2/deferred reference다.
 - 따라서 인증 시점 성공 로그도 최종 정산에서 제외될 수 있다. 예: `DAILY` 중복, `SPECIFIC_DAYS` 비유효 요일, pre-freeze host moderation으로 resolved certification state가 미인정인 경우.
 - Dashboard projection은 추정값이고, `SUCCEEDED` 전 정산 계산값은 `MissionLog`, frozen `JOINED` participant baseline, resolved certification state 기준으로 확정한다.
 
-### `GET /api/rooms/{roomId}/mission-logs/me`
+### `GET /api/crews/{crewId}/mission-logs/me`
 
 역할:
 
@@ -932,12 +935,12 @@ Response `200 OK`:
   "items": [
     {
       "mission_log_id": 9001,
-      "participant_id": 101,
+      "crew_participant_id": 101,
       "image_url": "https://cdn.example.com/mission/9001.jpg",
       "image_hash": "9b74c9897bac770ffc029102a200c5de8c0e9e5b9d3c9c7e5f4f5c1a2b3c4d5e",
       "server_time": "2026-05-11T05:58:10+09:00",
       "exif_taken_at": "2026-05-11T05:57:58+09:00",
-      "is_success": true,
+      "certification_status": "SUCCESS",
       "failure_reason": null,
       "decision_type": null,
       "reject_reason_code": null
@@ -948,7 +951,7 @@ Response `200 OK`:
 
 Error:
 
-- `ROOM_NOT_FOUND`
+- `CREW_NOT_FOUND`
 - `PARTICIPANT_NOT_FOUND`
 
 정책:
@@ -957,12 +960,12 @@ Error:
 - 정산 인정 판단 기준 시간은 `MissionLog.server_time`이다.
 - `exif_taken_at`은 서버가 S3 object에서 추출/검증한 촬영 시각 보조 정보이며, 최종 정산 인정 시각 기준으로 사용하지 않는다.
 - `image_hash`는 서버 계산 SHA-256 결과의 read-only 노출이며, 동일 인증 사진 중복 의심 신호일 뿐 authority가 아니다.
-- `is_success`는 인증 요청의 유효성 통과 여부를 의미하며, 정산에서 인정된 횟수를 나타내는 값이 아니다.
+- `certification_status`는 인증 요청의 resolved certification state(`PENDING_REVIEW`/`SUCCESS`/`FAILED`)이며, 정산에서 인정된 횟수를 나타내는 값이 아니다.
 - `decision_type`, `reject_reason_code`는 현재 latest-effective 검수 결과 projection이다. `reject_memo`는 본 응답에 포함하지 않는다(참여자 노출 정책: deferred decision).
 - FE는 이 값을 `최종 성공 횟수` 또는 `정산 인정 횟수`로 사용하면 안 된다.
 - 최종 인정 여부와 인정 횟수는 반드시 정산 결과 API `GET /api/settlements/{settlementId}`를 기준으로 판단해야 한다.
 
-### `GET /api/rooms/{roomId}/moderation-logs`
+### `GET /api/crews/{crewId}/moderation-logs`
 
 역할:
 
@@ -999,7 +1002,7 @@ Response `200 OK`:
 
 Error:
 
-- `ROOM_NOT_FOUND`
+- `CREW_NOT_FOUND`
 - `FORBIDDEN`
 
 정책:
@@ -1016,14 +1019,14 @@ Error:
 
 이 섹션은 성공 인증을 보여주는 소셜 projection 계약이다. `feed_items[]`와 `day_statuses[]` / `participant_day_slots[]`는 같은 화면에서 함께 쓰일 수 있지만 의미가 다르다.
 
-- `feed_items[]`는 feed-eligible `MissionLog` 게시물 목록이다. feed-eligible은 `mission_log.is_success = true` 인증 성공 로그만 뜻한다.
+- `feed_items[]`는 feed-eligible `MissionLog` 게시물 목록이다. feed-eligible은 `mission_log.certification_status = 'SUCCESS'` 인증 성공 로그만 뜻한다.
 - `day_statuses[]`와 `participant_day_slots[]`는 참여자/일자 표시용 파생 상태다. 값은 `SUCCESS`, `FAILED`, `NOT_SUBMITTED`만 사용한다.
 - 파생 상태는 DB 상태가 아니고 피드 게시물이 아니며 정산 입력도 아니다.
-- feed eligibility는 정산 인정, 환급, 포인트 적립, AI 리포트 입력, `Settlement.status` 또는 방/참여 생명주기 전이를 의미하지 않는다.
-- Canonical rule: Feed success does NOT guarantee settlement inclusion. `feed_items[].is_success = true`는 UX/social layer 표시 기준이며, 정산 포함 여부는 `MissionLog`, frozen `JOINED` baseline, resolved certification state 기준의 settlement calculation과 `settlement_item.calculation_reason`이 결정한다.
+- feed eligibility는 정산 인정, 환급, 포인트 적립, AI 리포트 입력, `Settlement.status` 또는 크루/참여 생명주기 전이를 의미하지 않는다.
+- Canonical rule: Feed success does NOT guarantee settlement inclusion. `feed_items[].certification_status = 'SUCCESS'`는 UX/social layer 표시 기준이며, 정산 포함 여부는 `MissionLog`, frozen `JOINED` baseline, resolved certification state 기준의 settlement calculation과 `settlement_item.calculation_reason`이 결정한다.
 - 정산 인정 여부와 최종 성공 횟수는 정산 API와 `settlement_item.calculation_reason`을 기준으로 판단한다.
 
-### `GET /api/rooms/{roomId}/feed`
+### `GET /api/crews/{crewId}/feed`
 
 역할:
 
@@ -1043,17 +1046,17 @@ Response `200 OK`:
 
 ```json
 {
-  "room_id": 42,
+  "crew_id": 42,
   "feed_items": [
     {
       "mission_log_id": 9001,
-      "participant_id": 101,
+      "crew_participant_id": 101,
       "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
       "nickname": "돈독러",
       "image_url": "https://cdn.example.com/mission/9001.jpg",
       "server_time": "2026-05-11T05:58:10+09:00",
       "created_at": "2026-05-11T05:58:10+09:00",
-      "is_success": true,
+      "certification_status": "SUCCESS",
       "reaction_counts": {
         "CHEER": 2,
         "CLAP": 1,
@@ -1077,14 +1080,14 @@ Response `200 OK`:
   ],
   "participant_day_slots": [
     {
-      "participant_id": 101,
+      "crew_participant_id": 101,
       "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
       "date": "2026-05-11",
       "status": "SUCCESS",
       "representative_mission_log_id": 9001
     },
     {
-      "participant_id": 102,
+      "crew_participant_id": 102,
       "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c908",
       "date": "2026-05-11",
       "status": "FAILED",
@@ -1096,13 +1099,13 @@ Response `200 OK`:
 
 Error:
 
-- `ROOM_NOT_FOUND`
-- `ROOM_ACCESS_DENIED`
+- `CREW_NOT_FOUND`
+- `CREW_ACCESS_DENIED`
 
 정책:
 
-- `feed_items[]`에는 `mission_log.is_success = true`인 인증 성공 로그만 포함한다.
-- `is_success = false` 실패 로그와 미제출일은 `feed_items[]`에 포함하지 않는다.
+- `feed_items[]`에는 `mission_log.certification_status = 'SUCCESS'`인 인증 성공 로그만 포함한다.
+- `certification_status = 'FAILED'` 실패 로그와 `certification_status = 'PENDING_REVIEW'` 검수 대기 로그, 미제출일은 `feed_items[]`에 포함하지 않는다.
 - 같은 참여자/같은 날짜에 성공 인증 로그가 여러 개 있으면 endpoint pagination/filtering에서 별도 제한하지 않는 한 raw successful feed post로 모두 남을 수 있다.
 - 참여자/일자 파생 상태 대표 규칙:
   - 성공 로그가 하나 이상 있으면 `SUCCESS`다.
@@ -1153,7 +1156,7 @@ Error:
 
 정책:
 
-- 리액션 대상은 `mission_log.is_success = true`인 feed-eligible `MissionLog`로 제한한다.
+- 리액션 대상은 `mission_log.certification_status = 'SUCCESS'`인 feed-eligible `MissionLog`로 제한한다.
 - `POST`는 `(mission_log_id, member_id)` 기준 멱등 upsert다. 기존 리액션이 있으면 같은 row의 `reaction_type`을 교체하고, 없으면 생성한다.
 - 구현은 `(mission_log_id, member_id)` unique constraint 기반의 DB-level idempotent upsert를 MUST로 한다. SQL 문법은 실제 MySQL 8.0 stack에 맞춘다.
 
@@ -1193,9 +1196,9 @@ Error:
 - 삭제는 `(mission_log_id, member_id)` 기준 멱등 delete다.
 - 삭제도 `mission_log` 원본, 정산, 환급, 포인트 원장, AI 리포트, 상태 생명주기에 side effect를 만들지 않는다.
 
-## 5.5 룸 대시보드
+## 5.5 크루 대시보드
 
-### `GET /api/rooms/{roomId}/dashboard`
+### `GET /api/crews/{crewId}/dashboard`
 
 역할:
 
@@ -1209,10 +1212,10 @@ Response `200 OK`:
 
 ```json
 {
-  "room_id": 101,
-  "participant_id": 1001,
+  "crew_id": 101,
+  "crew_participant_id": 1001,
   "settlement_id": null,
-  "room_status": "ACTIVE",
+  "crew_status": "ACTIVE",
   "settlement_status": "NONE",
   "projection_status": "LIVE",
   "projection_notice": "ESTIMATED_NOT_FINAL",
@@ -1230,9 +1233,9 @@ Response `200 OK`:
 
 Error:
 
-- `ROOM_NOT_FOUND`
+- `CREW_NOT_FOUND`
 - `PARTICIPANT_NOT_FOUND`
-- `ROOM_ACCESS_DENIED`
+- `CREW_ACCESS_DENIED`
 
 정책:
 
@@ -1240,6 +1243,7 @@ Error:
 - `settlement_status = NONE`은 해당 방의 `Settlement` row가 아직 없다는 뜻이다. Dashboard projection을 계산할 수 없다는 뜻이 아니다.
 - `updated_at`은 현재 Dashboard projection 계산/응답 생성 시각이다. `MissionLog`의 최신 수정 시각이나 `settlement.finished_at`을 뜻하지 않는다.
 - 모든 문서화된 필드는 응답에 포함한다. 적용할 수 없는 projection 필드는 생략하지 않고 `null`로 내려준다.
+- `my_recognized_success_count_estimated`, `total_recognized_success_count_estimated`, `my_share_ratio_estimated`, `my_expected_refund_amount`, `my_expected_refund_delta_amount`, `rank_estimated`(= `current_rank`)는 모두 `MissionLog` / `crew_participant` / `crew` 입력에서 응답 시점에 계산하는 logical projection이며 저장 컬럼이 아니다. 모두 "현재 기준 예상" 값이며 "최종 정산 전 변동 가능"하다.
 
 #### ProjectionStatus
 
@@ -1247,7 +1251,7 @@ Error:
 | --- | --- |
 | `NOT_STARTED` | `RECRUITING` 등 미션 수행 전 상태라 진행/환급 projection이 아직 시작되지 않았다. |
 | `LIVE` | `ACTIVE` 상태에서 현재 `MissionLog`와 참여자 상태를 기준으로 current-basis estimate를 계산했다. |
-| `FROZEN` | `CLOSED` 상태에서 `room.end_at` cutoff로 매 요청 시 deterministic하게 계산한 frozen projection을 보여준다. 저장된 dashboard snapshot이 아니며 최종값도 아니다. |
+| `FROZEN` | `CLOSED` 상태에서 `crew.end_at` cutoff로 매 요청 시 deterministic하게 계산한 frozen projection을 보여준다. 저장된 dashboard snapshot이 아니며 최종값도 아니다. |
 | `NOT_PROVIDED` | `CANCELLED` 등 수행 projection을 제공하지 않는 상태다. 환급/정산 안내는 Settlement API 기준이다. |
 | `SETTLEMENT_SUCCEEDED` | 최종 정산이 성공했다. Dashboard는 최종값을 복제하지 않고 `settlement_id`로 Settlement API 조회를 유도한다. |
 
@@ -1263,7 +1267,7 @@ Error:
 
 #### 상태별 필드 계약
 
-| `projection_status` | 일반 room status | `settlement_id` | `my_deposit_amount` | `my_success_count` | `my_recognized_success_count_estimated` | `total_recognized_success_count_estimated` | `my_share_ratio_estimated` | `my_expected_refund_amount` | `my_expected_refund_delta_amount` | `rank_estimated` | `updated_at` |
+| `projection_status` | 일반 crew status | `settlement_id` | `my_deposit_amount` | `my_success_count` | `my_recognized_success_count_estimated` | `total_recognized_success_count_estimated` | `my_share_ratio_estimated` | `my_expected_refund_amount` | `my_expected_refund_delta_amount` | `rank_estimated` | `updated_at` |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `NOT_STARTED` | `RECRUITING` | `null` | value | `0` | `0` | `0` | `null` | `null` | `null` | `null` | value |
 | `LIVE` | `ACTIVE` | nullable | value | value | value | value | value 또는 `null` | value 또는 `null` | value 또는 `null` | value 또는 `null` | value |
@@ -1280,9 +1284,9 @@ Error:
 
 | Source | Dashboard에서의 역할 |
 | --- | --- |
-| `mission_log` | 성공 후보와 수행 현황의 primary event source다. `mission_log.is_success = true` 로그만 후보로 사용하고, 인정 판단 시간은 `MissionLog.server_time` 기준이다. |
-| `room_participant` | 참여자 식별, frozen `JOINED` baseline, `deposit_amount` 보증금 금액 source다. `withdrawn_at`은 brownfield/deferred reference다. |
-| `mission_room` | 방 상태, 기간, 미션 주기/규칙 컨텍스트다. 총 보증금 source가 아니다. |
+| `mission_log` | 성공 후보와 수행 현황의 primary event source다. `mission_log.certification_status = 'SUCCESS'` 로그만 후보로 사용하고, 인정 판단 시간은 `MissionLog.server_time` 기준이다. |
+| `crew_participant` | 참여자 식별, frozen `JOINED` baseline, `deposit_amount` 보증금 금액 source다. `withdrawn_at`은 brownfield/deferred reference다. |
+| `crew` | 방 상태, 기간, 미션 주기/규칙 컨텍스트다. 총 보증금 source가 아니다. |
 | `settlement` | `SUCCEEDED` 여부와 최종값 전환 판단용이다. `SUCCEEDED` 전 Dashboard projection 계산 source가 아니다. |
 | `point_history` | 포인트 원장 source of truth다. Dashboard projection 계산 source가 아니다. 최종 환급/잔액 반영은 `Settlement.status = SUCCEEDED` 이후 Settlement API와 `point_history` 기준으로 확인한다. |
 | `point_account` | 현재 사용 가능 잔액 캐시다. Dashboard projection 계산 source가 아니며 `locked_balance`와 `my_expected_refund_amount`를 합산/차감해 최종 금액을 추론하지 않는다. |
@@ -1290,24 +1294,24 @@ Error:
 #### 계산 규칙
 
 - Dashboard는 deterministic estimated projection이다. 같은 source 입력과 cutoff를 사용하면 BE/FE/QA가 같은 projection 결과를 기대할 수 있어야 한다.
-- `my_success_count`는 raw `mission_log.is_success = true` 성공 로그 수다. 정산 인정 성공 수가 아니다.
+- `my_success_count`는 raw `mission_log.certification_status = 'SUCCESS'` 성공 로그 수다. 정산 인정 성공 수가 아니다.
 - `my_recognized_success_count_estimated`는 현재 시점에서 정산 규칙을 가능한 범위로 반영한 추정 인정 성공 수다.
 - 추정 인정 성공 수는 `MissionLog.server_time`을 `Asia/Seoul` 기준 날짜/요일/주차로 해석해 계산한다.
-- projection 후보 로그는 `mission_log.is_success = true`이고, `room.activated_at <= MissionLog.server_time <= projection_cutoff_at`을 만족해야 한다. `activated_at`이 `null`이면 post-activation projection을 계산하지 않는다.
-  - `LIVE`에서는 `projection_cutoff_at = min(응답 생성 시각, room.end_at)`이다.
-  - `FROZEN`에서는 `projection_cutoff_at = room.end_at`이다.
+- projection 후보 로그는 `mission_log.certification_status = 'SUCCESS'`이고, `crew.activated_at <= MissionLog.server_time <= projection_cutoff_at`을 만족해야 한다. `activated_at`이 `null`이면 post-activation projection을 계산하지 않는다.
+  - `LIVE`에서는 `projection_cutoff_at = min(응답 생성 시각, crew.end_at)`이다.
+  - `FROZEN`에서는 `projection_cutoff_at = crew.end_at`이다.
   - `withdrawn_at` cutoff는 brownfield/deferred reference이며 MVP Dashboard active projection에서 frozen `JOINED` baseline을 소급 변경하지 않는다.
 - 대표 success 선택은 모든 frequency projection에서 동일하게 `MissionLog.server_time ASC`, 동률이면 `MissionLog.id ASC` 순서를 사용한다.
 - `DAILY`는 같은 KST date의 첫 success만 인정하고 나머지 success는 duplicate로 제외한다.
 - `SPECIFIC_DAYS`는 `mission_schedule_day`에 포함된 KST weekday의 success만 후보로 삼고, valid KST date별 첫 success만 인정한다.
 - `WEEKLY_N`은 Phase 2/deferred cadence다. MVP Dashboard projection active contract에서는 계산하지 않는다.
-  - 향후 재도입 시에도 activation anchor는 `room.activated_at = start_at`이며 host/admin manual activation이 아니다.
+  - 향후 재도입 시에도 activation anchor는 `crew.activated_at = start_at`이며 host/admin manual activation이 아니다.
 - `total_recognized_success_count_estimated`는 참여자별 추정 인정 성공 수 합계다.
 - `my_share_ratio_estimated`는 소수 정밀도 오해를 줄이기 위해 문자열 decimal로 반환한다.
 - `my_expected_refund_amount`는 deterministic base UX estimate다. `total_recognized_success_count_estimated > 0`이면 `FLOOR(total_locked_amount × my_share_ratio_estimated)`로 계산한다.
 - Dashboard는 정산의 `remainder`, `remainder_policy`, deterministic remainder allocation, 1원 단위 잔액 처리를 계산하거나 반영하지 않는다. 해당 최종 지급 차이는 `Settlement.status = SUCCEEDED` 이후 Settlement API에서만 확인한다.
 - `my_expected_refund_delta_amount = my_expected_refund_amount - my_deposit_amount`다. 이 값은 수익 권위값이 아니라 현재 기준 환급 설명용 차이값이다.
-- `rank_estimated`는 예상 환급금/수익/지분율/보증금 기준 순위가 아니라 추정 수행/참여도 표시 순서다. 정렬 기준은 `recognized_success_count_estimated DESC`, 동률이면 `participant_id ASC`다.
+- `rank_estimated`는 예상 환급금/수익/지분율/보증금 기준 순위가 아니라 추정 수행/참여도 표시 순서다. 정렬 기준은 `recognized_success_count_estimated DESC`, 동률이면 `crew_participant_id ASC`다.
 - `total_recognized_success_count_estimated = 0`인 `LIVE` / `FROZEN` projection은 0으로 나누지 않고 all-fail equal-principal refund estimate를 적용한다.
 - 전체 인정 성공 추정값이 `0`인 경우 Dashboard는 all-fail equal-principal refund 철학에 맞춰 각 참여자의 `deposit_amount`를 current-basis refund estimate로 보여준다. `WITHDRAWN`/ACTIVE withdrawal은 brownfield-deferred semantics다.
 - zero-total base estimate의 `my_expected_refund_amount = my_deposit_amount`이며, 이 경우 Dashboard에서도 host/winner/draw remainder를 수행하지 않는다.
@@ -1315,19 +1319,19 @@ Error:
 - `Settlement.status = SUCCEEDED` 이후 최종 인정 성공 횟수, 최종 환급금, 최종 지분율은 Dashboard projection보다 Settlement API가 우선하며, `settlement_item`과 연결된 `point_history`가 final source of truth다.
 - Dashboard projection과 최종 settlement 결과가 달라도 시스템 오류로 보지 않는다.
 
-#### Room status별 동작
+#### Crew status별 동작
 
-| Room status | Dashboard 동작 |
+| Crew status | Dashboard 동작 |
 | --- | --- |
 | `RECRUITING` | 진행/환급 projection은 시작 전이다. 보증금, 방 규칙, `recruitment_deadline`, `start_at` 중심으로 표시한다. |
 | `ACTIVE` | current-basis estimated projection을 계산한다. 모든 금액/비율/표시 순서는 추정값이다. |
-| `CLOSED` | `room.end_at` cutoff로 query-time deterministic frozen projection을 계산해 보여준다. 저장된 snapshot이 아니며, `Settlement.status = SUCCEEDED` 전까지 최종값이 아니므로 pending/running/retry 상태 안내를 함께 제공한다. |
+| `CLOSED` | `crew.end_at` cutoff로 query-time deterministic frozen projection을 계산해 보여준다. 저장된 snapshot이 아니며, `Settlement.status = SUCCEEDED` 전까지 최종값이 아니므로 pending/running/retry 상태 안내를 함께 제공한다. |
 | `CANCELLED` | 수행 성과 projection을 제공하지 않는다. 시작 전 취소 정산/환급은 Settlement API 기준으로 안내한다. |
 
 #### locked_balance와의 관계
 
 - `GET /api/points`의 `locked_balance`는 계정 단위 현재 잠긴 보증금 UX projection이다.
-- Dashboard의 `my_expected_refund_amount`는 특정 room/participant 기준 예상 환급금 projection이다.
+- Dashboard의 `my_expected_refund_amount`는 특정 crew/crew_participant 기준 예상 환급금 projection이다.
 - FE는 `locked_balance`, `available_balance`, `total_balance`, `my_expected_refund_amount`를 합산하거나 차감해서 최종 보유 포인트, 출금 가능 금액, 최종 정산 후 확정되는 환급금을 계산하면 안 된다.
 - `total_balance = available_balance + locked_balance` 관계는 포인트 요약 화면 전용이다.
 - `CLOSED`지만 `Settlement.status != SUCCEEDED`인 방은 `locked_balance`에 아직 남을 수 있고, Dashboard는 frozen `my_expected_refund_amount`를 보여줄 수 있다.
@@ -1335,7 +1339,7 @@ Error:
 
 ## 5.6 정산
 
-### `GET /api/rooms/{roomId}/settlement`
+### `GET /api/crews/{crewId}/settlement`
 
 역할:
 
@@ -1347,7 +1351,7 @@ Response `200 OK`:
 
 ```json
 {
-  "room_id": 42,
+  "crew_id": 42,
   "settlement_id": null,
   "settlement_type": null,
   "status": "NONE",
@@ -1363,7 +1367,7 @@ Response `200 OK`:
 
 ```json
 {
-  "room_id": 42,
+  "crew_id": 42,
   "settlement_id": 501,
   "settlement_type": "NORMAL",
   "status": "RUNNING",
@@ -1377,14 +1381,14 @@ Response `200 OK`:
 
 Error:
 
-- `ROOM_NOT_FOUND`
+- `CREW_NOT_FOUND`
 
 정책:
 
 - `NONE`은 API projection이다.
 - `PENDING -> RUNNING -> SUCCEEDED / RETRY_WAIT / FAILED`는 `Settlement.status` 원천 상태를 그대로 반영한다.
 - `finished_at`은 성공/실패 종료 시각이다.
-- `started_at`/`finished_at`은 runtime execution fact다. Lifecycle/cutoff authority는 `start_at`, room timezone, daily cutoff, mission period end 같은 scheduled semantic anchor에 남는다.
+- `started_at`/`finished_at`은 runtime execution fact다. Lifecycle/cutoff authority는 `start_at`, crew timezone, daily cutoff, mission period end 같은 scheduled semantic anchor에 남는다.
 
 ### `GET /api/settlements/{settlementId}`
 
@@ -1397,7 +1401,7 @@ Response `200 OK`:
 ```json
 {
   "settlement_id": 501,
-  "room_id": 42,
+  "crew_id": 42,
   "settlement_type": "NORMAL",
   "status": "SUCCEEDED",
   "retry_count": 1,
@@ -1407,7 +1411,7 @@ Response `200 OK`:
   "total_base_refund_amount": 499996,
   "total_remainder_amount": 4,
   "remainder_policy": "DETERMINISTIC_REMAINDER_ALLOCATION",
-  "remainder_winner_participant_id": null,
+  "remainder_winner_crew_participant_id": null,
   "failure_code": null,
   "failure_message": null,
   "started_at": "2026-06-01T13:12:10+09:00",
@@ -1415,7 +1419,7 @@ Response `200 OK`:
   "items": [
     {
       "settlement_item_id": 7001,
-      "participant_id": 101,
+      "crew_participant_id": 101,
       "participant_status_snapshot": "JOINED",
       "deposit_amount": 100000,
       "success_count_raw": 92,
@@ -1460,6 +1464,7 @@ Error:
 - 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. Brownfield `HOST_REMAINDER` 명칭은 fixed rule alias일 뿐 host 지급 권한이 아니다.
 - 전체 인정 성공 `0`이면 all-fail equal-principal refund를 적용한다. 각 참여자는 자기 `deposit_amount`를 환급받고 host/winner/draw remainder 수익은 발생하지 않는다.
 - `settlement.algorithm_version`, `settlement.rule_context_snapshot`, `settlement_item.effective_moderation_snapshot`, `settlement_item.moderation_chain_ref`은 정산 시점 컨텍스트 스냅샷 source-of-truth다(ERD §정산/Settlement-design §7 참조). 이 컨텍스트를 API 응답에 어떤 모양으로 노출할지는 deferred decision이다. 노출하더라도 read-only replay/audit 컨텍스트이고, 현재 엔진으로의 reinterpretation/recalculation 권한이 아니다.
+- `settlement_item`에는 저장 `rank` 컬럼이 없다. UI 표시용 최종 순위가 필요하면 `final_rank`라는 logical projection으로 노출하고, `recognized_success_count DESC`, 동률이면 `crew_participant_id ASC` 기준으로 read-time 계산한다. `final_rank`는 payout authority가 아니며 지급 결과 변경에 사용하지 않는다.
 
 ### `GET /api/admin/settlements`
 
@@ -1480,7 +1485,7 @@ Response `200 OK`:
   "items": [
     {
       "settlement_id": 501,
-      "room_id": 42,
+      "crew_id": 42,
       "settlement_type": "NORMAL",
       "status": "FAILED",
       "retry_count": 3,
@@ -1508,7 +1513,7 @@ Response `202 Accepted`:
 ```json
 {
   "settlement_id": 501,
-  "room_id": 42,
+  "crew_id": 42,
   "status": "RUNNING",
   "retry_count": 2
 }
@@ -1524,7 +1529,7 @@ Error:
 
 - `FAILED` 또는 `RETRY_WAIT` 상태에서만 허용한다.
 - retry 대상은 특정 `Settlement` row다.
-- 같은 `room`이라도 `settlement_type`에 따라 별도 `Settlement`가 존재할 수 있으므로 retry 기준은 `roomId`가 아니라 `settlementId`다.
+- 같은 `crew`라도 `settlement_type`에 따라 별도 `Settlement`가 존재할 수 있으므로 retry 기준은 `crewId`가 아니라 `settlementId`다.
 - 같은 방에 새 `Settlement`를 만드는 것이 아니라 지정된 기존 row를 재사용한다.
 - 이미 생성된 `point_history`는 deterministic `idempotency_key`로 중복 지급이 차단된다.
 - 동일 `idempotency_key`와 동일 payload의 중복은 기존 `point_history`를 재사용하거나 연결하고, 동일 키에 다른 payload가 확인되면 idempotency conflict로 실패 처리한다.
@@ -1537,7 +1542,7 @@ Error:
 
 AI API는 trust-loop authority가 아니다. AI 실패, 무응답, 유효하지 않은 응답은 비트랜잭션성 기능 실패이지 시스템 실패가 아니다. 따라서 수동 방 생성, 정산 결과 조회, 환급, 포인트 원장, `Settlement.status`를 차단하거나 변경하지 않는다.
 
-AI habit report는 Phase 2/deferred 영역이다. MVP semantic propagation에서는 AI 리포트가 settlement/ledger/lifecycle authority가 아니라는 boundary만 유지한다.
+MVP에 포함되는 AI 기능은 크루 생성 도우미(`POST /api/ai/mission-recommendations`) 하나뿐이다. AI habit report 계열 endpoint는 MVP First Release 계약에서 제외되며, Phase 2 / Deferred 섹션으로 격리한다. AI 크루 생성 도우미와 AI habit report는 별개 기능이며 혼동하지 않는다.
 
 ### `POST /api/ai/mission-recommendations`
 
@@ -1589,11 +1594,15 @@ Error:
 
 정책:
 
-- 추천 응답은 사용자가 확인/수정한 뒤 `POST /api/rooms`로 별도 저장한다.
+- 추천 응답은 사용자가 확인/수정한 뒤 `POST /api/crews`로 별도 저장한다.
 - 유효하지 않은 AI 응답은 자동 저장하지 않는다.
 - 실패 응답을 받아도 FE는 기존 입력값을 유지하고 수동 생성 흐름을 계속 제공해야 한다.
 
-### `POST /api/rooms/{roomId}/ai-habit-report`
+### Phase 2 / Deferred: AI habit report
+
+> 아래 endpoint는 MVP First Release 계약이 아니다. ERD에서도 `ai_habit_report`는 Core/MVP entity에서 제외되었고 Phase 2 candidate note로만 유지된다. AI habit report는 settlement / `point_history` / `MissionLog.certification_status` / lifecycle authority가 아니며, MVP runtime이 의존하지 않는다. 새 AI entity/API를 invent하지 않는다.
+
+#### `POST /api/crews/{crewId}/ai-habit-report` — Phase 2 / Deferred
 
 역할:
 
@@ -1610,7 +1619,7 @@ Response `202 Accepted`:
 ```json
 {
   "report_id": 9001,
-  "room_id": 42,
+  "crew_id": 42,
   "settlement_id": 501,
   "status": "PENDING"
 }
@@ -1621,7 +1630,7 @@ Response `202 Accepted`:
 ```json
 {
   "report_id": 9001,
-  "room_id": 42,
+  "crew_id": 42,
   "settlement_id": 501,
   "status": "SUCCEEDED",
   "report_body": "30일 중 27일을 성공했고, 오전 루틴의 지속성이 높았습니다.",
@@ -1635,7 +1644,7 @@ Response `202 Accepted`:
 ```json
 {
   "report_id": 9001,
-  "room_id": 42,
+  "crew_id": 42,
   "settlement_id": 501,
   "status": "FAILED",
   "report_body": null,
@@ -1647,7 +1656,7 @@ Response `202 Accepted`:
 
 Error:
 
-- `ROOM_NOT_FOUND`
+- `CREW_NOT_FOUND`
 - `SETTLEMENT_NOT_SUCCEEDED`
 
 정책:
@@ -1670,7 +1679,7 @@ Error:
 - AI report/explanation은 versioned + stale/invalidation-aware artifact로 발전할 수 있으나 non-authoritative다. Prompt/policy/model/input snapshot metadata를 추가하더라도 settlement authority, replay authority, payout truth가 되지 않는다.
 - Regeneration append semantics, provider-level determinism, full AI replay reproducibility는 Phase 2 hardening registry에 남기며 이 MVP endpoint의 create-or-return-existing 계약을 바꾸지 않는다.
 
-### `GET /api/rooms/{roomId}/ai-habit-report/me`
+#### `GET /api/crews/{crewId}/ai-habit-report/me` — Phase 2 / Deferred
 
 역할:
 
@@ -1681,7 +1690,7 @@ Response `200 OK`:
 ```json
 {
   "report_id": 9001,
-  "room_id": 42,
+  "crew_id": 42,
   "settlement_id": 501,
   "status": "SUCCEEDED",
   "report_body": "30일 중 27일을 성공했고, 오전 루틴의 지속성이 높았습니다.",
@@ -1693,7 +1702,7 @@ Response `200 OK`:
 
 Error:
 
-- `ROOM_NOT_FOUND`
+- `CREW_NOT_FOUND`
 - `AI_REPORT_NOT_FOUND`
 
 정책:
@@ -1702,7 +1711,7 @@ Error:
 - `FAILED`여도 정산 결과 화면과 포인트 히스토리 조회는 그대로 가능해야 한다.
 - AI 리포트의 stale/failed 상태는 정산 결과의 stale/failed 상태가 아니다. 정산 truth는 Settlement API와 point history 원장 기준이다.
 
-### `GET /api/ai-habit-reports/{reportId}`
+#### `GET /api/ai-habit-reports/{reportId}` — Phase 2 / Deferred
 
 역할:
 
@@ -1710,7 +1719,7 @@ Error:
 
 정책:
 
-- 응답 구조와 상태 정책은 `GET /api/rooms/{roomId}/ai-habit-report/me`와 동일하다.
+- 응답 구조와 상태 정책은 `GET /api/crews/{crewId}/ai-habit-report/me`와 동일하다.
 - 리포트 소유자만 조회할 수 있다.
 
 ## 5.8 포인트
@@ -1794,12 +1803,12 @@ Response `200 OK`:
 - `available_balance`는 `point_account.balance`이며, 현재 사용 가능한 포인트 잔액만 의미한다.
 - `locked_balance`는 DB 컬럼이 아니라 API 응답에서만 제공하는 projection 필드다.
 - `locked_balance`는 정산 전 묶인 보증금 표시를 위한 UX 파생값이며, 포인트 원장의 source of truth가 아니다.
-- MVP 기준 `locked_balance`는 사용자의 양수 `room_participant.deposit_amount`를 `mission_room`과 조인해 계산한다.
+- MVP 기준 `locked_balance`는 사용자의 양수 `crew_participant.deposit_amount`를 `crew`과 조인해 계산한다.
 
 ```sql
 SELECT COALESCE(SUM(rp.deposit_amount), 0)
-FROM room_participant rp
-JOIN mission_room mr ON mr.id = rp.room_id
+FROM crew_participant rp
+JOIN crew mr ON mr.id = rp.crew_id
 WHERE rp.member_id = :memberId
   AND rp.deposit_amount > 0
   AND mr.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')
@@ -1810,7 +1819,7 @@ WHERE rp.member_id = :memberId
 - `CLOSED`는 정산 완료 전까지 보증금이 잠겨 있는 것으로 표시한다.
 - `WITHDRAWN`/ACTIVE withdrawal은 brownfield-deferred다. MVP locked balance projection은 frozen `JOINED` baseline과 settlement status를 기준으로 해석한다.
 - `Settlement.status = SUCCEEDED` 이후에는 해당 방의 보증금 lock이 해제된 것으로 본다.
-- 다만 MVP projection은 settlement 조인을 강제하지 않고 `mission_room.status` 기반으로 시작한다. 따라서 `CLOSED` 포함은 정산 전 잠금 표시를 위한 근사값이며, 더 정확한 정산 상태 기반 제외 조건은 Settlement 조회/정산 구현 단계에서 보강할 수 있다.
+- 다만 MVP projection은 settlement 조인을 강제하지 않고 `crew.status` 기반으로 시작한다. 따라서 `CLOSED` 포함은 정산 전 잠금 표시를 위한 근사값이며, 더 정확한 정산 상태 기반 제외 조건은 Settlement 조회/정산 구현 단계에서 보강할 수 있다.
 - `total_balance = available_balance + locked_balance`다.
 - `locked_balance`와 `total_balance`는 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단 기준으로 사용하지 않는다.
 - 최종 정산/환급 결과는 정산 API와 `point_history`를 기준으로 판단한다.
@@ -1872,17 +1881,19 @@ Error:
 - `cursor`는 클라이언트가 직접 해석하지 않고 다음 요청에 그대로 전달하는 값으로 취급한다.
 - `limit`이 `1` 미만이거나 `100`을 초과하면 `INVALID_LIMIT`를 반환한다.
 - `cursor` 형식이 잘못되었거나 해석할 수 없으면 `INVALID_CURSOR`를 반환한다.
-- `ROOM_DEPOSIT_LOCK`는 자산 이동이 아니라 lock 이벤트다.
-- `ROOM_SETTLEMENT_REFUND`와 `ROOM_CANCELLED_REFUND`는 실제 사용 가능 잔액 증가 이벤트다.
-- `reference_type`은 `POINT_CHARGE`, `ROOM_PARTICIPANT`, `SETTLEMENT_ITEM`만 사용한다.
+- `CREW_DEPOSIT_LOCK`는 자산 이동이 아니라 lock 이벤트다.
+- `CREW_SETTLEMENT_REFUND`와 `CREW_CANCELLED_REFUND`는 실제 사용 가능 잔액 증가 이벤트다.
+- `reference_type`은 `POINT_CHARGE`, `CREW_PARTICIPANT`, `SETTLEMENT_ITEM`만 사용한다.
 - `reference_type` / `reference_id` 매핑은 아래와 같다.
 
-| 도메인 동작         | `transaction_type`       | `reference_type`   | `reference_id` 규칙                                                                                                 |
-| ------------------- | ------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| 포인트 충전         | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. |
-| 방 참여 보증금 잠금 | `ROOM_DEPOSIT_LOCK`      | `ROOM_PARTICIPANT` | `room_participant.id`                                                                                               |
-| 일반 정산 환급      | `ROOM_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                |
-| 시작 전 취소 환급   | `ROOM_CANCELLED_REFUND`  | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                |
+| 도메인 동작         | `transaction_type`       | `reference_type`   | `reference_id` 규칙                                                                                                 | `idempotency_key` 예시 |
+| ------------------- | ------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| 포인트 충전         | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. | `charge:{paymentKey}` |
+| 크루 참여 보증금 잠금 | `CREW_DEPOSIT_LOCK`      | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `deposit:crew:{crewId}:participant:{participantId}` |
+| 일반 정산 환급      | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                | `settlement:crew:{crewId}:type:{settlementType}:participant:{participantId}:refund` |
+| 시작 전 취소 환급   | `CREW_CANCELLED_REFUND`  | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                | `settlement:crew:{crewId}:type:{settlementType}:participant:{participantId}:cancel_refund` |
+
+`{participantId}` placeholder는 내부적으로 `crew_participant.id`를 가리킨다. API field로 직접 노출할 때는 `crewParticipantId`로 정렬한다. `{settlementType}`은 §3.9의 `daily_settlement_type` (`A` / `B` / `C`) 값이다.
 
 
 ## 5.9 알림 / Android FCM / Inbox / SSE drift
@@ -1946,7 +1957,7 @@ Response item 후보:
   "event_type": "MISSION_LOG_VERIFICATION_RESULT",
   "resource_type": "mission_log",
   "resource_id": "1201",
-  "deep_link": "dondok://rooms/42/mission-logs/1201",
+  "deep_link": "dondok://crews/42/mission-logs/1201",
   "occurred_at": "2026-05-13T07:31:08+09:00",
   "display_text": "인증 결과가 반영되었습니다.",
   "requires_refetch": true,
@@ -1975,6 +1986,20 @@ Click/refetch contract:
 - payload/list item에 authoritative payout snapshot, authoritative certification snapshot, ledger truth, settlement retry/replay/correction directive를 넣지 않는다.
 - notification read/unread는 badge와 목록 정리에만 쓰며 unresolved settlement/certification/moderation/ledger task로 표시하지 않는다.
 
+### Daily mission result notification projection
+
+`MISSION_LOG_VERIFICATION_RESULT`, `DASHBOARD_PROJECTION_UPDATED` 등 일일 결과 알림 문구 후보:
+
+> `[크루명][날짜] 미션 성공! 크루원 [N]명 인증 실패 → 예상 환급금 [금액]도딘으로 상승했습니다 💪`
+
+- 문구에 인터폴레이트되는 `crewTitle`, `missionDate`, `certificationStatus`, `successMemberCount`, `failedMemberCount`, `pendingMemberCount`, `expectedRefundAmount`, `expectedRefundDelta`는 모두 알림 생성 시점 projection이며 저장 컬럼이 아니다.
+- `crewTitle`은 `crew.title` 현재 값이고, `missionDate`는 `Asia/Seoul` 기준 KST date다.
+- `certificationStatus`는 알림 대상 `MissionLog`의 resolved `certification_status`(`PENDING_REVIEW`/`SUCCESS`/`FAILED`)다.
+- `successMemberCount`, `failedMemberCount`, `pendingMemberCount`는 해당 `missionDate`에 대한 `mission_log` × `crew_participant` projection이며 dashboard projection과 동일 source/cutoff 규칙을 따른다.
+- `expectedRefundAmount`는 알림 대상 참여자의 `dashboard.my_expected_refund_amount`와 동일한 current-basis projection이다. `expectedRefundDelta`는 직전 알림 발송 시점 대비 변화 hint이며 ledger/settlement authority가 아니다.
+- 알림은 hint/deep-link이고 canonical state가 아니다. 알림 payload는 stale일 수 있고, 알림 클릭/진입 시 클라이언트는 `deep_link`로 이동한 뒤 dashboard / settlement / mission-log canonical API를 refetch해야 한다.
+- 알림 발송 성공/실패는 `certification_status`, `Settlement.status`, `point_history` 상태를 변경하지 않는다.
+
 ### Delivery attempt observability 후보
 
 - `notification_delivery_attempt` 또는 동등한 내부 log는 FCM send attempt, provider response, invalid token, bounded transport retry 관측용 후보다.
@@ -1985,14 +2010,14 @@ Click/refetch contract:
 
 | `event_type` 후보 | 설명 | Refetch target 예시 |
 | ----------------- | ---- | ------------------ |
-| `CREW_APPLICATION_CREATED` | 가입 신청 발생 | room applications / host review API |
-| `CREW_APPLICATION_DECIDED` | 가입 승인/거절 결과 | room participant/application API |
-| `CREW_NOTICE_CREATED` | 새 공지/댓글 등 engagement re-entry | room notice API |
-| `MISSION_CERTIFICATION_DUE_SOON` | 인증 마감 reminder | room dashboard / mission logs API |
+| `CREW_APPLICATION_CREATED` | 가입 신청 발생 | crew applications / host review API |
+| `CREW_APPLICATION_DECIDED` | 가입 승인/거절 결과 | crew participant/application API |
+| `CREW_NOTICE_CREATED` | 새 공지/댓글 등 engagement re-entry | crew notice API |
+| `MISSION_CERTIFICATION_DUE_SOON` | 인증 마감 reminder | crew dashboard / mission logs API |
 | `MISSION_LOG_UPLOADED` | 방장 검수 대상 인증 업로드 | mission log review API |
 | `MISSION_LOG_VERIFICATION_RESULT` | 인증 결과 반영 hint | mission log detail / dashboard API |
-| `DASHBOARD_PROJECTION_UPDATED` | 현재 기준 projection 요약 변화 | room dashboard API |
-| `SETTLEMENT_RESULT_READY` | 정산 결과 조회 가능 | room settlement / settlement detail API |
+| `DASHBOARD_PROJECTION_UPDATED` | 현재 기준 projection 요약 변화 | crew dashboard API |
+| `SETTLEMENT_RESULT_READY` | 정산 결과 조회 가능 | crew settlement / settlement detail API |
 | `POINT_HISTORY_UPDATED` | 포인트 내역 반영 hint | points/history API |
 | `REACTION_CREATED` | 리액션 engagement hint | feed / mission log API |
 
@@ -2032,7 +2057,7 @@ Reconnect / delivery semantics:
 
 ## 6. 상태 흐름 다이어그램
 
-### 6.1 Room
+### 6.1 Crew
 
 ```text
 RECRUITING --system activation at start_at / activated_at = start_at--> ACTIVE -> CLOSED
@@ -2068,19 +2093,19 @@ RUNNING
 - `my_participation.deposit_locked_amount`는 방 상세의 해당 참여 보증금 표시용 필드이며, 계정 단위 `locked_balance`나 `total_balance`의 source of truth가 아니다.
 - `locked_balance`와 `total_balance`는 UX 표시용이며, 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단 기준으로 사용하면 안 된다.
 - 탈퇴 버튼/withdrawal UX는 MVP active contract가 아니라 brownfield-deferred로 취급한다. 노출하더라도 frozen baseline, final settlement, point ledger를 직접 변경한다고 안내하면 안 된다.
-- FE는 `is_success`를 인증 성공 여부로만 사용해야 하고, 최종 인정 여부 판단 기준으로 사용하면 안 된다.
+- FE는 `certification_status`를 인증 요청의 resolved certification state로만 사용해야 하고, 최종 정산 인정 여부 판단 기준으로 사용하면 안 된다.
 - 피드 화면에서 `feed_items[]`는 성공 인증 게시물이고, `day_statuses[]` / `participant_day_slots[]`는 `SUCCESS`, `FAILED`, `NOT_SUBMITTED` 표시용 projection이다. 둘을 정산 결과나 포인트 원장으로 해석하면 안 된다.
 - 리액션은 `mission_log_reaction` 기반 social metadata이며, `reaction_counts`는 파생값이다. FE는 리액션이 인증 성공 여부, 정산 인정, 환급, 포인트, AI 리포트 상태를 바꾼다고 표시하면 안 된다.
-- 인증 제출 직후에는 `is_success`와 `failure_reason`만 신뢰한다. 최종 인정 횟수는 정산 전까지 확정되지 않는다.
+- 인증 제출 직후에는 `certification_status`와 `failure_reason`만 신뢰한다. 최종 인정 횟수는 정산 전까지 확정되지 않는다.
 - 인증 직후에는 성공으로 표시할 수 있지만, 최종 결과 화면의 인정/미인정 표시는 정산 결과 기준으로 별도 표시해야 한다.
 - 인증 기록 화면과 정산 결과 화면은 서로 다른 기준을 사용해야 한다.
-- 인증 기록 화면은 `is_success` 기준으로 `인증 성공/실패`만 표시한다.
+- 인증 기록 화면은 `certification_status` 기준으로 `검수 대기/인증 성공/인증 실패`만 표시한다.
 - 정산 결과 화면은 `settlement_item.calculation_reason` 기준으로 `최종 인정/미인정`을 표시한다.
 - 두 기준을 혼용하면 잘못된 UX가 발생하므로 반드시 분리해서 사용해야 한다.
 - 최종 정산 인정 시각 판단은 `server_time` 기준이며, `exif_taken_at`은 촬영 시각 검증용 보조 정보로만 사용해야 한다.
 - `failure_reason = null`이어도 최종 정산에서 제외될 수 있으므로, `DAILY` 중복이나 `SPECIFIC_DAYS` 제외 여부는 `settlement_item.calculation_reason`이 포함된 정산 결과 화면에서 확인해야 한다.
-- 정산 결과 화면은 먼저 `GET /api/rooms/{roomId}/settlement`를 polling하고, `status = SUCCEEDED`가 되면 `settlement_id`로 `GET /api/settlements/{settlementId}`를 호출한다.
-- 포인트 내역 화면은 `transaction_type` 그대로 내려받고, UI에서 `POINT_CHARGE`, `ROOM_DEPOSIT_LOCK`, `ROOM_SETTLEMENT_REFUND`, `ROOM_CANCELLED_REFUND`를 한국어 라벨로 매핑한다.
+- 정산 결과 화면은 먼저 `GET /api/crews/{crewId}/settlement`를 polling하고, `status = SUCCEEDED`가 되면 `settlement_id`로 `GET /api/settlements/{settlementId}`를 호출한다.
+- 포인트 내역 화면은 `transaction_type` 그대로 내려받고, UI에서 `POINT_CHARGE`, `CREW_DEPOSIT_LOCK`, `CREW_SETTLEMENT_REFUND`, `CREW_CANCELLED_REFUND`를 한국어 라벨로 매핑한다.
 - 포인트 내역 화면의 `next_cursor`는 UI가 직접 해석하지 말고 다음 요청에 그대로 전달해야 한다.
 - `Settlement.status = SUCCEEDED` 전에는 일부 `point_history_id`가 비어 있을 수 있으므로, 정산 상세의 item 금액과 포인트 내역 표시 시 상태를 함께 봐야 한다.
 - Dashboard 화면의 금액, 비율, 순위는 “예상”, “현재 기준”, “추정” 라벨로 표시하고 “확정”, “최종”, “정산 완료” 라벨은 Settlement API 결과에만 사용한다.
@@ -2098,8 +2123,8 @@ Android FCM push, notification inbox item, deferred SSE signal 모두 `deep_link
 - 인증 시점에는 과도한 분산 락보다 `MissionLog append-only 저장 + 캐시 원자 연산 + 최종 계산/replay 가능성`을 우선한다.
 - `SUCCEEDED` 전 최종 정산 계산은 `MissionLog.server_time`, frozen `JOINED` participant baseline, resolved certification state를 기준으로 수행한다.
 - `exif_taken_at`은 서버가 S3 object에서 추출/검증한 이미지 조작 또는 촬영 시각 이상 여부 검증 보조 정보이며, 인정 횟수 계산 기준 시간으로 사용하지 않는다.
-- 정산 시점에는 DB 조건부 `Settlement(PENDING/RETRY_WAIT -> RUNNING)` claim을 1차 기준으로 사용하고, Redisson room lock은 보조 수단, DB unique 제약과 `point_history.idempotency_key`는 최종 방어선으로 사용한다.
-- `total_locked_amount`는 정산 시점의 `room_participant.deposit_amount` 합계 스냅샷이며, `point_account`나 `point_history`를 다시 합산하지 않는다.
+- 정산 시점에는 DB 조건부 `Settlement(PENDING/RETRY_WAIT -> RUNNING)` claim을 1차 기준으로 사용하고, Redisson crew lock은 보조 수단, DB unique 제약과 `point_history.idempotency_key`는 최종 방어선으로 사용한다.
+- `total_locked_amount`는 정산 시점의 `crew_participant.deposit_amount` 합계 스냅샷이며, `point_account`나 `point_history`를 다시 합산하지 않는다.
 - 일반 정산 remainder는 deterministic remainder allocation rule로 처리한다. 이는 host 지급 권한, winner 지급, draw/random 지급이 아니라 replayable floor-remainder 규칙이다.
 - 취소형 정산에서도 조회 구조는 동일하고 `settlement_type = CANCELLED_BEFORE_START`만 달라진다.
 - 포인트 원장 기록과 `point_account.balance` 갱신은 participant 지급 단위로 같은 트랜잭션에서 처리하되, 전체 정산은 partial 복구가 가능하도록 이미 생성된 원장을 idempotency key로 재사용한다.
@@ -2112,4 +2137,4 @@ Android FCM push, notification inbox item, deferred SSE signal 모두 `deep_link
 
 - Withdrawal/탈퇴 semantics는 brownfield/deferred다. MVP active contract에서는 frozen `JOINED` baseline, final settlement, point ledger를 직접 변경하지 않는다.
 - MVP 인증 API의 `mission_log.failure_reason`은 인증 시점 실패 사유만 표현하고, `OUT_OF_SCHEDULE`는 사용하지 않는다.
-- 관리자 정산 재시도는 `roomId`가 아니라 `settlementId` 기준으로 수행한다.
+- 관리자 정산 재시도는 `crewId`가 아니라 `settlementId` 기준으로 수행한다.
