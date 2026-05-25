@@ -66,18 +66,16 @@
 
 ### 3.2 정산 대상 참여자
 
-- 정산 대상 participant는 activation 시점 frozen `JOINED` baseline에 포함되고 예치 Lock이 완료된 참여자다. 종료 시점의 locked deposit 조회값은 검증/스냅샷 입력일 뿐, ACTIVE 이후 withdrawal/rejoin으로 baseline을 다시 여는 기준이 아니다.
-- 한 `member`는 하나의 `MissionRoom`에 대해 하나의 `participant`만 가진다.
-- 이 불변식은 `unique(room_id, member_id)`로 강제하고, `participant`는 정산과 감사 추적을 위해 물리 삭제하지 않는다.
-- `participant` 생명주기는 MVP에서 `APPLIED -> APPROVED_LOCK_PENDING -> JOINED`로 해석한다.
-- `APPLIED`는 신청 상태이며 capacity, activation eligibility, frozen participant baseline에 포함하지 않는다.
-- `APPLIED` 시점에는 보증금 reserve/hold semantics를 둘 수 있다. 이는 신청자의 참여 의사를 보증하고 잔액 오인을 줄이기 위한 pre-lock boundary이며, 예치 Lock 완료나 settlement baseline 포함을 의미하지 않는다.
-- 승인 전 참여자 철회는 허용하며, 철회된 신청의 reserve/hold 금액은 즉시 환급 또는 release되어야 한다. 철회된 신청은 capacity, activation eligibility, frozen participant baseline에 포함하지 않는다.
-- Host 거절 또는 미검토 자동 거절된 신청의 reserve/hold 금액은 즉시 환급 또는 release되어야 하며, 해당 신청은 settlement baseline에 포함하지 않는다.
-- `APPROVED_LOCK_PENDING`은 host approval 이후 예치 Lock 완료 전 상태이며 capacity reservation만 의미한다. 이 상태는 activation eligibility, minimum participant baseline, frozen participant baseline에 포함하지 않는다.
-- `JOINED`는 승인과 예치 Lock이 모두 완료된 상태다. MVP에서 activation eligibility, minimum participant baseline, frozen participant baseline, settlement eligibility의 participant anchor는 `JOINED`만 사용한다.
+- 정산 대상 participant는 activation 시점 frozen `JOINED` baseline에 포함된 참여자다. 종료 시점의 locked deposit 조회값은 검증/스냅샷 입력일 뿐, ACTIVE 이후 withdrawal/rejoin으로 baseline을 다시 여는 기준이 아니다.
+- 한 `member`는 하나의 `crew`에 대해 하나의 `crew_participant`만 가진다.
+- 이 불변식은 `unique(crew_id, member_id)`로 강제하고, `crew_participant`는 정산과 감사 추적을 위해 물리 삭제하지 않는다.
+- MVP active `crew_participant.status`: `APPLIED`, `JOINED`, `REJECTED`, `CANCELLED`, `EXPIRED`. 중간 상태 (APPROVED + lock 대기) 는 두지 않으며 방장 승인 = 자동 보증금 lock trigger이고 lock 성공 시 즉시 `JOINED`로 전이한다.
+- `APPLIED`는 보증금 lock 전 신청 상태다. capacity, activation eligibility, minimum participant baseline, frozen participant baseline, settlement eligibility 어디에도 포함하지 않는다. `APPLIED` 시점에는 별도 reserve/hold 금액이 발생하지 않으며, `point_account.balance` 차감도 없다.
+- 사용자가 승인 전 신청을 취소하면 `APPLIED -> CANCELLED`. 보증금 lock 전 상태라 환급 처리가 없다.
+- 방장이 거절하거나 시작 전까지 처리되지 않아 자동 만료된 신청은 `REJECTED` / `EXPIRED`다. 보증금 lock 전 상태라 환급 처리가 없으며 settlement baseline에 포함하지 않는다.
+- `JOINED`는 방장 승인과 보증금 lock이 모두 성공한 상태다. MVP에서 activation eligibility, minimum participant baseline, frozen participant baseline, settlement eligibility의 participant anchor는 `JOINED`만 사용한다.
 - `JOINED` 이후에는 MVP에서 participant-side 변경/취소를 허용하지 않는다. 승인 + 예치 Lock 완료 후 상태 변경은 frozen baseline integrity와 deterministic settlement를 흔들 수 있으므로 별도 후속 설계 없이는 열지 않는다.
-- 위 reserve/hold/lock 문장은 lifecycle semantic boundary이며, 구체적인 DB column, API status, enum name, account balance column, lock implementation strategy를 여기서 새로 freeze하지 않는다.
+- 위 lifecycle 문장은 semantic boundary이며, 구체적인 DB column, API status, enum name, account balance column, lock implementation strategy는 `ERD` / `API-spec`이 소유한다.
 - 신규 참여/상태 전이는 `MissionRoom.status = RECRUITING`이고 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
 - `ACTIVE` 이후 신규 참여와 baseline 변경은 허용하지 않는다.
 - ACTIVE 이후 탈퇴/재참여 및 중도 탈퇴 정산은 MVP active semantics가 아니라 brownfield/deferred 영역으로 남긴다. 기존 문서/구현 흔적이 있더라도 `JOINED` frozen baseline을 바꾸는 권한으로 해석하지 않는다.
@@ -1160,13 +1158,15 @@ total_remainder_amount = 0
 - `TS-02` `min_participants > max_participants`이면 생성 실패
   기대 결과: `2 <= min_participants <= max_participants <= 15` 검증을 통과하지 못하면 요청이 reject된다.
 - `TS-03` participant lifecycle baseline
-  기대 결과: `APPLIED`, `APPROVED_LOCK_PENDING`, `JOINED`가 구분되고, activation/minimum/frozen baseline에는 `JOINED`만 포함된다.
-- `TS-03A` 참여 시 보증금 잠금 처리
-  기대 결과: 참여 시 `point_account.balance`는 보증금만큼 감소하고, 같은 금액이 `room_participant.deposit_amount`에 잠기며 `ROOM_DEPOSIT_LOCK` 원장이 생성된다.
-- `TS-03B` `APPROVED_LOCK_PENDING` capacity reservation
-  기대 결과: `APPROVED_LOCK_PENDING`은 capacity만 예약하며 예치 Lock 완료 전에는 settlement baseline에 포함되지 않는다.
+  기대 결과: `APPLIED`, `JOINED`, `REJECTED`, `CANCELLED`, `EXPIRED`가 구분되고, capacity/activation/minimum/frozen baseline 및 settlement eligibility에는 `JOINED`만 포함된다. 별도 중간 상태는 두지 않는다.
+- `TS-03A` 방장 승인 시 보증금 자동 잠금 처리
+  기대 결과: 방장 승인 = 자동 보증금 lock trigger로 단일 transaction 내에서 `point_account.balance`가 보증금만큼 감소하고, 같은 금액이 `crew_participant.deposit_amount`에 snapshot되며 `CREW_DEPOSIT_LOCK` 원장이 append되고 `crew_participant.status`가 `JOINED`, `joined_at`이 기록된다.
+- `TS-03B` `APPLIED` 단계 격리
+  기대 결과: `APPLIED`는 `point_account.balance` 변동을 만들지 않고, capacity/activation eligibility/minimum baseline/frozen participant baseline/settlement eligibility 어디에도 포함되지 않는다.
 - `TS-03C` 보증금 잠금 시 사용 가능 잔액 음수 방지
-  기대 결과: `point_account.balance >= deposit_amount` 조건부 update의 row count가 `1`일 때만 잠금이 성공하고, 동시 요청 또는 잔액 부족으로 row count가 `0`이면 참여가 실패한다.
+  기대 결과: 승인 transaction 내 `point_account.balance >= deposit_amount` 조건부 update의 row count가 `1`일 때만 잠금이 성공하고, 동시 승인 또는 잔액 부족으로 row count가 `0`이면 승인 transaction 전체가 rollback되어 신청자는 `APPLIED`로 유지된다.
+- `TS-03D` 승인 전 신청 취소
+  기대 결과: `APPLIED` 신청자는 `DELETE /api/crews/{crewId}/participants/me`로 직접 취소할 수 있고 상태가 `CANCELLED`로 전이되며 `point_history` ledger에 환불 항목이 생성되지 않는다. `JOINED` 이후에는 취소가 reject된다.
 - `TS-04` non-JOINED 인증 요청 차단
   기대 결과: `participant.status != JOINED`이면 인증 API가 reject된다.
 - `TS-04A` `ACTIVE` 이후 신규 참여 불가
@@ -1221,8 +1221,10 @@ total_remainder_amount = 0
   기대 결과: 해당 participant는 이미 지급 완료로 간주되고 새 환급 원장은 생성되지 않으며, 관리자 API 또는 배치가 기존 `point_history`를 조회해 FK만 연결한 뒤 전체 연결이 완료되면 `Settlement.status`가 `SUCCEEDED`로 전이된다.
 - `TS-16` 취소형 정산과 일반 정산이 같은 조회 API 구조로 반환되는지
 - `TS-17` 종료/취소 감지 시 `Settlement(PENDING)`가 먼저 생성되는지
-- `TS-17A` `unique(room_id, member_id)` 제약이 같은 방 중복 participant 생성을 막는지
-  기대 결과: 동일 `member`가 같은 `MissionRoom`에 두 번째로 참여를 시도하면 DB 제약 또는 동일 수준의 저장 전 검증으로 차단된다.
+- `TS-17A` `unique(crew_id, member_id)` 제약이 같은 크루 중복 participant row 생성을 막는지
+  기대 결과: 동일 `member`가 같은 `crew`에 두 번째 `crew_participant` row 생성을 시도하면 DB 제약 또는 동일 수준의 저장 전 검증으로 차단된다.
+- `TS-17A1` terminal 상태 재신청 차단
+  기대 결과: 동일 `member`가 같은 `crew`에 `REJECTED` / `CANCELLED` / `EXPIRED` 상태 row를 보유한 상태에서 `POST /api/crews/{crewId}/participants`를 재호출하면 `APPLICATION_NOT_ALLOWED`로 reject되고 기존 row의 status는 변경되지 않으며 신규 row도 생성되지 않는다.
 - `TS-17B` 실시간 대시보드 캐시와 `SUCCEEDED` 전 정산 계산 결과가 일시적으로 달라도 authoritative settlement input으로 정산값이 확정되는지
   기대 결과: 캐시 누락 또는 지연이 있어도 `settlement_item` 계산값은 `MissionLog` 원본, frozen `JOINED` baseline, resolved certification state 기준으로 일관되게 생성된다.
 

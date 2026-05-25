@@ -97,30 +97,28 @@
 - `CLOSED`: 계획된 `end_at` 이후 정상 종료 상태.
 - `CANCELLED`: 시작 전 취소 상태. `start_at` 자동 activation eligibility를 만족하지 못하면 batch가 취소형 정산 대상으로 전이할 수 있다.
 
-### 3.2 CrewVisibility
+### 3.2 ParticipantStatus
 
-- `PUBLIC`
-- `PRIVATE`
+- `APPLIED`: 사용자가 가입 신청을 완료한 상태. 보증금 lock 전이며 capacity, activation eligibility, frozen participant baseline, settlement 대상 어디에도 포함하지 않는다.
+- `JOINED`: 방장 승인과 보증금 lock이 모두 성공한 참여 확정 상태. activation eligibility, minimum baseline, frozen participant baseline, settlement eligibility의 participant anchor다.
+- `REJECTED`: 방장이 가입 신청을 거절한 상태. 보증금 lock 전이라 환급 없음.
+- `CANCELLED`: 사용자가 승인 전 `APPLIED` 상태에서 신청을 취소한 상태. 보증금 lock 전이라 환급 없음.
+- `EXPIRED`: 시작 전까지 처리되지 않아 자동 만료된 상태. 보증금 lock 전이라 환급 없음.
+- MVP에서 승인과 lock 사이 중간 상태는 두지 않는다. 방장 승인 = 자동 보증금 lock trigger이며 lock 성공 시 즉시 `JOINED`로 전이한다.
+- `WITHDRAWN`/active withdrawal/재참여 semantics는 MVP active contract가 아니라 brownfield/deferred reference다.
 
-### 3.3 ParticipantStatus
-
-- `APPLIED`: 신청 상태. capacity, activation eligibility, frozen participant baseline에 포함하지 않는다.
-- `APPROVED_LOCK_PENDING`: 승인 후 예치 Lock 완료 전 상태. capacity reservation만 의미하며 activation/minimum/frozen baseline에는 포함하지 않는다.
-- `JOINED`: 승인과 예치 Lock이 모두 완료된 상태. activation eligibility, minimum baseline, frozen participant baseline, settlement eligibility의 participant anchor다.
-- `WITHDRAWN`: brownfield/deferred 상태. ACTIVE withdrawal/재참여 semantics는 MVP active contract가 아니다.
-
-### 3.4 FrequencyType
+### 3.3 FrequencyType
 
 - `DAILY`
 - `SPECIFIC_DAYS`
 - `WEEKLY_N` (Phase 2 / deferred; MVP active cadence 아님)
 
-### 3.5 SettlementType
+### 3.4 SettlementType
 
 - `NORMAL`
 - `CANCELLED_BEFORE_START`
 
-### 3.6 SettlementStatus
+### 3.5 SettlementStatus
 
 - `NONE` - API projection only
 - `PENDING`
@@ -129,14 +127,14 @@
 - `FAILED`
 - `RETRY_WAIT`
 
-### 3.7 PointTransactionType
+### 3.6 PointTransactionType
 
 - `POINT_CHARGE`
 - `CREW_DEPOSIT_LOCK`
 - `CREW_SETTLEMENT_REFUND`
 - `CREW_CANCELLED_REFUND`
 
-### 3.8 MissionLogFailureReason
+### 3.7 MissionLogFailureReason
 
 - system/timing/upload validation axis다. 호스트 검수자 거절 사유와 의미 vocabulary가 다르다.
 - `EXIF_MISSING` (risk/review signal only; automatic final failure 아님)
@@ -145,25 +143,25 @@
 - `AFTER_END`
 - `AFTER_WITHDRAWN` (brownfield/deferred; MVP ACTIVE withdrawal 정산 규칙으로 사용하지 않음)
 
-### 3.9 DailySettlementType
+### 3.8 DailySettlementType
 
 - `A`: 일일 인증 마감 `09:00 KST`, 일일 정산 batch `12:00 KST`
 - `B`: 일일 인증 마감 `21:00 KST`, 일일 정산 batch `00:00 KST` (익일)
 - `C`: 일일 인증 마감 `23:59 KST`, 일일 정산 batch `익일 12:00 KST`
 - 방 생성 시 필수. cadence anchor는 `Settlement-design.md`이 소유한다.
 
-### 3.10 MissionLogDecisionType
+### 3.9 MissionLogDecisionType
 
 - host moderation 결정 type. 정확한 enum 값은 deferred decision이며 이 contract에서 freeze하지 않는다.
 - API 응답에는 string으로 노출하되, 클라이언트는 알려진 값 외 unknown 값에 대해 graceful degradation으로 처리한다.
 
-### 3.11 MissionLogRejectReasonCode
+### 3.10 MissionLogRejectReasonCode
 
 - host moderation rejection reason axis. `MissionLogFailureReason`(system axis)과 의미 vocabulary가 분리된다.
 - 6종 enum + `OTHER` 존재만 freeze한다. 정확한 5개 enum 이름은 deferred decision이다.
 - `OTHER` 결정 시 `reject_memo` (최대 50자 free-text)가 함께 채워질 수 있다.
 
-### 3.12 SettlementFailureCode
+### 3.11 SettlementFailureCode
 
 - `INPUT_LOAD_FAILED`
 - `CALCULATION_FAILED`
@@ -172,7 +170,7 @@
 - `LOCK_ACQUIRE_FAILED`
 - `UNKNOWN`
 
-### 3.13 AiHabitReportStatus — Phase 2 / Deferred
+### 3.12 AiHabitReportStatus — Phase 2 / Deferred
 
 > AI habit report는 ERD에서 MVP Core entity로부터 제거되고 Phase 2 candidate로 격리되었다. 아래 enum은 MVP First Release contract가 아니라 Phase 2 reference로만 유지한다.
 
@@ -180,7 +178,7 @@
 - `SUCCEEDED`
 - `FAILED`
 
-### 3.14 AiHabitReportFailureCode — Phase 2 / Deferred
+### 3.13 AiHabitReportFailureCode — Phase 2 / Deferred
 
 > AI habit report 격리에 따라 본 enum도 Phase 2 reference로만 유지한다. MVP active contract가 아니다.
 
@@ -188,7 +186,7 @@
 - `AI_RESPONSE_INVALID`
 - `UNKNOWN`
 
-### 3.15 ProjectionStatus
+### 3.14 ProjectionStatus
 
 대시보드 projection 응답 전용 상태값이다.
 
@@ -200,7 +198,7 @@
 - `NOT_PROVIDED`
 - `SETTLEMENT_SUCCEEDED`
 
-### 3.16 ProjectionNotice
+### 3.15 ProjectionNotice
 
 대시보드 projection 응답의 현재 상태를 설명하기 위한 안내 값이다.
 
@@ -212,13 +210,13 @@
 - `SETTLEMENT_RESULT_AVAILABLE`
 - `INSUFFICIENT_PROJECTION_INPUT`
 
-### 3.17 PointHistoryReferenceType
+### 3.16 PointHistoryReferenceType
 
 - `POINT_CHARGE`
 - `CREW_PARTICIPANT`
 - `SETTLEMENT_ITEM`
 
-### 3.18 MissionLogReactionType
+### 3.17 MissionLogReactionType
 
 - `CHEER`
 - `CLAP`
@@ -236,11 +234,13 @@
 | 인증/회원   | `POST`   | `/api/auth/logout`                              | 로그아웃                                 |
 | 인증/회원   | `GET`    | `/api/me`                                       | 내 계정/프로필 조회                      |
 | 인증/회원   | `PATCH`  | `/api/me/profile`                               | 내 최소 프로필 수정                      |
-| 크루/참여   | `GET`    | `/api/crews`                                    | 공개 방 목록 조회                        |
-| 크루/참여   | `POST`   | `/api/crews`                                    | 방 생성                                  |
-| 크루/참여   | `GET`    | `/api/crews/{crewId}`                           | 방 상세 조회                             |
-| 크루/참여   | `GET`    | `/api/crews/join-code/{joinCode}`               | 참여 코드로 방 조회                      |
-| 크루/참여   | `POST`   | `/api/crews/{crewId}/participants`              | 방 참여 및 보증금 lock                   |
+| 크루/참여   | `GET`    | `/api/crews`                                    | 크루 목록 조회                           |
+| 크루/참여   | `POST`   | `/api/crews`                                    | 크루 생성                                |
+| 크루/참여   | `GET`    | `/api/crews/{crewId}`                           | 크루 상세 조회                           |
+| 크루/참여   | `POST`   | `/api/crews/{crewId}/participants`              | 크루 가입 신청                           |
+| 크루/참여   | `DELETE` | `/api/crews/{crewId}/participants/me`           | 가입 신청 취소 (승인 전 `APPLIED`만)     |
+| 크루/참여   | `POST`   | `/api/crews/{crewId}/applications/{crewParticipantId}/approve` | 방장 승인 → 자동 보증금 lock → `JOINED` |
+| 크루/참여   | `POST`   | `/api/crews/{crewId}/applications/{crewParticipantId}/reject`  | 방장 거절 → `REJECTED`               |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/withdraw`                  | Brownfield/deferred withdrawal           |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/start`                     | Brownfield/removed manual start          |
 | 미션 인증   | `POST`   | `/api/mission-logs`                             | 인증 제출                                |
@@ -483,14 +483,13 @@ Error:
 
 역할:
 
-- 공개 모집 방 목록을 조회한다.
+- 크루 목록을 조회한다.
 
 Query:
 
 | 필드         | 타입     | 필수 | 설명                |
 | ------------ | -------- | ---- | ------------------- |
 | `status`     | `string` | N    | 기본값 `RECRUITING` |
-| `visibility` | `string` | N    | 기본값 `PUBLIC`     |
 
 Response `200 OK`:
 
@@ -500,7 +499,6 @@ Response `200 OK`:
     {
       "crew_id": 42,
       "title": "새벽 기상 챌린지",
-      "visibility": "PUBLIC",
       "status": "RECRUITING",
       "deposit_amount": 100000,
       "min_participants": 2,
@@ -519,7 +517,7 @@ Response `200 OK`:
 
 정책:
 
-- MVP 목록 API는 공개 방만 대상으로 시작한다.
+- MVP는 공개 크루만 지원한다.
 - 참여자 수 같은 집계 필드는 본 명세의 필수 응답에 포함하지 않는다.
 
 ### `POST /api/crews`
@@ -535,14 +533,13 @@ Request:
 | `title`                 | `string`   | Y    | 크루 제목. 표시용 텍스트이며 lifecycle/moderation/settlement authority가 아니다. |
 | `description`           | `string`   | Y    | 크루 설명. 표시용 텍스트이며 lifecycle/moderation/settlement authority가 아니다. |
 | `category`              | `string`   | Y    | 방 카테고리. 값 catalog는 deferred decision이며 string으로 받는다. 자세한 사항은 §3 enum 정책을 따른다. |
-| `visibility`            | `string`   | Y    | `PUBLIC` / `PRIVATE`                                    |
 | `deposit_amount`        | `integer`  | Y    | 기본 보증금                                             |
 | `min_participants`      | `integer`  | N    | 기본값 `2`                                              |
 | `max_participants`      | `integer`  | Y    | 최대 인원                                               |
 | `frequency_type`        | `string`   | Y    | MVP: `DAILY` / `SPECIFIC_DAYS`; `WEEKLY_N`은 Phase 2/deferred |
 | `frequency_count`       | `integer`  | N    | Phase 2 `WEEKLY_N` reference 전용                       |
 | `mission_schedule_days` | `string[]` | N    | `SPECIFIC_DAYS`일 때 필수. 예: `["MONDAY","WEDNESDAY"]` |
-| `daily_settlement_type` | `string`   | Y    | `A` / `B` / `C`. 일일 정산 cadence. §3.9 참조 |
+| `daily_settlement_type` | `string`   | Y    | `A` / `B` / `C`. 일일 정산 cadence. §3.8 참조 |
 | `host_agreement`        | `object`   | Y    | 방장 동의/약관 스냅샷 payload. payload shape는 deferred decision이며 서버는 시점 스냅샷으로 보관한다. |
 | `recruitment_deadline`  | `string`   | Y    | ISO-8601. 신규 참여 마감 시각                           |
 | `start_date`            | `string`   | Y    | `YYYY-MM-DD`. 예정 시작일                               |
@@ -556,8 +553,6 @@ Response `201 Created`:
   "title": "새벽 기상 챌린지",
   "description": "매일 새벽 6시 전 기상 인증",
   "category": "EXERCISE",
-  "visibility": "PRIVATE",
-  "join_code": "A1B2C3",
   "status": "RECRUITING",
   "deposit_amount": 100000,
   "min_participants": 2,
@@ -612,7 +607,6 @@ Response `200 OK`:
   "title": "새벽 기상 챌린지",
   "description": "매일 아침 6시 전에 인증",
   "category": "EXERCISE",
-  "visibility": "PUBLIC",
   "status": "ACTIVE",
   "settlement_status": "NONE",
   "deposit_amount": 100000,
@@ -650,43 +644,13 @@ Error:
 - `category`, `daily_settlement_type`, `host_agreement_version`, `host_agreed_at`은 방 생성 시점 컨텍스트의 read-only 노출이며 변경할 수 없다.
 - `host_agreement_snapshot` JSON 본문은 본 응답에서 직접 노출하지 않는다. 본문 노출 방식은 deferred decision이다.
 
-### `GET /api/crews/join-code/{joinCode}`
-
-역할:
-
-- 비공개 참여 코드를 방 조회용으로 변환한다.
-
-Response `200 OK`:
-
-```json
-{
-  "crew_id": 42,
-  "title": "새벽 기상 챌린지",
-  "visibility": "PRIVATE",
-  "status": "RECRUITING",
-  "deposit_amount": 100000,
-  "min_participants": 2,
-  "max_participants": 5,
-  "frequency_type": "DAILY",
-  "frequency_count": null,
-  "mission_schedule_days": [],
-  "recruitment_deadline": "2026-05-09T23:59:59+09:00",
-  "start_at": "2026-05-10T00:00:00+09:00",
-  "activated_at": null,
-  "end_at": "2026-05-31T23:59:59+09:00"
-}
-```
-
-Error:
-
-- `INVALID_JOIN_CODE`
-- `CREW_NOT_FOUND`
-
 ### `POST /api/crews/{crewId}/participants`
 
 역할:
 
-- 방 참여를 생성하고 보증금을 lock한다.
+- 크루 가입 신청을 생성한다.
+- MVP에서는 사용자가 직접 보증금을 lock하지 않는다. 신청만 생성되며 `APPLIED` 상태로 시작한다.
+- 실제 보증금 lock은 방장이 `POST /api/crews/{crewId}/applications/{crewParticipantId}/approve`를 호출할 때 자동 수행된다.
 
 Request:
 
@@ -699,9 +663,10 @@ Response `201 Created`:
   "crew_participant_id": 101,
   "crew_id": 42,
   "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
-  "status": "JOINED",
-  "deposit_locked_amount": 100000,
-  "joined_at": "2026-05-08T13:00:00+09:00"
+  "status": "APPLIED",
+  "deposit_locked_amount": 0,
+  "joined_at": null,
+  "applied_at": "2026-05-08T13:00:00+09:00"
 }
 ```
 
@@ -710,22 +675,135 @@ Error:
 - `CREW_NOT_FOUND`
 - `CREW_NOT_RECRUITING`
 - `CAPACITY_FULL`
-- `ALREADY_JOINED`
+- `ALREADY_APPLIED`
+- `APPLICATION_NOT_ALLOWED`
+
+정책:
+
+- 신규 신청은 `RECRUITING` 상태이면서 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
+- `recruitment_deadline` 이후에는 `CREW_RECRUITMENT_CLOSED` 또는 `CREW_NOT_RECRUITING` 계열 오류로 거절한다.
+- 같은 `member`는 같은 `crew`에 단 하나의 `crew_participant` row만 가질 수 있다 (`unique(crew_id, member_id)`). 한 번 생성된 row는 lifecycle 종료 후에도 재사용/재생성하지 않는다.
+- 진행 중 상태(`APPLIED`, `JOINED`)에서 동일 사용자가 신청 시도하면 `ALREADY_APPLIED`로 거절한다.
+- terminal 상태(`REJECTED`, `CANCELLED`, `EXPIRED`)에서 동일 사용자가 같은 방에 재신청 시도하면 `APPLICATION_NOT_ALLOWED`로 거절한다. MVP에서는 재참여/row 재사용/status 되돌리기를 허용하지 않는다.
+- `APPLIED` 상태는 보증금 lock 전이며 `deposit_locked_amount`는 `0` (필요 시 `null`)이다. capacity, 최소 인원 baseline, activation eligibility, frozen participant baseline, settlement 대상 어디에도 포함하지 않는다.
+- 보증금 lock과 `JOINED` 전이는 방장 승인 endpoint가 단일 트랜잭션으로 수행한다.
+
+### `DELETE /api/crews/{crewId}/participants/me`
+
+역할:
+
+- 본인의 `APPLIED` 신청을 취소한다.
+- 방장 승인 전(`APPLIED` 상태)에만 가능하다.
+
+Request:
+
+- body 없음
+
+Response `200 OK`:
+
+```json
+{
+  "crew_participant_id": 101,
+  "crew_id": 42,
+  "status": "CANCELLED",
+  "cancelled_at": "2026-05-08T14:00:00+09:00"
+}
+```
+
+Error:
+
+- `CREW_NOT_FOUND`
+- `PARTICIPANT_NOT_FOUND`
+- `APPLICATION_NOT_CANCELLABLE`
+
+정책:
+
+- 취소는 `APPLIED` 상태일 때만 허용한다. `JOINED`, `REJECTED`, `EXPIRED`, `CANCELLED`는 `APPLICATION_NOT_CANCELLABLE`로 거절한다.
+- 보증금 lock 전 상태이므로 환급/포인트 원장 변경이 발생하지 않는다.
+- 멱등성: 동일 사용자가 이미 `CANCELLED`된 신청에 대해 다시 호출하면 `APPLICATION_NOT_CANCELLABLE`을 반환한다. 동일 idempotency 응답을 원하면 클라이언트가 `204 No Content` polling 패턴을 별도로 처리한다.
+- `CANCELLED`는 pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다.
+
+### `POST /api/crews/{crewId}/applications/{crewParticipantId}/approve`
+
+역할:
+
+- 방장이 `APPLIED` 신청을 승인한다.
+- 승인 처리는 capacity 확인, 보증금 lock, `JOINED` 전이를 단일 트랜잭션으로 수행한다.
+
+Request:
+
+- body 없음
+
+Response `200 OK`:
+
+```json
+{
+  "crew_participant_id": 101,
+  "crew_id": 42,
+  "status": "JOINED",
+  "deposit_locked_amount": 100000,
+  "joined_at": "2026-05-08T15:00:00+09:00"
+}
+```
+
+Error:
+
+- `CREW_NOT_FOUND`
+- `PARTICIPANT_NOT_FOUND`
+- `FORBIDDEN_NOT_HOST`
+- `APPLICATION_NOT_APPROVABLE`
+- `CAPACITY_FULL`
 - `INSUFFICIENT_BALANCE`
 
 정책:
 
-- 신규 참여는 `RECRUITING` 상태이면서 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
-- `recruitment_deadline` 이후에는 `CREW_RECRUITMENT_CLOSED` 또는 `CREW_NOT_RECRUITING` 계열 오류로 거절한다.
-- 같은 `member`는 같은 방에 하나의 `participant`만 가질 수 있다.
-- 참여 lifecycle은 `APPLIED -> APPROVED_LOCK_PENDING -> JOINED`로 진행한다.
-- `APPROVED_LOCK_PENDING`은 capacity reservation만 의미하며, 아래 예치 Lock 트랜잭션이 성공해야 `JOINED`가 된다.
-- `JOINED` 전이에서는 아래 세 단계가 하나의 트랜잭션으로 함께 성공하거나 함께 롤백되어야 한다.
-  - `point_account.balance` 조건부 차감
-  - `crew_participant`의 JOINED 확정
-  - `CREW_DEPOSIT_LOCK point_history` 생성
-- 잔액 차감은 반드시 `WHERE balance >= deposit_amount` 조건부 update로 수행하고, row count가 `1`일 때만 성공으로 간주한다.
-- `INSUFFICIENT_BALANCE`는 잔액 부족뿐 아니라 동시 요청으로 조건부 update row count가 `0`이 된 경우도 포함한다.
+- 호출자는 해당 `crew.host_member_id`와 일치하는 사용자여야 한다. 아니면 `FORBIDDEN_NOT_HOST`.
+- 승인은 `APPLIED` 상태에서만 가능하다. `JOINED`, `REJECTED`, `CANCELLED`, `EXPIRED`는 `APPLICATION_NOT_APPROVABLE`로 거절한다.
+- 승인 트랜잭션 단계:
+  1. capacity 확인 (`JOINED` 수 < `crew.max_participants`)
+  2. `point_account.balance >= crew.deposit_amount` 조건부 차감 (`WHERE balance >= crew.deposit_amount`, row count `1`만 성공)
+  3. `CREW_DEPOSIT_LOCK point_history` insert, `idempotency_key = deposit:crew:{crewId}:participant:{crewParticipantId}`
+  4. `crew_participant.deposit_amount = crew.deposit_amount` snapshot
+  5. `crew_participant.status = JOINED`
+  6. `joined_at` 기록
+- 위 단계 중 하나라도 실패하면 `JOINED`로 전이하지 않는다. 별도 중간 상태를 만들지 않고, 신청자 `crew_participant.status`는 `APPLIED`로 유지하거나 승인 실패 응답으로 처리한다.
+- `INSUFFICIENT_BALANCE`는 신청자 잔액 부족 또는 동시 요청으로 조건부 update row count가 `0`이 된 경우다.
+- `CREW_DEPOSIT_LOCK point_history`는 본 승인 트랜잭션의 lock 성공 시점에 생성된다. 사용자 측 별도 deposit-lock endpoint는 제공하지 않는다.
+
+### `POST /api/crews/{crewId}/applications/{crewParticipantId}/reject`
+
+역할:
+
+- 방장이 `APPLIED` 신청을 거절한다.
+
+Request:
+
+- body 없음
+
+Response `200 OK`:
+
+```json
+{
+  "crew_participant_id": 101,
+  "crew_id": 42,
+  "status": "REJECTED",
+  "rejected_at": "2026-05-08T15:00:00+09:00"
+}
+```
+
+Error:
+
+- `CREW_NOT_FOUND`
+- `PARTICIPANT_NOT_FOUND`
+- `FORBIDDEN_NOT_HOST`
+- `APPLICATION_NOT_REJECTABLE`
+
+정책:
+
+- 호출자는 해당 `crew.host_member_id`와 일치해야 한다. 아니면 `FORBIDDEN_NOT_HOST`.
+- 거절은 `APPLIED` 상태에서만 가능하다. 다른 상태는 `APPLICATION_NOT_REJECTABLE`로 거절한다.
+- 보증금 lock 전 상태이므로 환급/포인트 원장 변경이 발생하지 않는다.
+- `REJECTED`는 pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다.
 
 ### `POST /api/crews/{crewId}/start` (Brownfield / removed from MVP active contract)
 
@@ -737,8 +815,8 @@ Error:
 Canonical replacement:
 
 - `start_at`에 시스템은 frozen eligibility를 평가한다.
-- activation eligibility는 `recruitment_deadline` 경과, `JOINED` participant 수 `min_participants` 이상, 승인+예치 Lock 완료, host의 시작 전 해체 없음으로 판단한다.
-- `APPROVED_LOCK_PENDING`은 capacity reservation만 의미하며 activation/minimum/frozen baseline에는 포함하지 않는다.
+- activation eligibility는 `recruitment_deadline` 경과, `JOINED` participant 수 `min_participants` 이상, host의 시작 전 해체 없음으로 판단한다. `JOINED`는 방장 승인과 보증금 lock이 모두 성공한 상태이므로 별도 lock 확인이 필요 없다.
+- `APPLIED`, `REJECTED`, `CANCELLED`, `EXPIRED`는 보증금 lock 전 상태이므로 activation/minimum/frozen baseline에는 포함하지 않는다.
 - 조건을 만족하면 `status = ACTIVE`, `activated_at = start_at`이 된다.
 - 조건을 만족하지 못하면 방은 시작 전 취소 정산 대상이 된다.
 - scheduler 실제 실행 시각은 운영 구현 상세이며 product authority는 `start_at`이다.
@@ -770,7 +848,7 @@ Error:
 정책:
 
 - 이 endpoint는 MVP active semantics로 고정하지 않는다.
-- `RECRUITING` 중 신청 취소/승인 취소는 별도 lifecycle 정렬 대상이며, `JOINED` frozen baseline과 구분한다.
+- `RECRUITING` 중 사용자 신청 취소는 `DELETE /api/crews/{crewId}/participants/me`로 처리하며 `APPLIED -> CANCELLED` 전이만 발생한다. `JOINED` frozen baseline과 구분한다.
 - `ACTIVE` 이후 withdrawal은 deferred이며, 정산에서는 frozen `JOINED` baseline과 resolved certification state를 소급 변경하지 않는다는 원칙을 우선한다.
 - 향후 withdrawal을 재도입하더라도 즉시 환급, final settlement mutation, point ledger 직접 변경으로 해석하면 안 된다.
 - 구현 가이드: MVP 공개 계약은 `WITHDRAW_NOT_ALLOWED` 단일 코드를 사용한다.
@@ -913,7 +991,7 @@ Error:
 - `certification_status = PENDING_REVIEW`는 업로드 직후 검수/판정 대기 상태다.
 - `certification_status`는 인증 피드 badge, dashboard projection, 알림 input에 쓰이는 resolved state이며 EXIF/hash raw signal이나 host moderation `decision_type`/`reject_reason_code`와 동일 axis로 해석하지 않는다.
 - `mission_log.failure_reason`은 인증 시점 실패 사유(system/timing axis)다.
-- `decision_type`, `reject_reason_code`, `reject_memo`는 호스트 검수자 결과 axis이며 시스템 `failure_reason`과 의미 vocabulary가 다르다. 자세한 사항은 §3.10/§3.11 참조.
+- `decision_type`, `reject_reason_code`, `reject_memo`는 호스트 검수자 결과 axis이며 시스템 `failure_reason`과 의미 vocabulary가 다르다. 자세한 사항은 §3.9/§3.10 참조.
 - POST 응답에서 `decision_type`, `reject_reason_code`, `reject_memo`는 검수가 일어나지 않은 시점에는 `null`이다. 검수 갱신은 별도 흐름이며 이 API는 검수 결과를 입력받지 않는다.
 - `settlement_item.calculation_reason`은 정산 시점 포함/제외 근거다.
 - MVP 인증 API에서 `OUT_OF_SCHEDULE`는 사용하지 않는다.
@@ -1803,13 +1881,14 @@ Response `200 OK`:
 - `available_balance`는 `point_account.balance`이며, 현재 사용 가능한 포인트 잔액만 의미한다.
 - `locked_balance`는 DB 컬럼이 아니라 API 응답에서만 제공하는 projection 필드다.
 - `locked_balance`는 정산 전 묶인 보증금 표시를 위한 UX 파생값이며, 포인트 원장의 source of truth가 아니다.
-- MVP 기준 `locked_balance`는 사용자의 양수 `crew_participant.deposit_amount`를 `crew`과 조인해 계산한다.
+- MVP 기준 `locked_balance`는 사용자의 `JOINED` 상태 `crew_participant.deposit_amount`를 `crew`과 조인해 계산한다. `APPLIED`/`REJECTED`/`CANCELLED`/`EXPIRED`는 보증금 lock 전 상태이므로 (`deposit_amount` `NULL` 또는 `0`) 합산 대상이 아니다.
 
 ```sql
 SELECT COALESCE(SUM(rp.deposit_amount), 0)
 FROM crew_participant rp
 JOIN crew mr ON mr.id = rp.crew_id
 WHERE rp.member_id = :memberId
+  AND rp.status = 'JOINED'
   AND rp.deposit_amount > 0
   AND mr.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')
 ```
@@ -1893,7 +1972,7 @@ Error:
 | 일반 정산 환급      | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                | `settlement:crew:{crewId}:type:{settlementType}:participant:{participantId}:refund` |
 | 시작 전 취소 환급   | `CREW_CANCELLED_REFUND`  | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                | `settlement:crew:{crewId}:type:{settlementType}:participant:{participantId}:cancel_refund` |
 
-`{participantId}` placeholder는 내부적으로 `crew_participant.id`를 가리킨다. API field로 직접 노출할 때는 `crewParticipantId`로 정렬한다. `{settlementType}`은 §3.9의 `daily_settlement_type` (`A` / `B` / `C`) 값이다.
+`{participantId}` placeholder는 내부적으로 `crew_participant.id`를 가리킨다. API field로 직접 노출할 때는 `crewParticipantId`로 정렬한다. `{settlementType}`은 §3.8의 `daily_settlement_type` (`A` / `B` / `C`) 값이다.
 
 
 ## 5.9 알림 / Android FCM / Inbox / SSE drift
@@ -2067,7 +2146,10 @@ RECRUITING --start_at eligibility failure cancellation batch--> CANCELLED
 ### 6.2 Participant
 
 ```text
-APPLIED -> APPROVED_LOCK_PENDING -> JOINED
+APPLIED --host approve + deposit lock 성공--> JOINED
+APPLIED --user cancel (DELETE /participants/me)--> CANCELLED
+APPLIED --host reject--> REJECTED
+APPLIED --시작 전까지 처리 안 됨--> EXPIRED
 WITHDRAWN / ACTIVE withdrawal: brownfield-deferred, not MVP active baseline authority
 ```
 
@@ -2087,7 +2169,7 @@ RUNNING
 
 ## 7. FE에서 바로 써야 하는 필드 설명
 
-- 방 화면은 `status`, `visibility`, `frequency_type`, `frequency_count`, `mission_schedule_days`, `deposit_amount`, `my_participation`을 기준으로 버튼 상태를 결정한다.
+- 방 화면은 `status`, `frequency_type`, `frequency_count`, `mission_schedule_days`, `deposit_amount`, `my_participation`을 기준으로 버튼 상태를 결정한다. `my_participation.status`(`APPLIED`/`JOINED`/`REJECTED`/`CANCELLED`/`EXPIRED`)에 따라 가입 신청/취소/대기 UX를 분기한다.
 - 계정/포인트 요약 화면은 `GET /api/points.available_balance`, `GET /api/points.locked_balance`, `GET /api/points.total_balance`를 기준으로 표시한다.
 - FE는 여러 방의 `my_participation.deposit_locked_amount`를 직접 합산해 계정 단위 잠금 잔액을 만들지 않고, `GET /api/points.locked_balance`를 표시한다.
 - `my_participation.deposit_locked_amount`는 방 상세의 해당 참여 보증금 표시용 필드이며, 계정 단위 `locked_balance`나 `total_balance`의 source of truth가 아니다.

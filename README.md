@@ -66,7 +66,7 @@
 - 72h grace는 pre-freeze correction window일 뿐이며, final 3 mission days는 즉시 freeze된다. Post-freeze mutation은 금지된다.
 - `NOTIFY-003`은 projection 기반 알림이며 final settlement guarantee가 아니다. 상세 event/API 문구는 `API-spec` 후속 propagation에서 정렬한다.
 - `point_history`는 authoritative append-only ledger이고, `point_account.balance`는 projection/cache layer다. 이 경계의 source of truth는 `ERD`다.
-- `APPROVED_LOCK_PENDING`은 capacity만 임시 예약하며 최소 인원 baseline/activation eligibility에 포함되지 않는다. Activation/min baseline은 `JOINED` participant만 센다.
+- 크루 참여 lifecycle 중 `APPLIED`는 보증금 lock 전 신청 상태이고, capacity/activation eligibility/minimum baseline/frozen baseline/settlement eligibility 어디에도 포함되지 않는다. 방장 승인 = 자동 보증금 lock trigger이며 단일 transaction 내 lock 성공 시 즉시 `JOINED`로 전이한다. Activation/min baseline은 `JOINED` participant만 센다.
 - EXIF/`image_hash`는 fraud/risk signal이며 인증/정산 authority가 아니다. `image_hash`는 서버가 S3 object에서 직접 계산한 SHA-256이고 클라이언트 제출 값을 신뢰하지 않는다.
 - FCM/알림 inbox는 non-authoritative UX hint다. delivery attempt나 read state를 settlement evidence/lifecycle authority로 끌어올리지 않는다.
 - `moderation_history`는 append-only audit trail이다. 기존 레코드를 수정/삭제하지 않으며, host moderation 결정도 mission_log 컬럼 update + history row append로만 진행한다. MVP에서 admin/correction workflow는 존재하지 않는다.
