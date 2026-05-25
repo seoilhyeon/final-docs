@@ -223,9 +223,9 @@ Unique / Index:
 
 - `CREW_DEPOSIT_LOCK`는 신청 생성 시 `PENDING` reserve가 성공했음을 남기는 append-only 원장 이벤트다. 별도 자산 이동 없이 `point_account.balance`(available)가 차감된다.
 - 차감된 금액은 해당 `crew_participant.deposit_amount`에 participant 단위 reserve/locked 금액 snapshot으로 기록된다. `PENDING`에서는 reserve, `LOCKED`에서는 activation/frozen baseline 후보 deposit으로 해석한다.
-- MVP에서 `point_account`의 현재값 컬럼은 현재 사용 가능 잔액 캐시인 `balance` 하나만 둔다. `reserved_balance`, `locked_balance`, `available_balance`는 저장 컬럼이 아니라 API projection이다.
-- 사용자별 묶인 금액은 `point_account`에 저장하지 않고, `crew_participant.deposit_amount`, `crew_participant.status`, `crew.status`를 이용해 API projection으로 계산한다.
-- MVP 기준 `GET /api/points.reserved_balance` projection은 `crew_participant.status = 'PENDING'`, `GET /api/points.locked_balance` projection은 `crew_participant.status = 'LOCKED'`이면서 양수 `deposit_amount`를 가진 참여 건 중 `crew.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')`인 방의 합계로 계산한다. `REJECTED`/`CANCELLED`/`EXPIRED`는 반환 완료 terminal 상태라 합산 대상이 아니다.
+- MVP에서 `point_account`의 현재값 컬럼은 현재 사용 가능 잔액 캐시인 `balance` 하나만 둔다. `available_balance`, `reserved_balance`, `active_locked_amount`, `settlement_pending_amount`, `locked_balance`는 저장 컬럼이 아니라 API/wallet projection이다. `settlement_pending_amount`는 DB/account column이 아니며 별도 settlement pending balance 컬럼도 두지 않는다.
+- 사용자별 묶인 금액은 `point_account`에 저장하지 않고, `crew_participant.deposit_amount`, `crew_participant.status`, `crew.status`, 필요 시 `settlement.status`를 이용해 API projection으로 계산한다.
+- MVP 기준 `GET /api/points.reserved_balance` projection은 `crew_participant.status = 'PENDING'` 합계다. `active_locked_amount`는 `LOCKED`이면서 진행/모집 중인 crew의 보증금, `settlement_pending_amount`는 종료 후 최종 정산 전 crew의 `LOCKED` 보증금이다. `locked_balance = active_locked_amount + settlement_pending_amount`이며, post-mission pre-settlement 금액도 MVP에서는 `locked_balance` 안에 남긴다. `REJECTED`/`CANCELLED`/`EXPIRED`는 반환 완료 terminal 상태라 합산 대상이 아니다.
 - MVP locked balance projection은 `LOCKED` baseline과 crew/settlement 상태를 기준으로 한다. `PENDING`은 capacity reservation과 reserved_balance에는 포함하지만 activation/minimum/frozen baseline이나 settlement baseline에는 포함하지 않는다. `WITHDRAWN`/active withdrawal은 brownfield/deferred reference이며 withdrawal wording이 즉시 환급 또는 final settlement mutation authority로 해석되면 안 된다.
 - 이 projection은 정산 전 UX 표시용이며 현재 환급 가능 금액, 출금 가능 여부, 분쟁 처리, 정산 결과 판단 기준이 아니다.
 - reserve 차감은 신청 생성 시 `WHERE balance >= deposit_amount` 조건을 포함한 조건부 update로 수행하고, row count가 `1`일 때만 성공으로 간주한다.
@@ -285,7 +285,7 @@ Unique / Index:
 | 포인트 충전         | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. |
 | 방 참여 보증금 잠금 | `CREW_DEPOSIT_LOCK`      | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
 | 일반 정산 환급      | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                                            |
-| 시작 전 취소 환급   | `CREW_CANCELLED_REFUND`  | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                                            |
+| PENDING reserve release | `CREW_CANCELLED_REFUND`  | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
 
 주의사항:
 
@@ -303,9 +303,9 @@ Unique / Index:
 - 동일 `idempotency_key`가 동일 payload로 다시 들어오면 기존 `point_history`를 재사용하거나 연결하고, 동일 키에 다른 payload가 들어오면 idempotency conflict로 처리한다.
 - 이벤트별 고정 규칙 예시는 아래와 같다.
   - 포인트 충전: `charge:{paymentKey}`
-  - 보증금 잠금: `deposit:crew:{crewId}:participant:{participantId}`
-  - 일반 정산 환급: `settlement:crew:{crewId}:type:{settlementType}:participant:{participantId}:refund`
-  - 취소형 정산 환급: `settlement:crew:{crewId}:type:{settlementType}:participant:{participantId}:cancel_refund`
+  - 보증금 reserve: `crew:{crewId}:participant:{participantId}:reserve`
+  - PENDING reserve release: `crew:{crewId}:participant:{participantId}:reserve-release`
+  - 일반 정산 환급: `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}`
 
 ### `crew`
 
@@ -424,6 +424,7 @@ Unique / Index:
 - `REJECTED`는 방장이 신청을 거절한 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
 - `CANCELLED`는 사용자가 승인 전 `PENDING` 상태에서 신청을 취소한 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
 - `EXPIRED`는 시작 전까지 처리되지 않아 자동 만료된 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
+- reserve release는 `crew_participant.id`당 한 번만 허용한다. terminal status 전이와 `CREW_CANCELLED_REFUND` 원장 생성은 같은 transaction에서 처리하며, 구현은 `released_point_history_id` 또는 `reserve_released_at` 같은 guard를 `crew_participant`에 두어 중복 release를 막는다.
 - 승인 후 lock 대기 상태(`APPROVED_LOCK_PENDING`)는 두지 않는다. 방장 승인은 `PENDING -> LOCKED` 상태 전이이며 추가 잔액 차감을 수행하지 않는다.
 - `WITHDRAWN`/active withdrawal/rejoin은 MVP active status가 아니다. 기존 row 재사용/withdrawal 재도입은 Phase 2/deferred brownfield reference다.
 - 보증금은 별도 계좌로 이동하지 않으며, `point_account.balance` projection/cache에서 차감되고 append-only `CREW_DEPOSIT_LOCK point_history`가 원장 이벤트로 남은 뒤 `crew_participant.deposit_amount`로 reserve/locked 상태를 표현한다.
@@ -846,8 +847,7 @@ Unique / Index:
 정산 계산 관련 입력 원칙:
 
 - `draw_key = SHA-256(crew_id + ":" + settlement_type + ":" + member_id)`은 non-payout 표시/설명 ordering 전용이다.
-- `point_history.idempotency_key = settlement:crew:{crewId}:type:{settlementType}:participant:{participantId}:refund`
-- `point_history.idempotency_key`는 이벤트별 고정 규칙을 따른다. 예: `charge:{paymentKey}`, `deposit:crew:{crewId}:participant:{participantId}`, `settlement:crew:{crewId}:type:{settlementType}:participant:{participantId}:refund`, `settlement:crew:{crewId}:type:{settlementType}:participant:{participantId}:cancel_refund`
+- `point_history.idempotency_key`는 이벤트별 고정 규칙을 따른다. 예: `charge:{paymentKey}`, `crew:{crewId}:participant:{participantId}:reserve`, `crew:{crewId}:participant:{participantId}:reserve-release`, `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}`
 - `draw_key`와 `idempotency_key` 모두 런타임 PK가 아니라 입력 기반 식별자를 사용한다.
 - `point_history.idempotency_key`는 `NOT NULL`이며, 이벤트 종류마다 재현 가능한 규칙으로 생성한다.
 - 동일 키 + 동일 payload는 기존 원장 재사용/연결 대상이고, 동일 키 + 다른 payload는 멱등성 충돌로 저장하지 않는다.

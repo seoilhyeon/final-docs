@@ -721,7 +721,7 @@ Error:
 정책:
 
 - 취소는 `PENDING` 상태일 때만 허용한다. `LOCKED`, `REJECTED`, `EXPIRED`, `CANCELLED`는 `APPLICATION_NOT_CANCELLABLE`로 거절한다.
-- 기존 reserve는 `CREW_CANCELLED_REFUND` 계열 point_history로 반환하고, `point_account.balance`를 같은 금액만큼 복구한다.
+- 기존 reserve는 `CREW_CANCELLED_REFUND` 계열 point_history로 반환하고, `point_account.balance`를 같은 금액만큼 복구한다. terminal 전이와 reserve release는 같은 transaction에서 처리하며, release는 `crew_participant.id`당 한 번만 허용한다. 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
 - 멱등성: 동일 사용자가 이미 `CANCELLED`된 신청에 대해 다시 호출하면 `APPLICATION_NOT_CANCELLABLE`을 반환한다. 동일 idempotency 응답을 원하면 클라이언트가 `204 No Content` polling 패턴을 별도로 처리한다.
 - `CANCELLED`는 pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다.
 
@@ -800,7 +800,7 @@ Error:
 
 - 호출자는 해당 `crew.host_member_id`와 일치해야 한다. 아니면 `FORBIDDEN_NOT_HOST`.
 - 거절은 `PENDING` 상태에서만 가능하다. 다른 상태는 `APPLICATION_NOT_REJECTABLE`로 거절한다.
-- 기존 reserve는 `CREW_CANCELLED_REFUND` 계열 point_history로 반환하고, `point_account.balance`를 같은 금액만큼 복구한다.
+- 기존 reserve는 `CREW_CANCELLED_REFUND` 계열 point_history로 반환하고, `point_account.balance`를 같은 금액만큼 복구한다. terminal 전이와 reserve release는 같은 transaction에서 처리하며, release는 `crew_participant.id`당 한 번만 허용한다. 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
 - `REJECTED`는 terminal pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다. 동일 crew 재신청은 MVP에서 허용하지 않는다.
 
 ### `POST /api/crews/{crewId}/start` (Brownfield / removed from MVP active contract)
@@ -1869,6 +1869,8 @@ Response `200 OK`:
 {
   "available_balance": 350000,
   "reserved_balance": 100000,
+  "active_locked_amount": 60000,
+  "settlement_pending_amount": 40000,
   "locked_balance": 100000,
   "total_balance": 550000,
   "updated_at": "2026-05-07T09:30:00+09:00"
@@ -1878,9 +1880,9 @@ Response `200 OK`:
 정책:
 
 - `available_balance`는 `point_account.balance`이며, `PENDING` reserve 또는 `LOCKED` deposit으로 이미 차감된 뒤 현재 사용 가능한 포인트 잔액만 의미한다.
-- `reserved_balance`와 `locked_balance`는 DB 컬럼이 아니라 API 응답에서만 제공하는 projection 필드다.
-- `reserved_balance`는 승인 전 `PENDING` reserve 표시용이고, `locked_balance`는 승인 후 `LOCKED` deposit 표시용 UX 파생값이다. 둘 다 포인트 원장의 source of truth가 아니다.
-- MVP 기준 `reserved_balance`는 사용자의 `PENDING` 상태 `crew_participant.deposit_amount`, `locked_balance`는 `LOCKED` 상태 `crew_participant.deposit_amount`를 `crew`과 조인해 계산한다. `REJECTED`/`CANCELLED`/`EXPIRED`는 반환 완료 terminal 상태라 합산 대상이 아니다.
+- `reserved_balance`, `active_locked_amount`, `settlement_pending_amount`, `locked_balance`는 DB 컬럼이 아니라 API 응답에서만 제공하는 wallet/projection 필드다. `settlement_pending_amount`는 DB/account column이 아니며 별도 settlement pending balance 컬럼도 두지 않는다.
+- `reserved_balance`는 승인 전 `PENDING` reserve 표시용이고, `active_locked_amount`는 진행/모집 중 `LOCKED` deposit, `settlement_pending_amount`는 종료 후 최종 정산 전 `LOCKED` deposit 표시용이다. `locked_balance = active_locked_amount + settlement_pending_amount`다. 모두 포인트 원장의 source of truth가 아니다.
+- MVP 기준 `reserved_balance`는 사용자의 `PENDING` 상태 `crew_participant.deposit_amount`, `locked_balance` 계열은 `LOCKED` 상태 `crew_participant.deposit_amount`를 `crew`과 조인해 계산한다. `REJECTED`/`CANCELLED`/`EXPIRED`는 반환 완료 terminal 상태라 합산 대상이 아니다.
 
 ```sql
 SELECT rp.status, COALESCE(SUM(rp.deposit_amount), 0) AS amount
@@ -1891,12 +1893,12 @@ WHERE rp.member_id = :memberId
   AND rp.deposit_amount > 0
   AND mr.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')
 GROUP BY rp.status
--- response layer maps PENDING -> reserved_balance, LOCKED -> locked_balance
+-- response layer maps PENDING -> reserved_balance; LOCKED + RECRUITING/ACTIVE -> active_locked_amount; LOCKED + CLOSED pre-SUCCEEDED -> settlement_pending_amount; locked_balance = active_locked_amount + settlement_pending_amount
 ```
 
 - `RECRUITING`은 신청/승인 후 아직 시작 전이지만 보증금이 reserve 또는 locked 상태다.
 - `ACTIVE`는 미션 진행 중이므로 보증금이 잠겨 있는 상태다.
-- `CLOSED`는 정산 완료 전까지 보증금이 잠겨 있는 것으로 표시한다.
+- `CLOSED`는 정산 완료 전까지 `settlement_pending_amount`로 표시하며, 이 금액은 `locked_balance`에 포함한다.
 - `WITHDRAWN`/ACTIVE withdrawal은 brownfield-deferred다. MVP locked balance projection은 frozen `LOCKED` baseline과 settlement status를 기준으로 해석한다.
 - `Settlement.status = SUCCEEDED` 이후에는 해당 방의 보증금 lock이 해제된 것으로 본다.
 - 다만 MVP projection은 settlement 조인을 강제하지 않고 `crew.status` 기반으로 시작한다. 따라서 `CLOSED` 포함은 정산 전 잠금 표시를 위한 근사값이며, 더 정확한 정산 상태 기반 제외 조건은 Settlement 조회/정산 구현 단계에서 보강할 수 있다.
@@ -1969,9 +1971,9 @@ Error:
 | 도메인 동작         | `transaction_type`       | `reference_type`   | `reference_id` 규칙                                                                                                 | `idempotency_key` 예시 |
 | ------------------- | ------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | 포인트 충전         | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. | `charge:{paymentKey}` |
-| 크루 참여 보증금 잠금 | `CREW_DEPOSIT_LOCK`      | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `deposit:crew:{crewId}:participant:{participantId}` |
-| 일반 정산 환급      | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                | `settlement:crew:{crewId}:type:{settlementType}:participant:{participantId}:refund` |
-| 시작 전 취소 환급   | `CREW_CANCELLED_REFUND`  | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                | `settlement:crew:{crewId}:type:{settlementType}:participant:{participantId}:cancel_refund` |
+| 크루 참여 보증금 reserve | `CREW_DEPOSIT_LOCK`      | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `crew:{crewId}:participant:{participantId}:reserve` |
+| PENDING reserve release | `CREW_CANCELLED_REFUND`  | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `crew:{crewId}:participant:{participantId}:reserve-release` |
+| 일반 정산 환급      | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                | `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}` |
 
 `{participantId}` placeholder는 내부적으로 `crew_participant.id`를 가리킨다. API field로 직접 노출할 때는 `crewParticipantId`로 정렬한다. `{settlementType}`은 §3.8의 `daily_settlement_type` (`A` / `B` / `C`) 값이다.
 
@@ -2171,7 +2173,7 @@ RUNNING
 ## 7. FE에서 바로 써야 하는 필드 설명
 
 - 방 화면은 `status`, `frequency_type`, `frequency_count`, `mission_schedule_days`, `deposit_amount`, `my_participation`을 기준으로 버튼 상태를 결정한다. `my_participation.status`(`PENDING`/`LOCKED`/`REJECTED`/`CANCELLED`/`EXPIRED`)에 따라 가입 신청/취소/대기 UX를 분기한다.
-- 계정/포인트 요약 화면은 `GET /api/points.available_balance`, `GET /api/points.reserved_balance`, `GET /api/points.locked_balance`, `GET /api/points.total_balance`를 기준으로 표시한다.
+- 계정/포인트 요약 화면은 `GET /api/points.available_balance`, `GET /api/points.reserved_balance`, `GET /api/points.active_locked_amount`, `GET /api/points.settlement_pending_amount`, `GET /api/points.locked_balance`, `GET /api/points.total_balance`를 기준으로 표시한다.
 - FE는 여러 방의 `my_participation.deposit_reserved_amount` / `deposit_locked_amount`를 직접 합산해 계정 단위 reserve/lock 잔액을 만들지 않고, `GET /api/points`의 projection 필드를 표시한다.
 - `my_participation.deposit_reserved_amount`와 `my_participation.deposit_locked_amount`는 방 상세의 해당 참여 보증금 표시용 필드이며, 계정 단위 `reserved_balance`, `locked_balance`, `total_balance`의 source of truth가 아니다.
 - `reserved_balance`, `locked_balance`, `total_balance`는 UX 표시용이며, 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단 기준으로 사용하면 안 된다.

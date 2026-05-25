@@ -520,7 +520,7 @@ MVP `calculation_reason` vocabulary:
 - 모든 포인트 변경은 반드시 `point_history`를 통해서만 발생한다.
 - `point_history`는 항상 `member_id` 기준으로 기록되며, 정산 계산 결과를 실제 계정 잔액 변화로 반영하는 금액 source of truth다.
 - `PointAccount` 또는 `MemberPoint` 같은 현재 잔액 테이블이 있다면, 이 값은 항상 `사용 가능한 포인트 잔액`만 나타내는 재계산 가능한 캐시다.
-- 현재 MVP/brownfield 설명은 잔액 캐시에 `pending_balance`, `waiting_balance`, `locked_balance` 같은 대기·잠금 상태 컬럼을 분리하지 않는 형태를 전제로 설명한다. 이는 physical balance shape를 새로 freeze하는 문장이 아니다.
+- MVP balance model은 `available_balance`(즉시 사용 가능), `reserved_balance`(`PENDING` 신청 reserve), `locked_balance`(`LOCKED` 크루 보증금)로 노출한다. `settlement_pending_amount`는 종료 후 최종 정산 전 `LOCKED` 금액을 보여주는 wallet/projection 응답 필드이며 DB/account column이 아니다. 별도 settlement pending balance 컬럼은 두지 않는다.
 - 현재 잔액 캐시와 `point_history` 원장 재계산값이 다르면 `point_history`를 source of truth로 삼고, 원인 조사 후 잔액 캐시를 보정하거나 재생성한다.
 - 현재 MVP/brownfield 설명에서는 보증금이 별도의 계좌로 이동하지 않고, 참여 시점에 `point_account.balance`에서 차감되어 `crew_participant.deposit_amount`로 잠긴 상태로 관리된다. 이 표현의 semantic 핵심은 participant 단위 잠금 금액과 원장 추적이지, physical balance column 확정이 아니다.
 - `CREW_DEPOSIT_LOCK`는 자산 이동이 아니라 기존 포인트를 사용 불가 상태로 전환하는 이벤트다.
@@ -531,9 +531,9 @@ MVP `calculation_reason` vocabulary:
 - 동일 이벤트는 항상 동일한 `idempotency_key`를 생성해야 하며, `settlement.id` 같은 런타임 상태값에 의존하지 않는다.
 - 이벤트별 고정 규칙 예시는 아래와 같다.
   - 포인트 충전: `charge:{paymentKey}`
-  - 보증금 잠금: `deposit:room:{roomId}:participant:{participantId}`
-  - 일반 정산 환급: `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:refund`
-  - 취소형 정산 환급: `settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cancel_refund`
+  - 보증금 reserve: `crew:{crewId}:participant:{participantId}:reserve`
+  - PENDING reserve release: `crew:{crewId}:participant:{participantId}:reserve-release`
+  - 일반 정산 환급: `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}`
 - `POINT_CHARGE`의 API field `payment_id`는 TossPayments `paymentKey`를 의미한다.
 - `orderId`는 confirm 검증과 로그 상관관계 추적용이며 `point_history.idempotency_key`에 사용하지 않는다.
 - 동일한 `paymentKey`는 반드시 하나의 충전 이벤트만 의미해야 하며, 재사용되거나 중복 발급되어서는 안 된다.
@@ -553,16 +553,17 @@ MVP `calculation_reason` vocabulary:
 - `point_account`는 `member`와 분리해 사용자 식별·인증 책임과 포인트 잔액 갱신 책임을 나눈다. 현재 문서의 `balance` 표현은 사용 가능 잔액 캐시를 설명하는 brownfield/MVP observation이며, 향후 physical balance shape 결정 권한이 아니다.
 - 크루 참여 시 보증금은 별도 자산으로 이동하지 않고, `point_account.balance`에서 차감되어 해당 `crew_participant.deposit_amount`에 participant 단위 잠금 금액으로 기록된다.
 - 보증금 잠금 상태는 `point_account.locked_balance`가 아니라 `balance` 차감과 `crew_participant.deposit_amount` 기록으로 표현한다.
-- 사용자에게 보여줄 `GET /api/points.locked_balance`는 정산 전 참여 보증금 합계를 API projection으로 제공할 수 있다.
+- 사용자에게 보여줄 `GET /api/points.locked_balance`는 `active_locked_amount + settlement_pending_amount`로 계산되는 API projection이다. `active_locked_amount`는 모집/진행 중 crew의 `LOCKED` 금액, `settlement_pending_amount`는 종료 후 최종 정산 전 crew의 `LOCKED` 금액이다.
 - 이 projection은 UX 표시용이며 정산 계산, 포인트 원장, 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단의 source of truth가 아니다.
-- MVP projection은 `crew_participant.deposit_amount`와 `mission_room.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')`를 기준으로 시작하며, settlement 조인을 강제하지 않는다.
-- `CLOSED` 포함은 정산 완료 전까지 잠겨 있을 것으로 기대되는 보증금 표시를 위한 근사값이다. `Settlement.status = SUCCEEDED` 이후 lock 해제 여부를 더 정확히 제외하는 조건은 Settlement 조회/정산 구현 단계에서 보강할 수 있다.
+- MVP projection은 `crew_participant.deposit_amount`와 `crew.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')`를 기준으로 시작하며, settlement 조인을 강제하지 않는다.
+- `CLOSED` 포함은 post-mission pre-settlement 금액을 `settlement_pending_amount`로 보여주되 `locked_balance` 안에 남기기 위한 근사값이다. `Settlement.status = SUCCEEDED` 이후 lock 해제 여부를 더 정확히 제외하는 조건은 Settlement 조회/정산 구현 단계에서 보강할 수 있다.
 - 정산 계산의 입력 금액은 여전히 정산 대상 participant의 `crew_participant.deposit_amount` 합계다.
 - 보증금 잠금은 `point_account`에 대한 조건부 update로 수행한다. 즉, `WHERE balance >= deposit_amount` 조건을 포함해 잔액이 충분할 때만 차감한다.
 - 이 update의 row count가 `1`일 때만 잠금 성공으로 간주하고, `0`이면 동시 요청 또는 잔액 부족으로 보고 참여를 실패 처리한다.
 - 보증금 잠금 처리, `crew_participant` 생성, `CREW_DEPOSIT_LOCK` 원장 생성은 반드시 하나의 트랜잭션으로 처리한다.
 - 권장 순서는 `point_account.balance` 조건부 차감 -> `crew_participant` 생성 및 `deposit_amount` 반영 -> `CREW_DEPOSIT_LOCK point_history` 생성이다.
 - 위 세 단계 중 하나라도 실패하면 전체 롤백한다. 잔액만 차감되고 participant가 생성되지 않거나, participant만 생기고 원장이 누락되는 상태를 허용하지 않는다.
+- `PENDING -> CANCELLED/REJECTED/EXPIRED` terminal 전이와 reserve release는 같은 transaction에서 처리한다. reserve release는 `crew_participant.id`당 한 번만 허용하며, 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
 - ACTIVE withdrawal은 MVP active semantics가 아니라 brownfield/deferred다. 향후 재도입하더라도 `deposit_amount` 즉시 환급이나 frozen settlement input 변경으로 해석하지 않는다.
 - 최종 정산 또는 취소 환급이 일어날 때만 `point_history`를 통해 `balance`가 증가한다.
 - 운영 검증이나 복구 중 `point_account.balance`가 `point_history` 기반 재계산값과 다르면 `point_history`를 기준으로 캐시를 복구한다.
@@ -761,16 +762,16 @@ ordering_key = stable domain input(room_id, participant_id/member_id, event_id �
 
 ```text
 charge:{paymentKey}
-deposit:room:{roomId}:participant:{participantId}
-settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:refund
-settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cancel_refund
+crew:{crewId}:participant:{participantId}:reserve
+crew:{crewId}:participant:{participantId}:reserve-release
+crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}
 ```
 
 원칙:
 
 - 모든 포인트 이벤트는 `idempotency_key`가 필수고, 이벤트 타입별 생성 규칙을 고정한다.
 - `settlement.id`는 실행 시 생성되는 PK이므로 `idempotency_key` 구성값으로 쓰지 않는다.
-- `room_id`, `settlement_type`, `participant_id`처럼 입력 기반 식별자를 사용해 재시도, replay/audit 테스트, 데이터 이관 상황에서도 같은 키가 재현되도록 한다.
+- `crew_id`, `settlement_id`, `participant_id`처럼 입력 기반 식별자를 사용해 재시도, replay/audit 테스트, 데이터 이관 상황에서도 같은 키가 재현되도록 한다.
 - `participant`는 물리 삭제하지 않고 같은 방 재참여도 지원하지 않으므로, 같은 정산 대상에 대한 `participant_id`는 생명주기 동안 안정적으로 유지된다.
 - 이 규칙은 non-payout stable ordering과 같은 철학을 따른다. 즉, 런타임 생성값이 아니라 동일 입력이면 동일 결과가 나와야 한다.
 - 동일 이벤트는 항상 동일한 `idempotency_key`를 사용한다.
@@ -1166,7 +1167,7 @@ total_remainder_amount = 0
 - `TS-03C` reserve 시 사용 가능 잔액 음수 방지
   기대 결과: 신청 생성 transaction 내 `point_account.balance >= deposit_amount` 조건부 update의 row count가 `1`일 때만 reserve가 성공하고, 동시 신청 또는 잔액 부족으로 row count가 `0`이면 신청 transaction 전체가 rollback된다.
 - `TS-03D` 승인 전 신청 취소/거절/만료 환급
-  기대 결과: `PENDING` 신청자는 `DELETE /api/crews/{crewId}/participants/me`로 직접 취소할 수 있고 상태가 `CANCELLED`로 전이되며 reserve 금액이 취소 환급 원장으로 반환된다. `REJECTED`/`EXPIRED`도 동일하게 reserve를 반환하고, `LOCKED` 이후에는 취소가 reject된다.
+  기대 결과: `PENDING` 신청자는 `DELETE /api/crews/{crewId}/participants/me`로 직접 취소할 수 있고 상태가 `CANCELLED`로 전이되며 reserve 금액이 취소 환급 원장으로 반환된다. `REJECTED`/`EXPIRED`도 동일하게 reserve를 반환하고, `LOCKED` 이후에는 취소가 reject된다. terminal 전이와 reserve release는 같은 transaction이며 release는 `crew_participant.id`당 한 번만 허용한다.
 - `TS-04` non-LOCKED 인증 요청 차단
   기대 결과: `participant.status != LOCKED`이면 인증 API가 reject된다.
 - `TS-04A` `ACTIVE` 이후 신규 참여 불가
@@ -1216,7 +1217,7 @@ total_remainder_amount = 0
 - `TS-14D` `point_account.balance`와 `point_history` 재계산값이 불일치할 때 원장 기준으로 복구되는지
   기대 결과: 운영 검증은 `point_history`를 source of truth로 삼아 불일치 원인을 기록하고, `point_account.balance` 캐시를 원장 재계산값으로 보정한다.
 - `TS-15` 배치 재시도 시 `point_history.idempotency_key`로 중복 지급이 차단되는지
-  기대 결과: 같은 `room_id`, `settlement_type`, `participant_id` 입력이면 같은 `idempotency_key`가 재사용되고, 동일 payload duplicate는 기존 원장 재사용/연결로 수렴하며, 다른 payload duplicate는 idempotency conflict로 실패한다.
+  기대 결과: `crew:{crewId}:participant:{participantId}:reserve`, `crew:{crewId}:participant:{participantId}:reserve-release`, `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}` 규칙으로 같은 입력이면 같은 `idempotency_key`가 재사용되고, 동일 payload duplicate는 기존 원장 재사용/연결로 수렴하며, 다른 payload duplicate는 idempotency conflict로 실패한다.
 - `TS-15A` `point_history`는 존재하지만 `settlement_item.point_history_id`만 누락된 partial 상태를 안전하게 복구하는지
   기대 결과: 해당 participant는 이미 지급 완료로 간주되고 새 환급 원장은 생성되지 않으며, 관리자 API 또는 배치가 기존 `point_history`를 조회해 FK만 연결한 뒤 전체 연결이 완료되면 `Settlement.status`가 `SUCCEEDED`로 전이된다.
 - `TS-16` 취소형 정산과 일반 정산이 같은 조회 API 구조로 반환되는지
