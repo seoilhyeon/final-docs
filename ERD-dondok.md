@@ -4,6 +4,7 @@
 
 - [PRD-dondok.md](./PRD-dondok.md)
 - [Settlement-design.md](./Settlement-design.md)
+- [Implementation-guardrails.md](./Implementation-guardrails.md)
 
 ## 1. ERD 설계 원칙
 
@@ -13,7 +14,7 @@
 - `crew`는 크루 모집과 진행의 루트 aggregate다. `crew_participant`, `mission_rule`, `mission_schedule_day`가 여기에 소속된다.
 - `mission_log`는 `crew_participant`의 인증 기록이다. `Settlement.status = SUCCEEDED` 전 계산 입력으로 이 로그와 참여자 상태를 다시 읽는다.
 - `settlement`는 `crew` 종료 이후의 정산 aggregate다. `settlement_item`은 참여자별 계산 스냅샷을 가지며, 성공 정산 이후 운영/분쟁/조회 기준이 된다.
-- `point_history`는 포인트 원장 aggregate이자 금액 source of truth다. 사용 가능 잔액의 증감과 보증금 잠금/환급 반영을 기록하고, `point_account.balance`는 이 원장에서 재계산 가능한 캐시로 둔다.
+- `point_history`는 포인트 원장 aggregate이자 금액 source of truth다. 사용 가능 잔액의 증감과 보증금 reserve/release/refund 반영을 기록하고, `point_account.available_balance` / `reserved_balance` / `locked_balance`는 이 원장에서 재계산 가능한 캐시로 둔다.
 - `total_locked_amount` 같은 정산 집계 스냅샷은 `point_account`나 `point_history` 재합산이 아니라 `crew_participant.deposit_amount` 기준으로 고정한다.
 
 ### 1.2 정산 원천 데이터
@@ -22,14 +23,14 @@
 - `settlement`와 `settlement_item`은 원천 로그를 다시 계산한 결과와 근거를 남기는 스냅샷이다.
 - Replay는 historical semantic truth reconstruction이다. `algorithm_version`, frozen participant baseline, deposit snapshot, recognized success counts, all-fail/remainder policy, cadence interpretation, timezone/cutoff semantics, lifecycle cutoff semantics, effective moderation state, append-only moderation chain reference, reason-code mapping version을 설명 가능하게 보존해야 한다.
 - `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item`과 연결된 `point_history`다. 이후 `MissionLog` 기반 replay는 감사/디버깅 검증용이지 지급 결과를 대체하거나 변경하는 기준이 아니다.
-- 현재 기준 지분율/projection, 통계성 캐시, `point_account.balance`는 source of truth가 아니다. 필요해도 정산 계산이나 분쟁 판단의 최종 기준으로 쓰지 않는다.
+- 현재 기준 지분율/projection, 통계성 캐시, `point_account` balance cache는 source of truth가 아니다. 필요해도 정산 계산이나 분쟁 판단의 최종 기준으로 쓰지 않는다.
 
 ### 1.3 Canonical Freeze v1 데이터 경계
 
 - Host moderation authority는 settlement authority가 아니다. 방장 검수/조정 이력은 정산 입력을 설명할 수는 있어도 freeze 이후의 정산/일별 결과를 직접 수정하는 권한으로 모델링하지 않는다.
 - 72h grace는 pre-freeze certification review/correction window다. 최종 3일 미션 결과는 grace 없이 즉시 freeze되며, post-freeze hidden mutation은 금지된다. Support correction은 별도 운영 의미 후보이며 settlement snapshot/ledger overwrite로 모델링하지 않는다.
 - `NOTIFY-003`은 projection 기반 알림이며 final settlement guarantee가 아니다. ERD에서는 알림을 정산 source of truth로 모델링하지 않는다. 상세 event contract는 `API-spec`의 projection boundary를 따른다.
-- `point_history`는 authoritative append-only ledger이고, `point_account.balance`는 `point_history`에서 재계산 가능한 projection/cache layer다. 불일치 시 원장 기준으로 원인을 조사하고 캐시를 보정한다.
+- `point_history`는 authoritative append-only ledger이고, `point_account` balance cache는 `point_history`에서 재계산 가능한 projection/cache layer다. 불일치 시 원장 기준으로 원인을 조사하고 캐시를 보정한다.
 - 최소 인원 baseline, activation eligibility, frozen participant baseline에는 `LOCKED` participant만 포함한다. `PENDING`은 capacity reservation과 reserve balance projection에는 포함하지만 baseline/activation/settlement 대상이 아니다. `REJECTED`/`CANCELLED`/`EXPIRED`는 terminal 상태다.
 - Scheduler/runtime 실행 지연은 audit/recovery fact이며 lifecycle authority가 아니다. `start_at`, crew timezone, daily cutoff, mission period end 같은 scheduled semantic anchor가 eligibility와 cutoff의 기준이다.
 - Authoritative moderation persistence는 effective state, transition, reason-code, actor, timestamp, append-only chain reference를 남기는 transition ledger 성격이다. Human memo/support note/UX wording/operational comment는 non-authoritative context로 분리한다.
@@ -47,6 +48,16 @@
 - 정산 아이템 중복 생성은 `unique(settlement_id, crew_participant_id)`로 막는다.
 - 포인트 중복 반영은 `unique(point_history.idempotency_key)`로 막는다.
 - 분산 락은 보조 수단이고, 최종 방어선은 DB unique와 조건부 update다.
+
+### 1.6 MVP schema implementation policy
+
+- 모든 primary key는 `BIGINT` auto increment를 사용한다.
+- 모든 금액 컬럼은 `BIGINT`만 사용한다.
+- FK delete policy는 money/audit/entity 참조에서 `RESTRICT` / `NO ACTION`을 사용한다.
+- Enum은 persistence에서 `STRING`으로 저장한다.
+- 표준 audit column은 `created_at`, `updated_at`이다.
+- `point_account`, `crew_participant`, `settlement`는 `version` 기반 optimistic locking을 둔다.
+- money/audit entity에는 soft delete를 사용하지 않는다.
 
 ## 2. 테이블 목록 요약
 
@@ -188,20 +199,23 @@ Unique / Index:
 
 역할:
 
-- 현재 사용 가능한 포인트 잔액을 빠르게 조회하기 위한 현재값 캐시 테이블이다.
-- `point_account`를 `member`와 분리하는 이유는 사용자 식별·인증 정보와 포인트 잔액 갱신 책임을 분리하기 위해서다.
-- 실제 포인트 source of truth는 append-only `point_history`이며, `point_account.balance`는 `point_history`에서 재계산 가능한 projection/cache layer다.
-- 보증금은 별도 계좌로 이동하지 않고, `balance`에서 차감된 뒤 `crew_participant.deposit_amount`로 잠긴 상태를 표현한다.
+- 사용자별 포인트 balance bucket의 현재값 캐시 테이블이다.
+- 실제 포인트 source of truth는 append-only `point_history`이며, `point_account`는 원장에서 재계산 가능한 cache/source layer다.
+- MVP에서 persisted balance column은 `available_balance`, `reserved_balance`, `locked_balance` 세 개다.
+- `settlement_pending_amount`는 wallet/API projection field이며 DB/account column이 아니다. `settlement_pending_balance` 컬럼은 두지 않는다.
 
 주요 컬럼:
 
-| 컬럼         | 타입 제안     | nullable | 설명                |
-| ------------ | ------------- | -------- | ------------------- |
-| `id`         | `BIGINT`      | N        | 계정 PK             |
-| `member_id`  | `BIGINT`      | N        | 회원 FK             |
-| `balance`    | `BIGINT`      | N        | 현재 사용 가능 잔액 |
-| `created_at` | `DATETIME(6)` | N        | 생성 시각           |
-| `updated_at` | `DATETIME(6)` | N        | 수정 시각           |
+| 컬럼                 | 타입 제안      | nullable | 설명                                      |
+| -------------------- | -------------- | -------- | ----------------------------------------- |
+| `id`                 | `BIGINT`       | N        | 계정 PK, auto increment                   |
+| `member_id`          | `BIGINT`       | N        | 회원 FK                                   |
+| `available_balance`  | `BIGINT`       | N        | 즉시 사용 가능한 잔액                     |
+| `reserved_balance`   | `BIGINT`       | N        | `PENDING` 신청 reserve 총액               |
+| `locked_balance`     | `BIGINT`       | N        | `LOCKED` 크루 보증금 총액 cache/source    |
+| `version`            | `BIGINT`       | N        | optimistic locking version                |
+| `created_at`         | `DATETIME(6)`  | N        | 생성 시각                                 |
+| `updated_at`         | `DATETIME(6)`  | N        | 수정 시각                                 |
 
 PK:
 
@@ -209,7 +223,7 @@ PK:
 
 FK:
 
-- `member_id -> member.id`
+- `member_id -> member.id` (`RESTRICT` / `NO ACTION`)
 
 Unique / Index:
 
@@ -221,43 +235,37 @@ Unique / Index:
 
 주의사항:
 
-- `CREW_DEPOSIT_LOCK`는 신청 생성 시 `PENDING` reserve가 성공했음을 남기는 append-only 원장 이벤트다. 별도 자산 이동 없이 `point_account.balance`(available)가 차감된다.
-- 차감된 금액은 해당 `crew_participant.deposit_amount`에 participant 단위 reserve/locked 금액 snapshot으로 기록된다. `PENDING`에서는 reserve, `LOCKED`에서는 activation/frozen baseline 후보 deposit으로 해석한다.
-- MVP에서 `point_account`의 현재값 컬럼은 현재 사용 가능 잔액 캐시인 `balance` 하나만 둔다. `available_balance`, `reserved_balance`, `active_locked_amount`, `settlement_pending_amount`, `locked_balance`는 저장 컬럼이 아니라 API/wallet projection이다. `settlement_pending_amount`는 DB/account column이 아니며 별도 settlement pending balance 컬럼도 두지 않는다.
-- 사용자별 묶인 금액은 `point_account`에 저장하지 않고, `crew_participant.deposit_amount`, `crew_participant.status`, `crew.status`, 필요 시 `settlement.status`를 이용해 API projection으로 계산한다.
-- MVP 기준 `GET /api/points.reserved_balance` projection은 `crew_participant.status = 'PENDING'` 합계다. `active_locked_amount`는 `LOCKED`이면서 진행/모집 중인 crew의 보증금, `settlement_pending_amount`는 종료 후 최종 정산 전 crew의 `LOCKED` 보증금이다. `locked_balance = active_locked_amount + settlement_pending_amount`이며, post-mission pre-settlement 금액도 MVP에서는 `locked_balance` 안에 남긴다. `REJECTED`/`CANCELLED`/`EXPIRED`는 반환 완료 terminal 상태라 합산 대상이 아니다.
-- MVP locked balance projection은 `LOCKED` baseline과 crew/settlement 상태를 기준으로 한다. `PENDING`은 capacity reservation과 reserved_balance에는 포함하지만 activation/minimum/frozen baseline이나 settlement baseline에는 포함하지 않는다. `WITHDRAWN`/active withdrawal은 brownfield/deferred reference이며 withdrawal wording이 즉시 환급 또는 final settlement mutation authority로 해석되면 안 된다.
-- 이 projection은 정산 전 UX 표시용이며 현재 환급 가능 금액, 출금 가능 여부, 분쟁 처리, 정산 결과 판단 기준이 아니다.
-- reserve 차감은 신청 생성 시 `WHERE balance >= deposit_amount` 조건을 포함한 조건부 update로 수행하고, row count가 `1`일 때만 성공으로 간주한다.
-- reserve 처리, `crew_participant(PENDING)` 생성, `CREW_DEPOSIT_LOCK point_history` 기록은 반드시 하나의 트랜잭션으로 처리한다.
-- 권장 순서는 `point_account.balance` 조건부 차감 -> `crew_participant(PENDING)` 생성 및 `deposit_amount` 반영 -> `CREW_DEPOSIT_LOCK point_history` 생성이다.
-- 위 세 단계 중 하나라도 실패하면 전체 롤백한다.
-- `Settlement.total_locked_amount`는 정산 실행 시점의 정산 대상 participant `crew_participant.deposit_amount` 합계로 스냅샷을 고정한다.
-- `point_history` insert와 `point_account.balance` 갱신은 같은 트랜잭션에서 처리한다.
-- `point_account.balance`와 `point_history` 재계산값이 불일치하면 `point_history`를 기준으로 원인을 조사하고 캐시를 보정한다.
-- `point_history`는 금액 이벤트 원장이며, `point_account.balance`보다 우선하는 authoritative ledger다. 다만 현재 묶인 금액 조회 projection은 `crew_participant.deposit_amount`와 방 상태를 사용하고, `point_history`를 locked balance source로 재합산하지 않는다.
+- reserve 생성은 `available_balance -= deposit_amount`, `reserved_balance += deposit_amount`로 처리한다.
+- 승인(`PENDING -> LOCKED`)은 `reserved_balance -= deposit_amount`, `locked_balance += deposit_amount` bucket/state transition이다. 승인 시 새 `point_history` transaction type을 만들지 않는다.
+- reserve release는 terminal 전이와 같은 transaction에서 `reserved_balance -= deposit_amount`, `available_balance += deposit_amount`로 처리한다.
+- final settlement refund는 `locked_balance -= deposit_amount`와 환급 결과에 따른 `available_balance` 증가를 `point_history`와 같은 transaction에서 처리한다.
+- `active_locked_amount`와 `settlement_pending_amount`는 `locked_balance`를 source로 설명하는 projection-only split field다. reconciliation check는 `locked_balance == active_locked_amount + settlement_pending_amount`다.
+- `point_account`와 `point_history` 재계산값이 불일치하면 append-only `point_history` 기준으로 원인을 조사하고 cache를 보정한다.
+- money/audit 성격 때문에 soft delete를 사용하지 않는다.
 
 ### `point_history`
 
 역할:
 
-- 모든 포인트 증감의 유일한 원장이자 금액 source of truth다.
-- 정산 재시도 시 중복 지급을 막는 deterministic 멱등성 키를 보관한다.
-- 보증금 잠금과 환급 모두 이 테이블에 이벤트로 남긴다.
+- 모든 포인트 증감의 유일한 append-only 원장이자 금액 source of truth다.
+- 정산 재시도 시 중복 지급을 막는 deterministic idempotency key를 보관한다.
+- reserve, reserve release, settlement refund 모두 이 테이블에 이벤트로 남긴다.
 
 주요 컬럼:
 
-| 컬럼               | 타입 제안      | nullable | 설명               |
-| ------------------ | -------------- | -------- | ------------------ |
-| `id`               | `BIGINT`       | N        | 원장 PK            |
-| `member_id`        | `BIGINT`       | N        | 사용자 계정 FK     |
-| `amount`           | `BIGINT`       | N        | 증감 금액          |
-| `balance_after`    | `BIGINT`       | N        | 반영 후 잔액       |
-| `transaction_type` | `VARCHAR(40)`  | N        | 포인트 이벤트 종류 |
-| `reference_type`   | `VARCHAR(40)`  | N        | 참조 엔티티 종류   |
-| `reference_id`     | `BIGINT`       | N        | 참조 엔티티 PK     |
-| `idempotency_key`  | `VARCHAR(255)` | N        | 중복 반영 방지 키  |
-| `created_at`       | `DATETIME(6)`  | N        | 생성 시각          |
+| 컬럼                 | 타입 제안      | nullable | 설명                                                       |
+| -------------------- | -------------- | -------- | ---------------------------------------------------------- |
+| `id`                 | `BIGINT`       | N        | 원장 PK, auto increment                                    |
+| `member_id`          | `BIGINT`       | N        | 사용자 계정 FK                                             |
+| `amount`             | `BIGINT`       | N        | 증감 금액                                                  |
+| `available_after`    | `BIGINT`       | N        | 반영 후 available balance snapshot                         |
+| `reserved_after`     | `BIGINT`       | N        | 반영 후 reserved balance snapshot                          |
+| `locked_after`       | `BIGINT`       | N        | 반영 후 locked balance snapshot                            |
+| `transaction_type`   | `VARCHAR(40)`  | N        | 포인트 이벤트 종류, enum은 STRING 저장                     |
+| `reference_type`     | `VARCHAR(40)`  | N        | 참조 엔티티 종류, enum은 STRING 저장                       |
+| `reference_id`       | `BIGINT`       | N        | 참조 엔티티 PK                                             |
+| `idempotency_key`    | `VARCHAR(160)` | N        | 중복 반영 방지 키, UNIQUE                                  |
+| `created_at`         | `DATETIME(6)`  | N        | 생성 시각                                                  |
 
 PK:
 
@@ -265,42 +273,37 @@ PK:
 
 FK:
 
-- `member_id -> member.id`
+- `member_id -> member.id` (`RESTRICT` / `NO ACTION`)
 
 Unique / Index:
 
-- `unique(idempotency_key)`
+- `unique(point_history.idempotency_key)`
 - `index(member_id, created_at)`
 - `index(reference_type, reference_id)`
 
 상태값 / Enum:
 
-- `transaction_type`: `POINT_CHARGE`, `CREW_DEPOSIT_LOCK`, `CREW_SETTLEMENT_REFUND`, `CREW_CANCELLED_REFUND`
+- `transaction_type`: `POINT_CHARGE`, `CREW_DEPOSIT_RESERVE`, `CREW_RESERVE_RELEASE`, `CREW_SETTLEMENT_REFUND`
 - `reference_type`: `POINT_CHARGE`, `CREW_PARTICIPANT`, `SETTLEMENT_ITEM`
 
 `reference_type` / `reference_id` 매핑:
 
-| 도메인 동작         | `transaction_type`       | `reference_type`   | `reference_id` 규칙                                                                                                                             |
-| ------------------- | ------------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| 포인트 충전         | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. |
-| 방 참여 보증금 잠금 | `CREW_DEPOSIT_LOCK`      | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
-| 일반 정산 환급      | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                                            |
-| PENDING reserve release | `CREW_CANCELLED_REFUND`  | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
+| 도메인 동작             | `transaction_type`       | `reference_type`   | `reference_id` 규칙                                                                                                                             |
+| ------------------------ | ------------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| 포인트 충전              | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. |
+| 신청 reserve             | `CREW_DEPOSIT_RESERVE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
+| PENDING reserve release  | `CREW_RESERVE_RELEASE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
+| 일반 정산 환급           | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                                            |
 
 주의사항:
 
 - 모든 포인트 변경은 항상 `member_id` 기준으로 기록한다.
-- `POINT_CHARGE`는 포인트 충전으로 `balance`를 증가시키는 이벤트다.
-- `CREW_DEPOSIT_LOCK`는 자산 이동이 아니라 기존 포인트를 사용 불가 상태로 전환하는 이벤트이며 `balance`를 감소시킨다.
-- `CREW_SETTLEMENT_REFUND`는 일반 정산 환급으로 `balance`를 증가시킨다.
-- `CREW_CANCELLED_REFUND`는 취소형 정산 환급으로 `balance`를 증가시킨다.
-- 포인트 충전은 `reference_type = POINT_CHARGE`, `reference_id = point_history.id`로 추적하고, API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. `orderId`는 confirm 검증과 로그 상관관계 추적용이며 idempotency key 구성값으로 사용하지 않는다.
-- MVP에서는 별도 payment aggregate 없이 `point_history` 자체를 충전 ledger로 사용하므로, 충전 이벤트의 `reference_id`는 생성된 자기 `point_history.id`를 가리킨다.
-- 참여 시 보증금 잠금은 `reference_type = CREW_PARTICIPANT`, `reference_id = crew_participant.id`로 추적한다.
-- 정산 지급의 `reference_type = SETTLEMENT_ITEM`, `reference_id = settlement_item.id` 조합으로 어느 계산 결과가 원장에 반영됐는지 추적한다.
-- 모든 포인트 변경은 `idempotency_key`를 반드시 가진다.
-- 동일 이벤트는 항상 동일한 `idempotency_key`를 사용하고, `settlement.id` 같은 런타임 값에 의존하지 않는다.
-- 동일 `idempotency_key`가 동일 payload로 다시 들어오면 기존 `point_history`를 재사용하거나 연결하고, 동일 키에 다른 payload가 들어오면 idempotency conflict로 처리한다.
+- `CREW_DEPOSIT_RESERVE`는 `PENDING` 신청 reserve 생성 이벤트다.
+- `CREW_RESERVE_RELEASE`는 `PENDING -> REJECTED/CANCELLED/EXPIRED` terminal 전이와 같은 transaction에서 reserve를 반환하는 이벤트다.
+- `CREW_SETTLEMENT_REFUND`는 일반 정산 환급 이벤트다.
+- `available_after`, `reserved_after`, `locked_after`는 reconciliation/debugging snapshot이며, append-only ledger ordering과 idempotency보다 우선하는 source of truth가 아니다.
+- `payload_hash` 저장과 payload consistency framework는 MVP에서 deferred이며 필수 컬럼/프레임워크로 도입하지 않는다.
+- 동일 이벤트는 항상 동일한 `idempotency_key`를 사용하고, 동일 canonical input retry는 기존 `point_history`를 재사용하거나 연결한다. 동일 키에 다른 canonical input이 확인되면 idempotency conflict로 처리한다.
 - 이벤트별 고정 규칙 예시는 아래와 같다.
   - 포인트 충전: `charge:{paymentKey}`
   - 보증금 reserve: `crew:{crewId}:participant:{participantId}:reserve`
@@ -385,13 +388,15 @@ Unique / Index:
 
 | 컬럼             | 타입 제안     | nullable | 설명                                                  |
 | ---------------- | ------------- | -------- | ----------------------------------------------------- |
-| `id`             | `BIGINT`      | N        | 참여 PK                                               |
+| `id`             | `BIGINT`      | N        | 참여 PK, auto increment                                               |
 | `crew_id`        | `BIGINT`      | N        | 방 FK                                                 |
 | `member_id`      | `BIGINT`      | N        | 회원 FK                                               |
 | `status`         | `VARCHAR(30)` | N        | 참여 lifecycle 상태                                   |
 | `deposit_amount` | `BIGINT`      | Y        | 참여 예치금 snapshot. `PENDING` 생성 시 `crew.deposit_amount`를 reserve 금액으로 기록하고, `LOCKED` 이후에는 정산 입력 deposit으로 유지한다 |
 | `locked_at`      | `DATETIME(6)` | Y        | 방장 승인으로 `PENDING -> LOCKED` 확정된 시각 |
+| `released_point_history_id` | `BIGINT` | Y        | reserve release 원장 FK. terminal release의 authoritative evidence |
 | `withdrawn_at`   | `DATETIME(6)` | Y        | brownfield/deferred withdrawal 시각 reference         |
+| `version`        | `BIGINT`      | N        | optimistic locking version                            |
 | `created_at`     | `DATETIME(6)` | N        | 생성 시각                                             |
 | `updated_at`     | `DATETIME(6)` | N        | 수정 시각                                             |
 
@@ -401,8 +406,9 @@ PK:
 
 FK:
 
-- `crew_id -> crew.id`
-- `member_id -> member.id`
+- `crew_id -> crew.id` (`RESTRICT` / `NO ACTION`)
+- `member_id -> member.id` (`RESTRICT` / `NO ACTION`)
+- `released_point_history_id -> point_history.id` (`RESTRICT` / `NO ACTION`)
 
 Unique / Index:
 
@@ -424,12 +430,12 @@ Unique / Index:
 - `REJECTED`는 방장이 신청을 거절한 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
 - `CANCELLED`는 사용자가 승인 전 `PENDING` 상태에서 신청을 취소한 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
 - `EXPIRED`는 시작 전까지 처리되지 않아 자동 만료된 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
-- reserve release는 `crew_participant.id`당 한 번만 허용한다. terminal status 전이와 `CREW_CANCELLED_REFUND` 원장 생성은 같은 transaction에서 처리하며, 구현은 `released_point_history_id` 또는 `reserve_released_at` 같은 guard를 `crew_participant`에 두어 중복 release를 막는다.
+- reserve release는 `crew_participant.id`당 한 번만 허용한다. terminal status 전이와 `CREW_RESERVE_RELEASE` 원장 생성은 같은 transaction에서 처리하며, 구현은 `released_point_history_id`를 `crew_participant`에 두어 authoritative reserve-release ledger evidence로 사용한다. `reserve_released_at`만으로 release 완료를 증명하지 않는다.
 - 승인 후 lock 대기 상태(`APPROVED_LOCK_PENDING`)는 두지 않는다. 방장 승인은 `PENDING -> LOCKED` 상태 전이이며 추가 잔액 차감을 수행하지 않는다.
 - `WITHDRAWN`/active withdrawal/rejoin은 MVP active status가 아니다. 기존 row 재사용/withdrawal 재도입은 Phase 2/deferred brownfield reference다.
-- 보증금은 별도 계좌로 이동하지 않으며, `point_account.balance` projection/cache에서 차감되고 append-only `CREW_DEPOSIT_LOCK point_history`가 원장 이벤트로 남은 뒤 `crew_participant.deposit_amount`로 reserve/locked 상태를 표현한다.
+- 보증금은 별도 계좌로 이동하지 않으며, `point_account.available_balance`에서 차감되고 append-only `CREW_DEPOSIT_RESERVE point_history`가 원장 이벤트로 남은 뒤 `crew_participant.deposit_amount`로 reserve/locked 상태를 표현한다.
 - `deposit_amount`는 participant 단위 예치금 snapshot의 source of truth다. `PENDING` 생성 시 `crew.deposit_amount`를 snapshot으로 복사 저장하고, `LOCKED` 전이 후에도 같은 값을 유지한다.
-- 신청 생성 트랜잭션은 capacity 확인(`PENDING + LOCKED < max_participants`) → `point_account.balance >= crew.deposit_amount` 조건부 차감 → `CREW_DEPOSIT_LOCK point_history` insert → `crew_participant.deposit_amount` snapshot → `status = PENDING` 기록을 하나의 트랜잭션으로 함께 성공 또는 함께 롤백한다.
+- 신청 생성 트랜잭션은 capacity 확인(`PENDING + LOCKED < max_participants`) → `point_account.available_balance >= crew.deposit_amount` 조건부 차감 및 `reserved_balance` 증가 → `CREW_DEPOSIT_RESERVE point_history` insert → `crew_participant.deposit_amount` snapshot → `status = PENDING` 기록을 하나의 트랜잭션으로 함께 성공 또는 함께 롤백한다.
 - 방장 승인 트랜잭션은 기존 `PENDING` row를 `LOCKED`로 전이하고 `locked_at`을 기록한다. 추가 잔액 차감, host settlement authority, 중간 상태는 만들지 않는다.
 
 ### `mission_rule`
@@ -698,6 +704,7 @@ Unique / Index:
 | `finished_at`                     | `DATETIME(6)`  | Y        | 실행 종료 시각                                                     |
 | `created_at`                      | `DATETIME(6)`  | N        | 생성 시각                                                          |
 | `updated_at`                      | `DATETIME(6)`  | N        | 수정 시각                                                          |
+| `version`                         | `BIGINT`       | N        | optimistic locking version                                         |
 
 PK:
 
@@ -835,7 +842,7 @@ Unique / Index:
 - `unique(crew_id, settlement_type)` on `settlement`
 - `unique(settlement_id, crew_participant_id)` on `settlement_item`
 - `unique(mission_log_id, member_id)` on `mission_log_reaction`
-- `unique(point_history.idempotency_key)` on `point_history`
+- `unique(point_history.idempotency_key)` on `point_history` (`VARCHAR(160)` 권장)
 
 정산 안정성을 높이는 보조 제약:
 
@@ -849,8 +856,8 @@ Unique / Index:
 - `draw_key = SHA-256(crew_id + ":" + settlement_type + ":" + member_id)`은 non-payout 표시/설명 ordering 전용이다.
 - `point_history.idempotency_key`는 이벤트별 고정 규칙을 따른다. 예: `charge:{paymentKey}`, `crew:{crewId}:participant:{participantId}:reserve`, `crew:{crewId}:participant:{participantId}:reserve-release`, `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}`
 - `draw_key`와 `idempotency_key` 모두 런타임 PK가 아니라 입력 기반 식별자를 사용한다.
-- `point_history.idempotency_key`는 `NOT NULL`이며, 이벤트 종류마다 재현 가능한 규칙으로 생성한다.
-- 동일 키 + 동일 payload는 기존 원장 재사용/연결 대상이고, 동일 키 + 다른 payload는 멱등성 충돌로 저장하지 않는다.
+- `point_history.idempotency_key`는 `NOT NULL`, `UNIQUE`, 권장 `VARCHAR(160)`이며, 이벤트 종류마다 재현 가능한 규칙으로 생성한다.
+- 동일 키 + 동일 canonical input은 기존 원장 재사용/연결 대상이고, 동일 키 + 다른 canonical input은 멱등성 충돌로 저장하지 않는다. `payload_hash` 저장이나 payload consistency framework는 MVP 필수 요건이 아니다.
 - `settlement.algorithm_version`과 `rule_context_snapshot`은 historical semantic replay context이며 current-engine reinterpretation이나 payout mutation에 사용하지 않는다.
 - Runtime delay가 있더라도 lifecycle/cutoff 판단은 scheduled semantic anchor 기준이다. 실제 실행 시각은 운영 로그/감사 fact로만 남긴다.
 - Notification 저장/전달/inbox/read/delivery attempt는 정산 source of truth가 아니다. Reconnect/deep-link/refetch 시 authoritative REST/API state가 stale/duplicate/out-of-order notification보다 우선한다.
@@ -913,7 +920,10 @@ erDiagram
     POINT_ACCOUNT {
         BIGINT id PK
         BIGINT member_id FK
-        BIGINT balance
+        BIGINT available_balance
+        BIGINT reserved_balance
+        BIGINT locked_balance
+        BIGINT version
         DATETIME created_at
         DATETIME updated_at
     }
@@ -922,7 +932,9 @@ erDiagram
         BIGINT id PK
         BIGINT member_id FK
         BIGINT amount
-        BIGINT balance_after
+        BIGINT available_after
+        BIGINT reserved_after
+        BIGINT locked_after
         VARCHAR transaction_type
         VARCHAR reference_type
         BIGINT reference_id
