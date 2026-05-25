@@ -152,14 +152,23 @@
 
 ### 3.9 MissionLogDecisionType
 
-- host moderation 결정 type. 정확한 enum 값은 deferred decision이며 이 contract에서 freeze하지 않는다.
-- API 응답에는 string으로 노출하되, 클라이언트는 알려진 값 외 unknown 값에 대해 graceful degradation으로 처리한다.
+- host/system moderation 결정 type. 값은 아래 4종으로 freeze한다.
+- `MANUAL_APPROVE`
+- `MANUAL_REJECT`
+- `AUTO_APPROVE`
+- `AUTO_REJECT`
+- `AUTO_*`는 certification lifecycle의 system moderation outcome일 뿐 AI/admin/support/dispute/override 권한이나 settlement/ledger authority가 아니다.
 
 ### 3.10 MissionLogRejectReasonCode
 
-- host moderation rejection reason axis. `MissionLogFailureReason`(system axis)과 의미 vocabulary가 분리된다.
-- 6종 enum + `OTHER` 존재만 freeze한다. 정확한 5개 enum 이름은 deferred decision이다.
-- `OTHER` 결정 시 `reject_memo` (최대 50자 free-text)가 함께 채워질 수 있다.
+- host moderation rejection reason axis. `MissionLogFailureReason`(system axis)과 의미 vocabulary가 분리된다. 값은 아래 6종으로 freeze한다.
+- `TIME_VIOLATION`
+- `DUPLICATE`
+- `MISSION_MISMATCH`
+- `UNCLEAR`
+- `INAPPROPRIATE`
+- `OTHER`
+- `reject_memo`는 일반적으로 nullable이지만 `reject_reason_code = OTHER`일 때 필수이며 최대 50자다. internal/private context이고 공개 canonical state나 settlement/ledger authority가 아니다.
 
 ### 3.11 SettlementFailureCode
 
@@ -218,11 +227,10 @@
 
 ### 3.17 MissionLogReactionType
 
-- `CHEER`
-- `CLAP`
-- `FIRE`
-
-리액션 enum은 소셜 메타데이터 전용이다. 포인트 원장, 정산, 환급, AI 리포트, 상태 생명주기 enum과 연결하지 않는다.
+- `reaction_type`은 고정 enum이 아니라 OS 기본 emoji picker 기반 string / normalized emoji token이다.
+- API는 동일 `(mission_log_id, member_id, reaction_type)` 단위로 toggle/delete/idempotency를 판단한다. 한 회원이 같은 feed item에 여러 emoji token을 동시에 남길 수 있지만, 같은 token은 1회만 허용한다.
+- Unicode normalization, variation selector, ZWJ/skin-tone 처리, max byte length는 API/FE propagation TODO로 남긴다.
+- 리액션은 소셜 메타데이터 전용이다. 포인트 원장, 정산, 환급, AI 리포트, 상태 생명주기 enum과 연결하지 않는다.
 
 ## 4. API 목록
 
@@ -904,6 +912,7 @@ Request:
 | --- | --- | --- | --- |
 | `crew_id` | `integer` | Y | 대상 방 |
 | `image_s3_key` | `string` | Y | presigned upload API로 발급되고 업로드 완료된 이미지 key |
+| `caption` | `string` | Y | 사진과 함께 제출하는 필수 인증 텍스트. 5~100자 |
 
 Response `201 Created`:
 
@@ -914,6 +923,7 @@ Response `201 Created`:
   "crew_participant_id": 101,
   "image_url": "https://cdn.example.com/mission/9001.jpg",
   "image_s3_key": "mission/42/101/9001.jpg",
+  "caption": "오늘도 미션 완료했습니다",
   "image_hash": "9b74c9897bac770ffc029102a200c5de8c0e9e5b9d3c9c7e5f4f5c1a2b3c4d5e",
   "server_time": "2026-05-11T05:58:10+09:00",
   "certification_status": "SUCCESS",
@@ -933,6 +943,7 @@ Response `201 Created`:
   "mission_log_id": 9003,
   "crew_id": 42,
   "crew_participant_id": 101,
+  "caption": "아침 미션 인증합니다",
   "server_time": "2026-05-12T08:30:00+09:00",
   "certification_status": "SUCCESS",
   "failure_reason": null,
@@ -949,6 +960,7 @@ Response `201 Created`:
   "crew_participant_id": 101,
   "image_url": "https://cdn.example.com/mission/9002.jpg",
   "image_s3_key": "mission/42/101/9002.jpg",
+  "caption": "시작 전 촬영한 인증입니다",
   "server_time": "2026-05-11T00:01:02+09:00",
   "certification_status": "FAILED",
   "failure_reason": "BEFORE_START"
@@ -967,7 +979,10 @@ Error:
 
 - 인증 시점에는 crew 단위 Redisson 락을 기본으로 사용하지 않는다.
 - 인증은 `MissionLog` 원본 보존이 우선이다.
-- 이미지 업로드 자체는 별도 presigned upload 계약으로 처리하고, 이 API는 업로드 완료된 `image_s3_key`만 받는다.
+- 이미지 업로드 자체는 별도 presigned upload 계약으로 처리하고, 이 API는 업로드 완료된 `image_s3_key`와 필수 `caption`을 함께 받는다.
+- 유효한 mission-log creation에는 서버가 검증한 `image_s3_key`와 5~100자 `caption`이 모두 필요하다. image-only 또는 caption-only 인증 생성은 허용하지 않는다.
+- `image_url`은 조회/서빙용 nullable URL이며, 이미지 존재/범위 검증의 기준은 `image_s3_key`와 서버의 S3 object validation이다.
+- `caption`은 feed/display/replay evidence 용도이고 단독 인증 성공/실패, 정산, 원장 기준이 아니다.
 - Presigned URL은 upload delegation 수단이지 validation delegation 수단이 아니다.
 - 서버는 `image_s3_key`가 현재 사용자/participant/crew 범위에 속하는지 검증한다.
 - 서버는 S3 object를 직접 조회해 존재 여부, size, content-type, ownership, EXIF를 검증한다.
@@ -1013,6 +1028,7 @@ Response `200 OK`:
       "mission_log_id": 9001,
       "crew_participant_id": 101,
       "image_url": "https://cdn.example.com/mission/9001.jpg",
+      "caption": "오늘도 미션 완료했습니다",
       "image_hash": "9b74c9897bac770ffc029102a200c5de8c0e9e5b9d3c9c7e5f4f5c1a2b3c4d5e",
       "server_time": "2026-05-11T05:58:10+09:00",
       "exif_taken_at": "2026-05-11T05:57:58+09:00",
@@ -1037,7 +1053,7 @@ Error:
 - `exif_taken_at`은 서버가 S3 object에서 추출/검증한 촬영 시각 보조 정보이며, 최종 정산 인정 시각 기준으로 사용하지 않는다.
 - `image_hash`는 서버 계산 SHA-256 결과의 read-only 노출이며, 동일 인증 사진 중복 의심 신호일 뿐 authority가 아니다.
 - `certification_status`는 인증 요청의 resolved certification state(`PENDING_REVIEW`/`SUCCESS`/`FAILED`)이며, 정산에서 인정된 횟수를 나타내는 값이 아니다.
-- `decision_type`, `reject_reason_code`는 현재 latest-effective 검수 결과 projection이다. `reject_memo`는 본 응답에 포함하지 않는다(참여자 노출 정책: deferred decision).
+- `decision_type`, `reject_reason_code`는 현재 latest-effective 검수 결과 projection이다. `reject_memo`는 internal/private context이므로 본 응답에 포함하지 않는다. 참여자 노출 정책은 별도 API/UX 결정으로 남긴다.
 - FE는 이 값을 `최종 성공 횟수` 또는 `정산 인정 횟수`로 사용하면 안 된다.
 - 최종 인정 여부와 인정 횟수는 반드시 정산 결과 API `GET /api/settlements/{settlementId}`를 기준으로 판단해야 한다.
 
@@ -1086,7 +1102,9 @@ Error:
 - 본 API는 read-only audit 조회 전용이다. 검수 결정을 새로 만들거나 수정하지 않는다.
 - `moderation_history`는 append-only다. 본 API는 기존 레코드를 변경/삭제하지 않는다.
 - 조회 권한 매트릭스(누가 어디까지 볼 수 있는지)는 deferred decision이다. MVP 1차 구현 범위는 호스트 본인 + 본인 인증 로그에 대한 본인 참여자로 한정한다.
-- `reject_memo`는 본 응답에 노출하지 않는다. 참여자 노출 정책은 deferred decision이다.
+- `decision_type`은 `MANUAL_APPROVE`, `MANUAL_REJECT`, `AUTO_APPROVE`, `AUTO_REJECT`만 사용한다.
+- `reject_reason_code`는 `TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER`만 사용한다.
+- `reject_memo`는 일반적으로 nullable이지만 `OTHER`일 때 필수이며 최대 50자다. internal/private context이므로 본 응답에 노출하지 않는다. 참여자 노출 정책은 별도 API/UX 결정으로 남긴다.
 - `before_state`, `after_state`는 검수 결정 시점의 latest-effective snapshot JSON이다. 정산 결과를 재계산하는 입력으로 사용하지 않는다.
 - 검수자 식별은 `moderator_member_uuid`로만 노출한다. internal FK `moderator_id`는 응답에 포함하지 않는다.
 - 이 API는 운영 admin 권한 endpoint가 아니다. MVP에서는 admin/correction workflow를 발명하지 않는다.
@@ -1130,15 +1148,15 @@ Response `200 OK`:
       "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
       "nickname": "돈독러",
       "image_url": "https://cdn.example.com/mission/9001.jpg",
+      "caption": "오늘도 미션 완료했습니다",
       "server_time": "2026-05-11T05:58:10+09:00",
       "created_at": "2026-05-11T05:58:10+09:00",
       "certification_status": "SUCCESS",
       "reaction_counts": {
-        "CHEER": 2,
-        "CLAP": 1,
-        "FIRE": 0
+        "👏": 2,
+        "🔥": 1
       },
-      "my_reaction_type": "CHEER"
+      "my_reactions": ["👏"]
     }
   ],
   "next_cursor": "2026-05-11T05:58:10+09:00_9001",
@@ -1189,24 +1207,25 @@ Error:
   - 성공 로그가 없고 실패 시도가 하나 이상 있으면 `FAILED`다.
   - 성공/실패 로그가 모두 없으면 `NOT_SUBMITTED`다.
 - 대표 규칙은 표시/API payload용이다. 원본 성공 피드 게시물을 삭제, 병합, 수정, 숨김 처리하지 않는다.
-- reaction counts는 `mission_log_reaction`에서 파생한다. `mission_log`에 저장 카운터를 두거나 갱신하지 않는다.
+- `caption`은 feed item의 display/replay evidence로 포함될 수 있으며 단독 인증/정산 기준이 아니다.
+- reaction counts는 `mission_log_reaction`에서 파생한다. `mission_log`에 저장 카운터를 두거나 갱신하지 않는다. `reaction_counts`는 emoji token을 key로 하는 동적 map이다.
 - 이 API의 상태 projection은 정산 인정 횟수, 환급액, 포인트 잔액, AI 리포트 상태, lifecycle status의 source of truth가 아니다.
 
 ### `POST /api/mission-logs/{missionLogId}/reactions`
 
 역할:
 
-- 현재 로그인한 회원의 해당 인증 성공 게시물 리액션을 멱등 upsert한다.
+- 현재 로그인한 회원의 해당 인증 성공 게시물 리액션을 emoji token 단위로 멱등 toggle/create한다.
 
 Request:
 
 | 필드            | 타입     | 필수 | 설명                      |
 | --------------- | -------- | ---- | ------------------------- |
-| `reaction_type` | `string` | Y    | `CHEER` / `CLAP` / `FIRE` |
+| `reaction_type` | `string` | Y    | OS emoji string / normalized emoji token 후보 |
 
 ```json
 {
-  "reaction_type": "CHEER"
+  "reaction_type": "👏"
 }
 ```
 
@@ -1215,11 +1234,10 @@ Response `200 OK`:
 ```json
 {
   "mission_log_id": 9001,
-  "my_reaction_type": "CHEER",
+  "my_reactions": ["👏", "🔥"],
   "reaction_counts": {
-    "CHEER": 3,
-    "CLAP": 1,
-    "FIRE": 0
+    "👏": 3,
+    "🔥": 1
   }
 }
 ```
@@ -1233,11 +1251,11 @@ Error:
 정책:
 
 - 리액션 대상은 `mission_log.certification_status = 'SUCCESS'`인 feed-eligible `MissionLog`로 제한한다.
-- `POST`는 `(mission_log_id, member_id)` 기준 멱등 upsert다. 기존 리액션이 있으면 같은 row의 `reaction_type`을 교체하고, 없으면 생성한다.
-- 구현은 `(mission_log_id, member_id)` unique constraint 기반의 DB-level idempotent upsert를 MUST로 한다. SQL 문법은 실제 MySQL 8.0 stack에 맞춘다.
-
-- 동일 `(mission_log_id, member_id)`에 대한 동시 중복 요청은 DB unique conflict 때문에 API 에러가 되어서는 안 되며, 최종 상태는 하나의 일관된 `reaction_type`으로 성공적으로 수렴해야 한다.
-- 한 회원은 한 `MissionLog`에 하나의 리액션만 가진다.
+- `POST`는 `(mission_log_id, member_id, reaction_type)` 기준 멱등 create/toggle이다. 같은 emoji token이 이미 있으면 동일 token 단위로 idempotent하게 처리하고, 다른 emoji token은 별도 row로 공존할 수 있다.
+- 구현은 `(mission_log_id, member_id, reaction_type)` unique constraint 기반의 DB-level idempotency를 MUST로 한다. SQL 문법은 실제 MySQL 8.0 stack에 맞춘다.
+- 동일 `(mission_log_id, member_id, reaction_type)`에 대한 동시 중복 요청은 DB unique conflict 때문에 API 에러가 되어서는 안 되며, 최종 상태는 해당 token 1개 존재로 수렴해야 한다.
+- 한 회원은 한 `MissionLog`에 여러 emoji token을 남길 수 있지만, 동일 token은 1회만 허용한다.
+- TODO(API/FE): emoji normalization(Unicode normalization, variation selector, ZWJ/skin-tone, max byte length)과 toggle-on-existing의 정확한 응답 semantics를 확정한다.
 - 리액션 생성/수정은 `mission_log`를 mutate하지 않는다.
 - 리액션은 정산, 환급, 포인트 원장, AI 리포트, 방/참여/정산 상태 전이에 side effect를 만들지 않는다.
 
@@ -1252,11 +1270,10 @@ Response `200 OK`:
 ```json
 {
   "mission_log_id": 9001,
-  "my_reaction_type": null,
+  "my_reactions": ["🔥"],
   "reaction_counts": {
-    "CHEER": 2,
-    "CLAP": 1,
-    "FIRE": 0
+    "👏": 2,
+    "🔥": 1
   }
 }
 ```
@@ -1269,7 +1286,7 @@ Error:
 정책:
 
 - 리액션이 이미 없어도 성공 응답을 반환한다.
-- 삭제는 `(mission_log_id, member_id)` 기준 멱등 delete다.
+- 삭제는 의미상 `(mission_log_id, member_id, reaction_type)` 기준 멱등 delete다. 현재 `DELETE /api/mission-logs/{missionLogId}/reactions/me` route shape에는 target `reaction_type` 전달 방식이 없으므로 API propagation TODO로 남긴다(query/body/path 중 하나를 선택해야 함).
 - 삭제도 `mission_log` 원본, 정산, 환급, 포인트 원장, AI 리포트, 상태 생명주기에 side effect를 만들지 않는다.
 
 ## 5.5 크루 대시보드
@@ -1980,7 +1997,7 @@ Error:
 
 ## 5.9 알림 / Android FCM / Inbox / SSE drift
 
-알림 API의 MVP 기준은 Android-first FCM이다. FCM은 delivery transport이고, notification은 best-effort re-entry hint다. 알림 payload, inbox list item, read/unread state, delivery attempt success/failure는 crew lifecycle, certification, moderation, settlement, point ledger/history의 source of truth가 아니다.
+알림 API의 MVP 기준은 Android-first FCM이다. FCM은 delivery transport이고, notification은 best-effort re-entry hint다. 알림 payload, inbox list item, read/unread state, delivery attempt success/failure는 crew lifecycle, certification, moderation, settlement, point ledger/history의 canonical state authority가 아니다.
 
 ### MVP boundary
 
@@ -2201,7 +2218,7 @@ RUNNING
 
 ### Notification click/refetch UX handling
 
-Android FCM push, notification inbox item, deferred SSE signal 모두 `deep_link` 또는 refetch target으로 이동한 뒤 canonical REST API state를 다시 조회한다. 알림 payload/list item/read state는 상태 snapshot이나 source of truth가 아니다. `GET /api/notifications/stream`은 Phase 2/deferred drift 후보로만 유지한다.
+Android FCM push, notification inbox item, deferred SSE signal 모두 `deep_link` 또는 refetch target으로 이동한 뒤 canonical REST API state를 다시 조회한다. 알림 payload/list item/read state는 상태 snapshot이나 canonical state authority가 아니다. `GET /api/notifications/stream`은 Phase 2/deferred drift 후보로만 유지한다.
 
 ## 8. 구현 메모
 

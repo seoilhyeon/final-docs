@@ -83,7 +83,7 @@
 | 테이블명                                       | 역할                                              | 포함 판단                                                                                                                                   |
 | ---------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `notification_device` / `push_token` 후보      | Android-first FCM token/device lifecycle 지원     | MVP notification transport 후보. 토큰 등록/갱신/비활성화 상태만 다루며 crew lifecycle, 인증, 검수, 정산, 포인트 원장 상태를 변경하지 않는다 |
-| `notification_event` / `notification_log` 후보 | 알림 inbox/read UX hint history 지원              | MVP notification list/read 후보. canonical history/audit/source of truth가 아니며 payload/list item은 refetch target metadata만 가진다      |
+| `notification_event` / `notification_log` 후보 | 알림 inbox/read UX hint history 지원              | MVP notification list/read 후보. canonical history/audit truth가 아니며 payload/list item은 refetch target metadata만 가진다      |
 | `notification_delivery_attempt` 후보           | FCM delivery attempt 관측 및 transport retry 지원 | MVP 운영 관측 후보. delivery success/failure/read 여부는 도메인 성공/실패나 settlement retry/replay/correction의 근거가 아니다              |
 | `notification_preference` 후보                 | 채널/이벤트별 수신 설정                           | Phase 2 deferred. MVP에서는 세부 preference matrix를 schema로 freeze하지 않는다                                                             |
 | `notification_template` 후보                   | 알림 문구/template 관리                           | Phase 2 deferred. MVP에서는 template CMS/table을 schema로 freeze하지 않는다                                                                 |
@@ -95,6 +95,7 @@
 - `notification_event` 또는 `notification_log`는 사용자가 놓친 알림을 다시 볼 수 있게 하는 UX hint history 후보일 뿐, audit-grade canonical domain history가 아니다. 읽음/미읽음은 사용자 UX 상태이며 미해결 정산·인증·검수 task를 뜻하지 않는다.
 - `notification_delivery_attempt`는 FCM send attempt, provider response, bounded transport retry 관측 후보로만 둔다. 실패/재시도는 settlement retry, replay, correction, payout mutation과 분리한다.
 - 알림 payload/list item에 필요한 canonical refetch metadata 후보는 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 수준으로 제한한다. authoritative payout/certification/ledger snapshot은 포함하지 않는다.
+- Notification 후보 엔티티는 non-authoritative hint/deep-link/refetch/transport surface이므로 Core Mermaid에서 의도적으로 제외한다. Core Mermaid에 포함하면 canonical domain history/source of truth로 오해될 수 있다.
 - Preference matrix, template CMS/table, campaign/broadcast, advanced analytics, SSE/Web realtime reliability persistence는 Phase 2/deferred로 유지한다.
 
 ## 3. 테이블 상세
@@ -534,6 +535,7 @@ Unique / Index:
 | `crew_participant_id`  | `BIGINT`       | N        | 참여 FK                                                                          |
 | `image_url`            | `VARCHAR(500)` | Y        | 조회용 이미지 URL                                                                |
 | `image_s3_key`         | `VARCHAR(255)` | N        | 저장소 키                                                                        |
+| `caption`              | `VARCHAR(100)` | N        | 사진과 함께 제출하는 필수 인증 텍스트. 5~100자 feed/display/replay evidence      |
 | `image_hash`           | `CHAR(64)`     | Y        | 서버가 S3 object에서 계산한 SHA-256 fraud/risk signal. 단독 final authority 아님 |
 | `server_time`          | `DATETIME(6)`  | N        | 서버 수신 시각                                                                   |
 | `exif_taken_at`        | `DATETIME(6)`  | Y        | 서버가 S3 object에서 추출/검증한 이미지 Exif 촬영 시각                           |
@@ -541,9 +543,9 @@ Unique / Index:
 | `failure_reason`       | `VARCHAR(50)`  | Y        | 시스템 실패/timing 사유 코드 (host moderation rejection 아님)                    |
 | `moderator_id`         | `BIGINT`       | Y        | host moderation 결정자 FK (member)                                               |
 | `moderator_decided_at` | `DATETIME(6)`  | Y        | host moderation 결정 시각                                                        |
-| `decision_type`        | `VARCHAR(20)`  | Y        | host moderation 결정 type. enum 값은 deferred decision                           |
-| `reject_reason_code`   | `VARCHAR(30)`  | Y        | host moderation rejection reason code. 정확한 값 이름은 deferred decision        |
-| `reject_memo`          | `VARCHAR(50)`  | Y        | `OTHER` rejection 시에만 사용하는 free-text 메모. non-authoritative context      |
+| `decision_type`        | `VARCHAR(20)`  | Y        | host moderation 결정 type                                                        |
+| `reject_reason_code`   | `VARCHAR(30)`  | Y        | host moderation rejection reason code                                            |
+| `reject_memo`          | `VARCHAR(50)`  | Y        | `OTHER` rejection 시 필수 free-text 메모. internal/private non-authoritative context |
 | `created_at`           | `DATETIME(6)`  | N        | 생성 시각                                                                        |
 | `updated_at`           | `DATETIME(6)`  | N        | 수정 시각 (latest-effective moderation 컬럼 갱신 반영)                           |
 
@@ -559,15 +561,20 @@ Unique / Index:
 
 - `index(crew_participant_id, server_time)`
 - `index(crew_participant_id, certification_status, server_time)`
+- `check(char_length(caption) between 5 and 100)`
 
 상태값 / Enum:
 
 - `certification_status`: `PENDING_REVIEW`, `SUCCESS`, `FAILED`
 - `failure_reason`: `EXIF_MISSING`, `EXIF_TIME_INVALID`, `BEFORE_START`, `AFTER_END`, `AFTER_WITHDRAWN`
+- `decision_type`: `MANUAL_APPROVE`, `MANUAL_REJECT`, `AUTO_APPROVE`, `AUTO_REJECT`
+- `reject_reason_code`: `TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER`
 
 주의사항:
 
 - `crew_participant_id` 기준으로만 기록한다. 방과 회원은 참여 엔티티를 통해 역추적한다.
+- 유효한 `mission_log` 생성에는 `image_s3_key`와 `caption`이 함께 필요하다. `image_s3_key`는 서버가 검증한 이미지 object 존재/범위의 저장소 키이며, `image_url`은 조회/서빙용 nullable URL이다. caption-only mission log는 허용하지 않는다.
+- `caption`은 사진과 함께 제출하는 필수 인증 텍스트이며 5~100자를 저장한다. 인증 피드 표시와 replay/audit 설명에 필요한 evidence지만, AI 설명 텍스트나 moderation memo가 아니고 단독 성공/실패 판단 또는 settlement 기준이 아니다.
 - `exif_taken_at`은 클라이언트가 제출한 값을 신뢰해 저장하는 컬럼이 아니다. 서버가 S3에 업로드된 object에서 EXIF를 추출/검증한 결과를 저장한다.
 - `image_hash`는 서버가 S3 object에서 직접 계산한 SHA-256이며 클라이언트 제출 hash를 신뢰해서 저장하는 컬럼이 아니다. 동일/유사 사진 식별에 사용하는 fraud/risk signal이며 단독으로 final 인정/거절 authority가 아니다.
 - EXIF가 없거나 유효하지 않으면 `failure_reason`은 `EXIF_MISSING` 또는 `EXIF_TIME_INVALID`가 된다.
@@ -577,8 +584,9 @@ Unique / Index:
 - 조회 시점 성공 표시와 최종 인정 횟수는 다를 수 있으므로, 최종 결과는 `settlement_item`에서 설명한다.
 - `certification_status`는 인증 피드 badge, projection/dashboard, 알림 입력에서 사용하는 resolved certification state다. (`PENDING_REVIEW`: 업로드 직후 검수/판정 대기, `SUCCESS`: 인증 인정, `FAILED`: 인정 불가.) EXIF/hash raw signal이나 host moderation `decision_type`/`reject_reason_code`와 같은 의미 axis로 사용하지 않으며, settlement 인정 횟수 계산은 `calculation_reason`을 통해 별도 표현한다.
 - `failure_reason`(system/timing axis)과 `reject_reason_code`(host moderation rejection axis)는 서로 다른 의미 axis다. 한쪽 enum을 다른 쪽에 재사용하지 않는다.
-- `moderator_id`, `moderator_decided_at`, `decision_type`, `reject_reason_code`, `reject_memo`는 host moderation input authority의 흔적이며 settlement/lifecycle/ledger authority를 가지지 않는다. 후속 변경은 새 row를 만들지 않고 latest-effective 컬럼 갱신 + `moderation_history` append로 표현한다.
-- `reject_memo`는 `reject_reason_code = OTHER`인 경우에만 채워지는 비식별 context이며 settlement truth/공개 노출 대상이 아니다.
+- `moderator_id`, `moderator_decided_at`, `decision_type`, `reject_reason_code`, `reject_memo`는 host moderation input authority의 흔적이며 settlement/lifecycle/ledger authority를 가지지 않는다. 후속 moderation 변경은 기존 `mission_log` row의 latest-effective moderation 컬럼을 UPDATE하고, 별도 `moderation_history` row를 INSERT해 append-only audit trail을 보존한다.
+- `AUTO_APPROVE`/`AUTO_REJECT`는 certification-axis system moderation outcome일 뿐 client input, AI authority, admin/support/dispute/override state, settlement authority, ledger authority가 아니다.
+- `reject_memo`는 일반적으로 nullable이지만 `reject_reason_code = OTHER`인 경우 필수이며 50자 이내로 제한한다. internal/private non-authoritative context이고 settlement truth/공개 canonical state/ledger correction authority가 아니다.
 
 ### `mission_log_reaction`
 
@@ -594,7 +602,7 @@ Unique / Index:
 | `id`             | `BIGINT`      | N        | 리액션 PK           |
 | `mission_log_id` | `BIGINT`      | N        | 인증 로그 FK        |
 | `member_id`      | `BIGINT`      | N        | 리액션 작성 회원 FK |
-| `reaction_type`  | `VARCHAR(20)` | N        | 리액션 종류         |
+| `reaction_type`  | `VARCHAR(20)` | N        | OS emoji string / normalized emoji token 후보 |
 | `created_at`     | `DATETIME(6)` | N        | 생성 시각           |
 | `updated_at`     | `DATETIME(6)` | N        | 수정 시각           |
 
@@ -609,18 +617,18 @@ FK:
 
 Unique / Index:
 
-- `unique(mission_log_id, member_id)`
+- `unique(mission_log_id, member_id, reaction_type)`
 - `index(mission_log_id)`
 - `index(member_id, created_at)`
 
-상태값 / Enum:
+상태값 / Token:
 
-- `reaction_type`: `CHEER`, `CLAP`, `FIRE`
+- `reaction_type`: 고정 enum이 아니라 OS 기본 emoji picker 기반 문자열 또는 normalized emoji token을 저장한다. Unicode normalization, variation selector, ZWJ/skin-tone 처리, 최대 byte 길이는 API/FE 후속 결정으로 남긴다.
 
 주의사항:
 
 - 리액션은 `mission_log.certification_status = 'SUCCESS'`인 feed-eligible 로그에만 허용한다. 이 제약은 API/애플리케이션 계층에서 검증한다.
-- 한 회원은 한 `mission_log`에 하나의 리액션만 가진다. `POST`는 같은 unique key를 기준으로 멱등 upsert하고, `DELETE /me`는 멱등 delete한다.
+- 한 회원은 한 `mission_log`에 여러 `reaction_type`을 남길 수 있지만, 동일 `(mission_log_id, member_id, reaction_type)`은 한 번만 허용한다. 토글/idempotency 기준은 같은 `reaction_type` 단위다.
 - 리액션 수는 이 테이블에서 파생 계산한다. `mission_log`에 `reaction_count` 같은 저장 카운터를 추가하지 않는다.
 - 리액션 생성, 수정, 삭제는 `mission_log.certification_status`, `failure_reason`, 이미지, 서버 시간 등 원본 로그를 변경하지 않는다.
 - 리액션은 `settlement`, `settlement_item`, `point_history`, 환급 상태, `Crew.status`, `CrewParticipant.status`, `Settlement.status`를 생성하거나 수정하거나 롤백하지 않는다.
@@ -642,9 +650,9 @@ Unique / Index:
 | `mission_log_id`     | `BIGINT`      | N        | 대상 `mission_log` FK                                  |
 | `before_state`       | `JSON`        | Y        | 변경 직전 effective moderation state snapshot          |
 | `after_state`        | `JSON`        | N        | 변경 직후 effective moderation state snapshot          |
-| `decision_type`      | `VARCHAR(20)` | N        | 결정 type. enum 값은 deferred decision                 |
-| `reject_reason_code` | `VARCHAR(30)` | Y        | rejection reason code. 정확한 이름은 deferred decision |
-| `reject_memo`        | `VARCHAR(50)` | Y        | `OTHER` 결정 시에만 사용하는 free-text 메모            |
+| `decision_type`      | `VARCHAR(20)` | N        | 결정 type                                             |
+| `reject_reason_code` | `VARCHAR(30)` | Y        | rejection reason code                                 |
+| `reject_memo`        | `VARCHAR(50)` | Y        | `OTHER` 결정 시 필수 free-text 메모                    |
 | `moderator_id`       | `BIGINT`      | N        | 결정자 FK (member)                                     |
 | `changed_at`         | `DATETIME(6)` | N        | transition 시각                                        |
 
@@ -663,11 +671,15 @@ Unique / Index:
 
 상태값 / Enum:
 
-- `decision_type` / `reject_reason_code` 값은 `mission_log`와 동일 vocabulary를 공유하며 둘 다 deferred decision이다.
+- `decision_type`: `MANUAL_APPROVE`, `MANUAL_REJECT`, `AUTO_APPROVE`, `AUTO_REJECT`
+- `reject_reason_code`: `TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER`
+- `decision_type` / `reject_reason_code` 값은 `mission_log`와 동일 vocabulary를 공유한다.
 
 주의사항:
 
 - append-only다. UPDATE/DELETE를 허용하지 않으며 후속 결정 변경은 새 row append로 표현한다.
+- `AUTO_APPROVE`/`AUTO_REJECT`는 certification-axis system moderation outcome일 뿐 client input, AI authority, admin/support/dispute/override state, settlement authority, ledger authority가 아니다.
+- `reject_memo`는 일반적으로 nullable이지만 `reject_reason_code = OTHER`인 경우 필수이며 50자 이내로 제한한다. internal/private non-authoritative context이고 공개 canonical state가 아니다.
 - 운영 memo, support note, UX wording은 authoritative transition 정보가 아니다. `before_state`/`after_state`는 effective state, transition, reason code, actor, timestamp만 보존하고 free-form memo는 `reject_memo`로만 제한 저장한다.
 - host correction window 안의 결정 변경은 `mission_log` latest-effective 컬럼 갱신 + 이 테이블 append로 표현한다. settlement input freeze 이후에는 record가 추가되어도 frozen settlement/원장은 변경하지 않는다.
 - 이 테이블은 host moderation input authority의 audit 흔적이며 admin correction/dispute workflow, settlement authority가 아니다.
@@ -830,7 +842,7 @@ Unique / Index:
 - `unique(released_point_history_id)` on `crew_participant` with nullable-unique semantics
 - `unique(crew_id)` on `settlement`
 - `unique(settlement_id, crew_participant_id)` on `settlement_item`
-- `unique(mission_log_id, member_id)` on `mission_log_reaction`
+- `unique(mission_log_id, member_id, reaction_type)` on `mission_log_reaction`
 - `unique(point_history.idempotency_key)` on `point_history` (`VARCHAR(160)` 권장)
 
 정산 안정성을 높이는 보조 제약:
@@ -1006,6 +1018,7 @@ erDiagram
         BIGINT crew_participant_id FK
         VARCHAR image_url
         VARCHAR image_s3_key
+        VARCHAR caption
         CHAR image_hash
         DATETIME server_time
         DATETIME exif_taken_at
@@ -1019,10 +1032,10 @@ erDiagram
         DATETIME created_at
         DATETIME updated_at
     }
-    %% MISSION_LOG: nullable=image_url, image_hash, exif_taken_at, failure_reason, moderator_id, moderator_decided_at, decision_type, reject_reason_code, reject_memo.
+    %% MISSION_LOG: nullable=image_url, image_hash, exif_taken_at, failure_reason, moderator_id, moderator_decided_at, decision_type, reject_reason_code, reject_memo; image_s3_key and caption are required together; CHECK(char_length(caption) between 5 and 100).
     %% MISSION_LOG indexes: IDX(crew_participant_id, server_time), IDX(crew_participant_id, certification_status, server_time).
-    %% MISSION_LOG enums: certification_status=PENDING_REVIEW|SUCCESS|FAILED; failure_reason=EXIF_MISSING|EXIF_TIME_INVALID|BEFORE_START|AFTER_END|AFTER_WITHDRAWN.
-    %% MISSION_LOG note: image_hash and exif_taken_at are server-derived risk/timing signals, not final authority; created_at and id remain available for deterministic tie-breaks.
+    %% MISSION_LOG enums: certification_status=PENDING_REVIEW|SUCCESS|FAILED; failure_reason=EXIF_MISSING|EXIF_TIME_INVALID|BEFORE_START|AFTER_END|AFTER_WITHDRAWN; decision_type=MANUAL_APPROVE|MANUAL_REJECT|AUTO_APPROVE|AUTO_REJECT; reject_reason_code=TIME_VIOLATION|DUPLICATE|MISSION_MISMATCH|UNCLEAR|INAPPROPRIATE|OTHER.
+    %% MISSION_LOG note: image_url is a nullable serving URL; image_hash and exif_taken_at are server-derived risk/timing signals, not final decision inputs; caption is required display/replay evidence, not a standalone decision input; created_at and id remain available for deterministic tie-breaks.
 
     MODERATION_HISTORY {
         BIGINT id PK
@@ -1035,8 +1048,8 @@ erDiagram
         BIGINT moderator_id FK
         DATETIME changed_at
     }
-    %% MODERATION_HISTORY: append-only transition ledger; nullable=before_state, reject_reason_code, reject_memo; IDX(mission_log_id, changed_at).
-    %% MODERATION_HISTORY note: latest effective state is reflected on MISSION_LOG, but corrections append history rows rather than overwriting the chain.
+    %% MODERATION_HISTORY: append-only transition ledger; nullable=before_state, reject_reason_code, reject_memo; IDX(mission_log_id, changed_at); decision_type=MANUAL_APPROVE|MANUAL_REJECT|AUTO_APPROVE|AUTO_REJECT; reject_reason_code=TIME_VIOLATION|DUPLICATE|MISSION_MISMATCH|UNCLEAR|INAPPROPRIATE|OTHER.
+    %% MODERATION_HISTORY note: moderation changes UPDATE latest-effective MISSION_LOG columns and INSERT a new append-only history row; post-freeze history append does not mutate frozen settlement or ledger; reject_memo is required for OTHER and remains internal/private non-authoritative context.
 
     MISSION_LOG_REACTION {
         BIGINT id PK
@@ -1046,8 +1059,8 @@ erDiagram
         DATETIME created_at
         DATETIME updated_at
     }
-    %% MISSION_LOG_REACTION: UK(mission_log_id, member_id); IDX(mission_log_id), IDX(member_id, created_at); reaction_type=CHEER|CLAP|FIRE.
-    %% MISSION_LOG_REACTION note: feed/social metadata only; reaction counts are derived and do not affect certification or settlement state.
+    %% MISSION_LOG_REACTION: UK(mission_log_id, member_id, reaction_type); IDX(mission_log_id), IDX(member_id, created_at); reaction_type is an OS emoji string / normalized emoji token candidate, not a fixed enum.
+    %% MISSION_LOG_REACTION note: feed/social metadata only; same emoji token toggles idempotently per member/log; multiple emoji tokens may coexist; counts are derived and do not affect certification or payout state.
 
     SETTLEMENT {
         BIGINT id PK
@@ -1139,8 +1152,8 @@ erDiagram
 
 이 절은 ERD에 컬럼/테이블 형태로만 freeze되고 값 catalog/정책/노출 정책은 freeze되지 않은 결정들을 명시한다. ERD는 "정책 결정 장소"가 아니라 "확정된 semantics의 물리적 반영"이므로, 아래 항목은 후속 결정 전까지 ERD가 enum/policy를 invent하지 않는다.
 
-- `mission_log.decision_type` enum 값은 freeze하지 않는다. host moderation 결정 type의 정확한 값(예: MANUAL_APPROVE/MANUAL_REJECT 등)은 source-of-truth 확정 후 별도 결정한다. AUTO 경로는 PRD/Usecase 확정 전 ERD가 발명하지 않는다.
-- `mission_log.reject_reason_code` 정확한 값 이름은 freeze하지 않는다. 6개 enum과 `OTHER` 존재만 확인됐고 나머지 5개 이름은 source 재확인 후 결정한다.
+- MVP moderation vocabulary는 `mission_log` / `moderation_history` 기준으로 freeze한다: 결정 type 4종(`MANUAL_APPROVE`, `MANUAL_REJECT`, `AUTO_APPROVE`, `AUTO_REJECT`)과 반려 reason code 6종(`TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER`).
+- 추가 moderation 값과 admin/correction/dispute/override workflow 값은 이 ERD가 발명하지 않으며, 새 source-of-truth decision 없이는 추가하지 않는다.
 - `crew.category` catalog 형태(고정 enum / managed catalog 테이블 / free string)는 deferred decision이다. 필수 컬럼 존재만 freeze한다.
 - `crew.host_agreement_snapshot` payload shape는 deferred decision이다. JSON column 존재만 freeze한다.
 - `moderation_history` 노출 범위 (host-only / participant-self / role matrix)는 deferred decision이다. 저장 schema만 freeze하고 노출 정책은 `API-spec`이 후속 propagation한다.

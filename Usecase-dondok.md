@@ -172,7 +172,7 @@ Hardening은 engagement mechanics 제거가 아니다. 실시간 지분율, 상�
 - 실시간 지분율/기여도: 현재 입력 기준 projection visibility이며 final settlement input mutation 권한이 아니다.
 - 상대적 순위/위치: cooperative persistence를 돕는 상대 위치 표시이며 adversarial leaderboard가 아니다.
 - 예상 환급금: 불안 완화와 정산 설명을 위한 current-basis estimate이며 payout promise가 아니다.
-- 인증 피드/리액션: social richness와 응원을 위한 engagement surface이며 certification result authority가 아니다.
+- 인증 피드/리액션: social richness와 응원을 위한 engagement surface이며 certification result authority가 아니다. 리액션은 OS emoji/free token 기반 social metadata이고, 동일 token 단위로만 toggle/idempotency를 판단한다.
 - 결과 카드/공유 욕구: final settlement 이후 completion ritual과 virality intent이며 projection 공유 카드나 금전적 우위 자랑 카드가 아니다.
 - 알림 richness: 사용자를 canonical 화면으로 다시 데려오는 hint/deep-link이며 state authority가 아니다.
 
@@ -273,11 +273,11 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Participant, system
 - **Classification**: actor-performed usecase (Participant certification submission; upload ≠ certification success)
 - **Preconditions**: Participant is eligible to submit; upload route available.
-- **Main Flow**: User uploads image, then creates mission-log/certification record through server validation.
-- **Failure Flow**: Upload succeeds but mission-log creation fails; image object orphaned; validation delayed near cutoff.
-- **Authority Boundary**: Upload object existence is not certification authority. MissionLog with server validation is the authority boundary.
-- **Projection Impact**: No projection impact until successful/eligible mission-log candidate exists.
-- **Settlement Impact**: No recognition without authoritative log/input.
+- **Main Flow**: User uploads image, then creates mission-log/certification record with `image_s3_key` and required 5~100 char `caption` through server validation.
+- **Failure Flow**: Upload succeeds but mission-log creation fails; image object orphaned; image-only or caption-only submission is rejected; validation delayed near cutoff.
+- **Authority Boundary**: Upload object existence and caption text alone do not establish certification. The server-validated `MissionLog` boundary requires both image object key and caption.
+- **Projection Impact**: No projection impact until successful/eligible mission-log candidate exists. Caption may be displayed for feed/replay context but does not decide success/failure by itself.
+- **Settlement Impact**: No recognition without authoritative log/input; caption is not settlement input.
 - **UX Risk**: User thinks “image uploaded” equals “certification submitted.”
 - **Related Domain Objects**: upload object, `mission_log`.
 
@@ -314,7 +314,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Preconditions**: Multiple successful raw logs exist in the same cadence period.
 - **Main Flow**: Raw logs remain append-only; projection/settlement recognizes only allowed count according to cadence.
 - **Failure Flow**: Feed success count inflates final settlement recognized count.
-- **Authority Boundary**: Feed visibility is not settlement recognition.
+- **Authority Boundary**: Settlement recognition does not come from feed visibility or reaction activity. Reactions are social metadata only and do not affect certification, payout calculation, point ledger, crew status, or participant status.
 - **Projection Impact**: Projection must apply current-basis recognition rules consistent with settlement inputs, but remains a non-final estimate until Settlement.status = SUCCEEDED and point_history is committed.
 - **Settlement Impact**: Excluded logs need calculation reasons.
 - **UX Risk**: User thinks every successful feed post increases payout.
@@ -325,8 +325,8 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Host, participant, system
 - **Classification**: actor-performed usecase (Host moderation of certification input; append-only, pre-freeze only)
 - **Preconditions**: Certification log exists and is eligible for review.
-- **Main Flow**: Host appends contextual certification input review decision with actor, reason category, and time.
-- **Failure Flow**: Host decision overwrites prior history or directly mutates settlement/ledger.
+- **Main Flow**: Host records contextual certification input review decision with actor, reason category, and time; `mission_log` latest-effective moderation columns update and `moderation_history` receives an append-only row.
+- **Failure Flow**: Host decision overwrites prior history, deletes audit rows, or directly mutates settlement/ledger.
 - **Authority Boundary**: Host can affect certification input before freeze; host cannot determine settlement amount, ledger output, final settlement, participant baseline, replay, retry, or correction.
 - **Projection Impact**: Current-basis projection may update when effective moderation input changes, with explanation of the changed input state.
 - **Settlement Impact**: Settlement consumes the resolved moderation state at freeze.
@@ -338,8 +338,8 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Host, participant, system
 - **Classification**: extension / variant of UC-A10 (append-only correction event before freeze; not state overwrite)
 - **Preconditions**: Prior moderation decision exists; settlement input not frozen.
-- **Main Flow**: New moderation event is appended; current-effective interpretation may change.
-- **Failure Flow**: Prior decision is deleted or silently changed.
+- **Main Flow**: New moderation event is appended and the `mission_log` latest-effective snapshot may update; current-effective interpretation may change before freeze.
+- **Failure Flow**: Prior decision is deleted, silently changed without a history row, or applied after freeze as payout mutation.
 - **Authority Boundary**: Correction is append-only and only affects settlement input if before freeze.
 - **Projection Impact**: Current-basis expected settlement state and contribution/progress visibility may update with explanation.
 - **Settlement Impact**: Settlement input changes only before freeze.
@@ -440,7 +440,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A19 — Notification and Reconnect State Drift
 
 - **Actors**: Participant, system, client
-- **Classification**: cross-cutting non-authoritative semantics (notification = hint only; canonical API is source of truth)
+- **Classification**: cross-cutting non-authoritative semantics (notification = hint only; canonical state is refetched from API)
 - **Preconditions**: Notification/SSE/FCM/event delivery exists.
 - **Main Flow**: Notification arrives as a best-effort re-entry hint; the client follows `deep_link` and refetches canonical API state before rendering current truth.
 - **Failure Flow**: Late, missed, duplicate, or out-of-order notification contradicts current canonical state; canonical API state wins and notification failure does **not** trigger domain retry.
