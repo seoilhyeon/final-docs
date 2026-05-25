@@ -625,12 +625,12 @@ MVP `calculation_reason` vocabulary:
 ### 8.8 `failure_reason`(system axis)과 `reject_reason_code`(moderation axis) 분리
 
 - `mission_log.failure_reason`은 system/timing/upload validation axis다. 서버가 인증 시점에 결정하는 system 실패 사유(예: `BEFORE_START`, `AFTER_END`, EXIF risk signal)를 저장한다.
-- `mission_log.reject_reason_code`는 host moderation rejection axis다. 호스트 검수자가 결정하는 거절 사유 코드이며 값은 `TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER`로 freeze한다. `OTHER`는 internal/private `reject_memo`(최대 50자)를 요구한다.
+- `mission_log.reject_reason_code`는 host moderation rejection axis다. 호스트 검수자가 결정하는 거절 사유 코드이며 값은 `TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER`로 freeze한다. `OTHER`는 internal/private `reject_memo`(최대 50자)를 요구하며, 이 memo는 settlement input이나 participant-facing canonical state가 아니다.
 - `mission_log.decision_type`은 moderation action type이며 값은 `MANUAL_APPROVE`, `MANUAL_REJECT`, `AUTO_APPROVE`, `AUTO_REJECT`로 freeze한다. 값 자체는 host/system moderation source를 설명할 뿐 settlement authority나 lifecycle authority가 아니다.
 - 두 axis는 서로 다른 의미 vocabulary다. 한쪽 enum 값을 다른 쪽에 재사용하거나 한쪽 컬럼에 다른 axis의 값을 저장하지 않는다.
 - host 거절은 `mission_log.failure_reason`에 기록하지 않고 `reject_reason_code` + `decision_type` + `moderator_*` 컬럼과 `moderation_history` append로 표현한다.
 - `mission_log`는 latest-effective moderation snapshot을 보유하고, `moderation_history`는 append-only audit trail을 보유한다. 후속 pre-freeze 변경은 snapshot UPDATE + history INSERT로 남기지만, settlement input freeze 이후 append는 frozen settlement snapshot이나 point ledger를 변경하지 않는다.
-- `caption`, 리액션, notification은 정산 입력 기준이 아니다. Final settlement는 frozen participant baseline과 resolved certification state를 freeze 시점에 소비한다.
+- `caption`, 리액션, emoji token 처리, notification은 정산 입력 기준이 아니다. Final settlement는 frozen participant baseline과 resolved certification state를 freeze 시점에 소비한다.
 
 ## 9. 정산 알고리즘
 

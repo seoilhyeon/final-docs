@@ -172,7 +172,7 @@ Hardening은 engagement mechanics 제거가 아니다. 실시간 지분율, 상�
 - 실시간 지분율/기여도: 현재 입력 기준 projection visibility이며 final settlement input mutation 권한이 아니다.
 - 상대적 순위/위치: cooperative persistence를 돕는 상대 위치 표시이며 adversarial leaderboard가 아니다.
 - 예상 환급금: 불안 완화와 정산 설명을 위한 current-basis estimate이며 payout promise가 아니다.
-- 인증 피드/리액션: social richness와 응원을 위한 engagement surface이며 certification result authority가 아니다. 리액션은 OS emoji/free token 기반 social metadata이고, 동일 token 단위로만 toggle/idempotency를 판단한다.
+- 인증 피드/리액션: social richness와 응원을 위한 engagement surface이며 certification result authority가 아니다. 리액션은 OS emoji/free token 기반 social metadata이고, FE가 선택한 token 문자열 그대로 같은 reaction_type으로 취급한다. 동일 token 단위로만 toggle/delete/idempotency를 판단하며 여러 token은 공존할 수 있다.
 - 결과 카드/공유 욕구: final settlement 이후 completion ritual과 virality intent이며 projection 공유 카드나 금전적 우위 자랑 카드가 아니다.
 - 알림 richness: 사용자를 canonical 화면으로 다시 데려오는 hint/deep-link이며 state authority가 아니다.
 
@@ -327,7 +327,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Preconditions**: Certification log exists and is eligible for review.
 - **Main Flow**: Host records contextual certification input review decision with actor, reason category, and time; `mission_log` latest-effective moderation columns update and `moderation_history` receives an append-only row.
 - **Failure Flow**: Host decision overwrites prior history, deletes audit rows, or directly mutates settlement/ledger.
-- **Authority Boundary**: Host can affect certification input before freeze; host cannot determine settlement amount, ledger output, final settlement, participant baseline, replay, retry, or correction.
+- **Authority Boundary**: Host can affect certification input before freeze; host cannot determine settlement amount, ledger output, final settlement, participant baseline, replay, retry, or correction. Participants receive reason-code-level rejection explanation only; raw `reject_memo` text stays hidden in MVP.
 - **Projection Impact**: Current-basis projection may update when effective moderation input changes, with explanation of the changed input state.
 - **Settlement Impact**: Settlement consumes the resolved moderation state at freeze.
 - **UX Risk**: Participant interprets rejection as host confiscating money or personally judging the participant.
@@ -340,7 +340,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Preconditions**: Prior moderation decision exists; settlement input not frozen.
 - **Main Flow**: New moderation event is appended and the `mission_log` latest-effective snapshot may update; current-effective interpretation may change before freeze.
 - **Failure Flow**: Prior decision is deleted, silently changed without a history row, or applied after freeze as payout mutation.
-- **Authority Boundary**: Correction is append-only and only affects settlement input if before freeze.
+- **Authority Boundary**: Correction is append-only and only affects settlement input if before freeze. `reject_memo` remains internal/private context rather than participant-facing canonical explanation.
 - **Projection Impact**: Current-basis expected settlement state and contribution/progress visibility may update with explanation.
 - **Settlement Impact**: Settlement input changes only before freeze.
 - **UX Risk**: User sees estimate change as arbitrary money removal rather than a visible input-state update.

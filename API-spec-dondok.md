@@ -168,7 +168,7 @@
 - `UNCLEAR`
 - `INAPPROPRIATE`
 - `OTHER`
-- `reject_memo`는 일반적으로 nullable이지만 `reject_reason_code = OTHER`일 때 필수이며 최대 50자다. internal/private context이고 공개 canonical state나 settlement/ledger authority가 아니다.
+- `reject_memo`는 일반적으로 nullable이지만 `reject_reason_code = OTHER`일 때 필수이며 최대 50자다. internal/private context이고 participant-facing canonical state나 settlement/ledger authority가 아니다.
 
 ### 3.11 SettlementFailureCode
 
@@ -227,9 +227,11 @@
 
 ### 3.17 MissionLogReactionType
 
-- `reaction_type`은 고정 enum이 아니라 OS 기본 emoji picker 기반 string / normalized emoji token이다.
+- `reaction_type`은 고정 enum이 아니라 OS 기본 emoji picker 기반 string / normalized emoji token 후보다.
+- FE는 사용자가 선택한 emoji grapheme/token 문자열을 그대로 전송한다.
+- BE는 `trim`, blank reject, 기존 `VARCHAR(20)` 저장 길이 검증만 수행한다.
+- MVP에서는 NFC/NFD 정규화, variation selector collapsing, ZWJ/skin-tone equivalence normalization을 적용하지 않는다. 같은 문자열만 같은 `reaction_type`으로 본다.
 - API는 동일 `(mission_log_id, member_id, reaction_type)` 단위로 toggle/delete/idempotency를 판단한다. 한 회원이 같은 feed item에 여러 emoji token을 동시에 남길 수 있지만, 같은 token은 1회만 허용한다.
-- Unicode normalization, variation selector, ZWJ/skin-tone 처리, max byte length는 API/FE propagation TODO로 남긴다.
 - 리액션은 소셜 메타데이터 전용이다. 포인트 원장, 정산, 환급, AI 리포트, 상태 생명주기 enum과 연결하지 않는다.
 
 ## 4. API 목록
@@ -257,7 +259,7 @@
 | 피드/리액션 | `GET`    | `/api/crews/{crewId}/feed`                      | 방 인증 피드와 파생 일자 상태 조회       |
 | 대시보드    | `GET`    | `/api/crews/{crewId}/dashboard`                 | 진행 상황/환급 설명용 current-basis projection 조회 |
 | 피드/리액션 | `POST`   | `/api/mission-logs/{missionLogId}/reactions`    | 내 리액션 멱등 upsert                    |
-| 피드/리액션 | `DELETE` | `/api/mission-logs/{missionLogId}/reactions/me` | 내 리액션 멱등 삭제                      |
+| 피드/리액션 | `DELETE` | `/api/mission-logs/{missionLogId}/reactions/me?reaction_type={reaction_type}` | 내 특정 emoji token 리액션 멱등 삭제 |
 | 정산        | `GET`    | `/api/crews/{crewId}/settlement`                | 방 기준 정산 상태/요약 조회              |
 | 정산        | `GET`    | `/api/settlements/{settlementId}`               | 정산 결과 상세 조회                      |
 | 정산        | `GET`    | `/api/admin/settlements`                        | 관리자 정산 실패/대기 목록 조회          |
@@ -1053,7 +1055,7 @@ Error:
 - `exif_taken_at`은 서버가 S3 object에서 추출/검증한 촬영 시각 보조 정보이며, 최종 정산 인정 시각 기준으로 사용하지 않는다.
 - `image_hash`는 서버 계산 SHA-256 결과의 read-only 노출이며, 동일 인증 사진 중복 의심 신호일 뿐 authority가 아니다.
 - `certification_status`는 인증 요청의 resolved certification state(`PENDING_REVIEW`/`SUCCESS`/`FAILED`)이며, 정산에서 인정된 횟수를 나타내는 값이 아니다.
-- `decision_type`, `reject_reason_code`는 현재 latest-effective 검수 결과 projection이다. `reject_memo`는 internal/private context이므로 본 응답에 포함하지 않는다. 참여자 노출 정책은 별도 API/UX 결정으로 남긴다.
+- `decision_type`, `reject_reason_code`는 현재 latest-effective 검수 결과 projection이다. 참여자-facing 응답은 `reject_reason_code`만 제공하고 `reject_memo`를 포함하지 않는다. `reject_memo`는 internal/private context다.
 - FE는 이 값을 `최종 성공 횟수` 또는 `정산 인정 횟수`로 사용하면 안 된다.
 - 최종 인정 여부와 인정 횟수는 반드시 정산 결과 API `GET /api/settlements/{settlementId}`를 기준으로 판단해야 한다.
 
@@ -1104,7 +1106,7 @@ Error:
 - 조회 권한 매트릭스(누가 어디까지 볼 수 있는지)는 deferred decision이다. MVP 1차 구현 범위는 호스트 본인 + 본인 인증 로그에 대한 본인 참여자로 한정한다.
 - `decision_type`은 `MANUAL_APPROVE`, `MANUAL_REJECT`, `AUTO_APPROVE`, `AUTO_REJECT`만 사용한다.
 - `reject_reason_code`는 `TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER`만 사용한다.
-- `reject_memo`는 일반적으로 nullable이지만 `OTHER`일 때 필수이며 최대 50자다. internal/private context이므로 본 응답에 노출하지 않는다. 참여자 노출 정책은 별도 API/UX 결정으로 남긴다.
+- `reject_memo`는 일반적으로 nullable이지만 `OTHER`일 때 필수이며 최대 50자다. internal/private context이므로 participant-facing 응답에는 포함하지 않는다. `OTHER`여도 참여자는 raw memo text가 아니라 `reject_reason_code`만 받는다.
 - `before_state`, `after_state`는 검수 결정 시점의 latest-effective snapshot JSON이다. 정산 결과를 재계산하는 입력으로 사용하지 않는다.
 - 검수자 식별은 `moderator_member_uuid`로만 노출한다. internal FK `moderator_id`는 응답에 포함하지 않는다.
 - 이 API는 운영 admin 권한 endpoint가 아니다. MVP에서는 admin/correction workflow를 발명하지 않는다.
@@ -1255,15 +1257,21 @@ Error:
 - 구현은 `(mission_log_id, member_id, reaction_type)` unique constraint 기반의 DB-level idempotency를 MUST로 한다. SQL 문법은 실제 MySQL 8.0 stack에 맞춘다.
 - 동일 `(mission_log_id, member_id, reaction_type)`에 대한 동시 중복 요청은 DB unique conflict 때문에 API 에러가 되어서는 안 되며, 최종 상태는 해당 token 1개 존재로 수렴해야 한다.
 - 한 회원은 한 `MissionLog`에 여러 emoji token을 남길 수 있지만, 동일 token은 1회만 허용한다.
-- TODO(API/FE): emoji normalization(Unicode normalization, variation selector, ZWJ/skin-tone, max byte length)과 toggle-on-existing의 정확한 응답 semantics를 확정한다.
+- Emoji token minimal-freeze: FE-selected token을 서버가 새 등가 규칙으로 바꾸지 않는다. BE는 trim 후 blank를 거절하고 `VARCHAR(20)` 저장 길이를 검증한다. NFC/NFD, variation selector, ZWJ/skin-tone 동등성 처리는 MVP에서 적용하지 않는다.
 - 리액션 생성/수정은 `mission_log`를 mutate하지 않는다.
 - 리액션은 정산, 환급, 포인트 원장, AI 리포트, 방/참여/정산 상태 전이에 side effect를 만들지 않는다.
 
-### `DELETE /api/mission-logs/{missionLogId}/reactions/me`
+### `DELETE /api/mission-logs/{missionLogId}/reactions/me?reaction_type={reaction_type}`
 
 역할:
 
-- 현재 로그인한 회원의 해당 인증 성공 게시물 리액션을 멱등 삭제한다.
+- 현재 로그인한 회원의 해당 인증 성공 게시물에서 지정한 emoji token 리액션을 멱등 삭제한다.
+
+Query:
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `reaction_type` | `string` | Y | 삭제할 OS emoji string / normalized emoji token 후보. URL encoding 필요 |
 
 Response `200 OK`:
 
@@ -1286,7 +1294,8 @@ Error:
 정책:
 
 - 리액션이 이미 없어도 성공 응답을 반환한다.
-- 삭제는 의미상 `(mission_log_id, member_id, reaction_type)` 기준 멱등 delete다. 현재 `DELETE /api/mission-logs/{missionLogId}/reactions/me` route shape에는 target `reaction_type` 전달 방식이 없으므로 API propagation TODO로 남긴다(query/body/path 중 하나를 선택해야 함).
+- 삭제는 `(mission_log_id, member_id, reaction_type)` 기준 멱등 delete다. 같은 token만 삭제하며 다른 emoji token row는 유지한다.
+- `reaction_type` query parameter는 required다. 클라이언트는 emoji token을 URL encoding해서 전송해야 하며, 서버는 POST와 같은 trim/blank/length 검증을 적용한다.
 - 삭제도 `mission_log` 원본, 정산, 환급, 포인트 원장, AI 리포트, 상태 생명주기에 side effect를 만들지 않는다.
 
 ## 5.5 크루 대시보드

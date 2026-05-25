@@ -586,7 +586,7 @@ Unique / Index:
 - `failure_reason`(system/timing axis)과 `reject_reason_code`(host moderation rejection axis)는 서로 다른 의미 axis다. 한쪽 enum을 다른 쪽에 재사용하지 않는다.
 - `moderator_id`, `moderator_decided_at`, `decision_type`, `reject_reason_code`, `reject_memo`는 host moderation input authority의 흔적이며 settlement/lifecycle/ledger authority를 가지지 않는다. 후속 moderation 변경은 기존 `mission_log` row의 latest-effective moderation 컬럼을 UPDATE하고, 별도 `moderation_history` row를 INSERT해 append-only audit trail을 보존한다.
 - `AUTO_APPROVE`/`AUTO_REJECT`는 certification-axis system moderation outcome일 뿐 client input, AI authority, admin/support/dispute/override state, settlement authority, ledger authority가 아니다.
-- `reject_memo`는 일반적으로 nullable이지만 `reject_reason_code = OTHER`인 경우 필수이며 50자 이내로 제한한다. internal/private non-authoritative context이고 settlement truth/공개 canonical state/ledger correction authority가 아니다.
+- `reject_memo`는 일반적으로 nullable이지만 `reject_reason_code = OTHER`인 경우 필수이며 50자 이내로 제한한다. internal/private non-authoritative context이고 settlement truth, participant-facing canonical state, appeal/dispute workflow, ledger correction authority가 아니다.
 
 ### `mission_log_reaction`
 
@@ -623,12 +623,12 @@ Unique / Index:
 
 상태값 / Token:
 
-- `reaction_type`: 고정 enum이 아니라 OS 기본 emoji picker 기반 문자열 또는 normalized emoji token을 저장한다. Unicode normalization, variation selector, ZWJ/skin-tone 처리, 최대 byte 길이는 API/FE 후속 결정으로 남긴다.
+- `reaction_type`: 고정 enum이 아니라 OS 기본 emoji picker 기반 문자열 또는 normalized emoji token 후보를 저장한다. MVP는 trim/blank validation과 기존 `VARCHAR(20)` 길이 검증만 적용하며 NFC/NFD 정규화, variation selector collapsing, ZWJ/skin-tone 동등성 처리는 적용하지 않는다.
 
 주의사항:
 
 - 리액션은 `mission_log.certification_status = 'SUCCESS'`인 feed-eligible 로그에만 허용한다. 이 제약은 API/애플리케이션 계층에서 검증한다.
-- 한 회원은 한 `mission_log`에 여러 `reaction_type`을 남길 수 있지만, 동일 `(mission_log_id, member_id, reaction_type)`은 한 번만 허용한다. 토글/idempotency 기준은 같은 `reaction_type` 단위다.
+- 한 회원은 한 `mission_log`에 여러 `reaction_type`을 남길 수 있지만, 동일 `(mission_log_id, member_id, reaction_type)`은 한 번만 허용한다. 토글/idempotency/delete 기준은 같은 `reaction_type` token 단위다.
 - 리액션 수는 이 테이블에서 파생 계산한다. `mission_log`에 `reaction_count` 같은 저장 카운터를 추가하지 않는다.
 - 리액션 생성, 수정, 삭제는 `mission_log.certification_status`, `failure_reason`, 이미지, 서버 시간 등 원본 로그를 변경하지 않는다.
 - 리액션은 `settlement`, `settlement_item`, `point_history`, 환급 상태, `Crew.status`, `CrewParticipant.status`, `Settlement.status`를 생성하거나 수정하거나 롤백하지 않는다.
@@ -679,7 +679,7 @@ Unique / Index:
 
 - append-only다. UPDATE/DELETE를 허용하지 않으며 후속 결정 변경은 새 row append로 표현한다.
 - `AUTO_APPROVE`/`AUTO_REJECT`는 certification-axis system moderation outcome일 뿐 client input, AI authority, admin/support/dispute/override state, settlement authority, ledger authority가 아니다.
-- `reject_memo`는 일반적으로 nullable이지만 `reject_reason_code = OTHER`인 경우 필수이며 50자 이내로 제한한다. internal/private non-authoritative context이고 공개 canonical state가 아니다.
+- `reject_memo`는 일반적으로 nullable이지만 `reject_reason_code = OTHER`인 경우 필수이며 50자 이내로 제한한다. internal/private non-authoritative context이고 participant-facing canonical state 또는 appeal/dispute workflow가 아니다.
 - 운영 memo, support note, UX wording은 authoritative transition 정보가 아니다. `before_state`/`after_state`는 effective state, transition, reason code, actor, timestamp만 보존하고 free-form memo는 `reject_memo`로만 제한 저장한다.
 - host correction window 안의 결정 변경은 `mission_log` latest-effective 컬럼 갱신 + 이 테이블 append로 표현한다. settlement input freeze 이후에는 record가 추가되어도 frozen settlement/원장은 변경하지 않는다.
 - 이 테이블은 host moderation input authority의 audit 흔적이며 admin correction/dispute workflow, settlement authority가 아니다.
@@ -1049,7 +1049,7 @@ erDiagram
         DATETIME changed_at
     }
     %% MODERATION_HISTORY: append-only transition ledger; nullable=before_state, reject_reason_code, reject_memo; IDX(mission_log_id, changed_at); decision_type=MANUAL_APPROVE|MANUAL_REJECT|AUTO_APPROVE|AUTO_REJECT; reject_reason_code=TIME_VIOLATION|DUPLICATE|MISSION_MISMATCH|UNCLEAR|INAPPROPRIATE|OTHER.
-    %% MODERATION_HISTORY note: moderation changes UPDATE latest-effective MISSION_LOG columns and INSERT a new append-only history row; post-freeze history append does not mutate frozen settlement or ledger; reject_memo is required for OTHER and remains internal/private non-authoritative context.
+    %% MODERATION_HISTORY note: moderation changes UPDATE latest-effective MISSION_LOG columns and INSERT a new append-only history row; post-freeze history append does not mutate frozen settlement or ledger; reject_memo is required for OTHER and remains internal/private, not participant-facing canonical state.
 
     MISSION_LOG_REACTION {
         BIGINT id PK
@@ -1059,8 +1059,8 @@ erDiagram
         DATETIME created_at
         DATETIME updated_at
     }
-    %% MISSION_LOG_REACTION: UK(mission_log_id, member_id, reaction_type); IDX(mission_log_id), IDX(member_id, created_at); reaction_type is an OS emoji string / normalized emoji token candidate, not a fixed enum.
-    %% MISSION_LOG_REACTION note: feed/social metadata only; same emoji token toggles idempotently per member/log; multiple emoji tokens may coexist; counts are derived and do not affect certification or payout state.
+    %% MISSION_LOG_REACTION: UK(mission_log_id, member_id, reaction_type); IDX(mission_log_id), IDX(member_id, created_at); reaction_type is an OS emoji string / normalized emoji token candidate, not a fixed enum; no emoji canonicalization beyond trim/blank/length validation.
+    %% MISSION_LOG_REACTION note: feed/social metadata only; same emoji token toggles/deletes idempotently per member/log; multiple emoji tokens may coexist; counts are derived and do not affect certification or payout state.
 
     SETTLEMENT {
         BIGINT id PK
@@ -1156,7 +1156,7 @@ erDiagram
 - 추가 moderation 값과 admin/correction/dispute/override workflow 값은 이 ERD가 발명하지 않으며, 새 source-of-truth decision 없이는 추가하지 않는다.
 - `crew.category` catalog 형태(고정 enum / managed catalog 테이블 / free string)는 deferred decision이다. 필수 컬럼 존재만 freeze한다.
 - `crew.host_agreement_snapshot` payload shape는 deferred decision이다. JSON column 존재만 freeze한다.
-- `moderation_history` 노출 범위 (host-only / participant-self / role matrix)는 deferred decision이다. 저장 schema만 freeze하고 노출 정책은 `API-spec`이 후속 propagation한다.
+- `moderation_history` row-level visibility matrix는 deferred decision이다. 다만 `reject_memo` raw text는 MVP participant-facing 응답에 포함하지 않고, 참여자는 reason-code-level 설명만 받는다.
 - replay context (`algorithm_version`, `rule_context_snapshot`)의 public API exposure 정책은 deferred decision이다. ERD는 저장 schema만 freeze한다.
 - `member.is_host_ever`, `member.hosted_crew_count`는 별도 column으로 저장하지 않는 derived projection이며 authoritative counter source-of-truth가 아니다. host badge/카운터는 settlement/lifecycle authority가 아니다.
 - admin/correction/dispute workflow는 이 ERD가 발명하지 않는다. host moderation은 input authority이며 settlement/lifecycle/ledger authority가 아니다.
