@@ -17,9 +17,9 @@ ERD/API/Settlement/Test 문서는 이 PRD synthesis를 기준으로 후속 propa
 - 예상 환급금은 anxiety reduction과 settlement explanation을 위한 현재 기준 projection이며 최종 정산금이 아니다. 최종 정산은 authoritative batch 결과로 확정된다.
 - 실시간 지분율, 상대적 순위/위치, 예상 환급금, 기여도, 결과 카드, 알림 재진입은 engagement visibility로 유지한다. 이는 사용자가 현재 흐름을 이해하고 다시 돌아오게 만드는 UX mechanics이며, 최종 정산·원장·payout authority가 아니다.
 - 정산은 deterministic, explainable, replayable 해야 한다.
-- 전체 인정 성공 기록이 없는 all-fail 상황에서는 누군가의 실패가 다른 참여자의 수익으로 이어지지 않도록 equal principal refund를 적용한다.
+- 전체 인정 성공 기록이 없는 all-fail 상황에서는 누군가의 실패가 다른 참여자의 추가 환급으로 이어지지 않도록 equal principal refund를 적용한다.
 - 사용자 화면에서 도딘(Dodin)은 보증금·환급 UX를 표현하는 user-facing app-money branding이며, authoritative accounting은 point ledger/history가 담당한다. 도딘은 별도 coin, 외부 현금, 인출 가능 자산, 또는 별도 ledger가 아니다.
-- 원단위 절사 잔액은 deterministic하게 방장에게 귀속할 수 있다. 이는 host authority가 아니라 replayable remainder rule이다.
+- 원단위 절사 잔액은 deterministic/replayable calculation rule로 처리한다. 이는 host reward, host authority, 또는 host privilege가 아니다.
 - 모집 마감까지 최소 인원 충족 + 승인 + 예치 Lock 완료 + host disband 없음이면 미션은 start_at 기준 자동 ACTIVE가 되며, MVP에서 activated_at = start_at이다. Host는 activation authority가 아니다.
 - 인증 검증은 layered trust model을 따른다: `server_time`은 timing 기준, EXIF/hash는 fraud/risk signal, moderation은 contextual review, final batch는 authoritative settlement snapshot이다.
 - 방장은 인증 moderation authority를 가지며 이 결정은 정산 입력에 영향을 줄 수 있다. 단, 방장은 정산 엔진, 정산 금액, 포인트 원장을 직접 조작할 수 없다.
@@ -34,7 +34,7 @@ ERD/API/Settlement/Test 문서는 이 PRD synthesis를 기준으로 후속 propa
 
 - scheduler mechanics와 timezone storage
 - DB field naming / API enum / batch job implementation
-- host remainder UX disclosure level
+- deterministic remainder disclosure level
 - moderation enum/state 세부값
 - moderation log 기본 공개 범위
 - 운영 문의 SLA와 담당자
@@ -213,7 +213,7 @@ P1 이후 프로토타입 후보:
 - 예상 환급금 영역에는 아래 문구를 노출한다.
   `예상 환급금 projection은 현재까지의 인증 결과를 기반으로 계산된 현재 기준 예상입니다. 최종 정산 전까지 변동될 수 있으며, 최종 정산은 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 실행되는 final settlement batch 결과로 확정됩니다.`
 - 정산 결과 화면에서 전체 성공 횟수가 `0`인 경우 아래 문구를 노출한다.
-  `이번 미션에서는 인정된 성공 기록이 없어, 누군가의 실패가 다른 참여자의 수익으로 이어지지 않도록 원금을 기준으로 정산되었습니다.`
+  `이번 미션에서는 인정된 성공 기록이 없어, 누군가의 실패가 다른 참여자의 추가 환급으로 이어지지 않도록 원금을 기준으로 정산되었습니다.`
 - 알림 UX에는 아래 문구를 적용한다.
   `알림은 놓치지 않도록 돕는 best-effort 안내이며, 인증 제출과 정산 기준은 앱 내 기록과 final batch를 따릅니다.`
   Android-first MVP에서는 FCM을 background/off-app 재진입 transport로 사용한다. FCM payload, 알림 목록, 읽음 상태, 발송/수신/실패 상태는 canonical history나 audit source가 아니며, 알림 클릭 시 클라이언트는 `deep_link`로 이동한 뒤 관련 canonical API state를 다시 조회해야 한다.
@@ -315,7 +315,7 @@ Dashboard는 운영 중 사용자에게 예상 상태와 그 이유를 설명하
 - 보증금은 1,000~100,000원이며 1,000원 단위로 설정한다.
 - `recruitment_deadline`은 참여자 승인 + 예치 Lock eligibility cutoff다.
 - `recruitment_deadline`까지 승인 + 예치 Lock 완료된 참여자만 frozen participant baseline에 포함된다.
-- 참여 신청 시 보증금 reserve/hold UX는 가능하지만, 승인 + 예치 Lock 완료 전에는 activation eligibility나 frozen participant baseline에 포함되지 않는다.
+- `PENDING` 참여 신청 시 보증금 reserve가 발생하고 사용 가능 잔액은 감소하지만, `LOCKED` 승인 전에는 activation eligibility나 frozen participant baseline에 포함되지 않는다.
 - 승인 전 참여자는 신청을 철회할 수 있으며, 철회 시 reserve/hold된 도딘은 즉시 환급 또는 release되어야 한다.
 - Host 거절 또는 미검토 자동 거절 시 해당 신청은 baseline에 포함되지 않으며 reserve/hold된 도딘은 즉시 환급 또는 release되어야 한다.
 - 승인 + 예치 Lock 완료 후에는 MVP에서 참여 변경/취소를 허용하지 않으며, 해당 참여자는 frozen baseline 후보가 된다.
@@ -335,10 +335,10 @@ Dashboard는 운영 중 사용자에게 예상 상태와 그 이유를 설명하
 - Weekly-N cadence는 Phase 2로 이연한다.
 - Final settlement batch는 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 실행된다.
 - Grace period는 일반 인증 주기에 72시간을 적용하되, 마지막 3일은 grace 없이 즉시 terminal 상태로 처리한다.
-- Projection cutoff는 final settlement batch 직전까지이며, batch 이후 값이 authoritative snapshot이다.
+- Projection은 final settlement batch 전까지 항상 현재 기준 예상이며, batch 이후 authoritative 값은 settlement snapshot과 point_history에서만 확인한다.
 - 단순 성공 횟수만으로 고정 환급금을 배분하지 않는다. 전체 상대 성공률/지분율 기반으로 정산한다.
-- 전체 인정 성공 기록이 없으면 누군가의 실패가 다른 참여자의 수익으로 이어지지 않도록 equal principal refund를 적용한다.
-- 정산 중 소수점/절사 잔액은 deterministic하게 host에게 귀속될 수 있다. 이는 host authority가 아니라 replayable remainder rule이다.
+- 전체 인정 성공 기록이 없으면 누군가의 실패가 다른 참여자의 추가 환급으로 이어지지 않도록 equal principal refund를 적용한다.
+- 정산 중 소수점/절사 잔액은 deterministic/replayable calculation rule로 처리한다. 이는 host reward, host authority, 또는 host privilege가 아니다.
 - 최대 15명 기준에서 remainder 설명은 1~14원 범위를 초과하지 않도록 유지한다.
 
 #### 인증 검증 / Moderation
@@ -598,7 +598,7 @@ Phase 2 후보는 아래와 같다.
 | Layered trust        | signal/state 분리 필요           | 인증 상태와 signal 응답 구분  | resolved state 입력     | EXIF/hash override case                       |
 | Moderation authority | moderation history 필요          | approve/reject/override 계약  | moderation 결과 반영    | audit/history tests                           |
 | Projection boundary  | projection 저장/계산 정책 검토   | dashboard disclaimer/status   | final과 독립            | projection != final tests                     |
-| Host remainder       | settlement snapshot 설명 필요    | settlement detail reason      | floor remainder to host | deterministic remainder tests                 |
+| Deterministic remainder | settlement snapshot 설명 필요 | settlement detail reason | replayable remainder calculation, not host reward/authority | deterministic remainder tests |
 | P0 trust loop        | authority scope 확인             | endpoint priority             | batch/replay priority   | E2E trust-loop tests                          |
 | Activation lifecycle | participant baseline 필요        | 모집/자동 시작 상태 응답 검토 | baseline freeze input   | auto-start/cancel race tests                  |
 | Cadence A/B/C        | cadence 설정/일일 정산 기준 검토 | cadence display/validation    | daily settlement anchor | A/B/C timing tests                            |

@@ -16,7 +16,7 @@
 - 비즈니스 시간대는 `Asia/Seoul`이고, API 시각 값은 timezone offset이 포함된 `ISO-8601` 문자열로 주고받는다.
 - 금액은 모두 `integer` 원 단위다.
 - 보증금은 별도 자산 이동이 아니라 `lock` 모델이다.
-- `Settlement.status = SUCCEEDED` 전 정산 계산 입력은 `MissionLog`, frozen `JOINED` participant baseline, resolved certification state 기반 계산 결과다.
+- `Settlement.status = SUCCEEDED` 전 정산 계산 입력은 `MissionLog`, frozen `LOCKED` participant baseline, resolved certification state 기반 계산 결과다.
 - `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item` 계산 스냅샷과 연결된 `point_history` 원장이다. 이후 `MissionLog` 기반 replay는 감사/디버깅용 검증에만 사용하며 지급 결과를 변경하지 않는다.
 - `point_history`는 포인트 금액의 source of truth이고, `point_account.balance`는 재계산 가능한 현재값 캐시다.
 - `Settlement.status = SUCCEEDED`는 모든 `settlement_item.point_history_id` 연결과 대응 `point_history` 존재 검증까지 완료된 경우에만 가능하다.
@@ -99,12 +99,12 @@
 
 ### 3.2 ParticipantStatus
 
-- `APPLIED`: 사용자가 가입 신청을 완료한 상태. 보증금 lock 전이며 capacity, activation eligibility, frozen participant baseline, settlement 대상 어디에도 포함하지 않는다.
-- `JOINED`: 방장 승인과 보증금 lock이 모두 성공한 참여 확정 상태. activation eligibility, minimum baseline, frozen participant baseline, settlement eligibility의 participant anchor다.
-- `REJECTED`: 방장이 가입 신청을 거절한 상태. 보증금 lock 전이라 환급 없음.
-- `CANCELLED`: 사용자가 승인 전 `APPLIED` 상태에서 신청을 취소한 상태. 보증금 lock 전이라 환급 없음.
-- `EXPIRED`: 시작 전까지 처리되지 않아 자동 만료된 상태. 보증금 lock 전이라 환급 없음.
-- MVP에서 승인과 lock 사이 중간 상태는 두지 않는다. 방장 승인 = 자동 보증금 lock trigger이며 lock 성공 시 즉시 `JOINED`로 전이한다.
+- `PENDING`: 사용자가 가입 신청을 완료하고 예치금이 reserve된 상태. 생성 트랜잭션에서 `point_account.balance`(available)가 감소하고 `crew_participant.deposit_amount`가 reserve snapshot이 된다. Capacity reservation에는 포함하지만 activation eligibility, frozen participant baseline, settlement 대상에는 포함하지 않는다.
+- `LOCKED`: 방장 승인으로 `PENDING` reserve가 참여 확정으로 전환된 상태. approval은 별도 중간 상태 없이 `PENDING -> LOCKED`를 만들며 activation eligibility, minimum baseline, frozen participant baseline, settlement eligibility의 participant anchor다.
+- `REJECTED`: 방장이 가입 신청을 거절한 terminal 상태. 기존 `PENDING` reserve는 취소 환급 원장으로 반환한다.
+- `CANCELLED`: 사용자가 승인 전 `PENDING` 상태에서 신청을 취소한 terminal 상태. 기존 reserve는 취소 환급 원장으로 반환한다.
+- `EXPIRED`: 시작 전까지 처리되지 않아 자동 만료된 terminal 상태. 기존 reserve는 취소 환급 원장으로 반환한다.
+- MVP에서 `APPROVED_LOCK_PENDING` 같은 승인 후 lock 대기 중간 상태는 두지 않는다.
 - `WITHDRAWN`/active withdrawal/재참여 semantics는 MVP active contract가 아니라 brownfield/deferred reference다.
 
 ### 3.3 FrequencyType
@@ -194,7 +194,7 @@
 
 - `NOT_STARTED`
 - `LIVE`
-- `FROZEN`
+- `CLOSED_ESTIMATE`
 - `NOT_PROVIDED`
 - `SETTLEMENT_SUCCEEDED`
 
@@ -238,8 +238,8 @@
 | 크루/참여   | `POST`   | `/api/crews`                                    | 크루 생성                                |
 | 크루/참여   | `GET`    | `/api/crews/{crewId}`                           | 크루 상세 조회                           |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/participants`              | 크루 가입 신청                           |
-| 크루/참여   | `DELETE` | `/api/crews/{crewId}/participants/me`           | 가입 신청 취소 (승인 전 `APPLIED`만)     |
-| 크루/참여   | `POST`   | `/api/crews/{crewId}/applications/{crewParticipantId}/approve` | 방장 승인 → 자동 보증금 lock → `JOINED` |
+| 크루/참여   | `DELETE` | `/api/crews/{crewId}/participants/me`           | 가입 신청 취소 (승인 전 `PENDING`만)     |
+| 크루/참여   | `POST`   | `/api/crews/{crewId}/applications/{crewParticipantId}/approve` | 방장 승인 → 기존 reserve 확정 → `LOCKED` |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/applications/{crewParticipantId}/reject`  | 방장 거절 → `REJECTED`               |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/withdraw`                  | Brownfield/deferred withdrawal           |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/start`                     | Brownfield/removed manual start          |
@@ -624,9 +624,9 @@ Response `200 OK`:
   "end_at": "2026-05-31T23:59:59+09:00",
   "my_participation": {
     "crew_participant_id": 101,
-    "status": "JOINED",
+    "status": "LOCKED",
     "deposit_locked_amount": 100000,
-    "joined_at": "2026-05-08T13:00:00+09:00",
+    "locked_at": "2026-05-08T13:00:00+09:00",
     "withdrawn_at": null
   }
 }
@@ -648,9 +648,9 @@ Error:
 
 역할:
 
-- 크루 가입 신청을 생성한다.
-- MVP에서는 사용자가 직접 보증금을 lock하지 않는다. 신청만 생성되며 `APPLIED` 상태로 시작한다.
-- 실제 보증금 lock은 방장이 `POST /api/crews/{crewId}/applications/{crewParticipantId}/approve`를 호출할 때 자동 수행된다.
+- 크루 가입 신청을 생성하고 예치금을 reserve한다.
+- MVP에서는 신청 생성 시 `PENDING` 상태로 시작하며, 같은 트랜잭션에서 사용 가능 잔액을 `crew.deposit_amount`만큼 차감하고 reserve snapshot을 남긴다.
+- 방장 승인은 별도 보증금 차감 없이 기존 `PENDING` reserve를 `LOCKED` 참여로 확정한다.
 
 Request:
 
@@ -663,10 +663,11 @@ Response `201 Created`:
   "crew_participant_id": 101,
   "crew_id": 42,
   "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
-  "status": "APPLIED",
+  "status": "PENDING",
+  "deposit_reserved_amount": 100000,
   "deposit_locked_amount": 0,
-  "joined_at": null,
-  "applied_at": "2026-05-08T13:00:00+09:00"
+  "locked_at": null,
+  "pending_at": "2026-05-08T13:00:00+09:00"
 }
 ```
 
@@ -675,7 +676,8 @@ Error:
 - `CREW_NOT_FOUND`
 - `CREW_NOT_RECRUITING`
 - `CAPACITY_FULL`
-- `ALREADY_APPLIED`
+- `INSUFFICIENT_BALANCE`
+- `ALREADY_PARTICIPATING`
 - `APPLICATION_NOT_ALLOWED`
 
 정책:
@@ -683,17 +685,17 @@ Error:
 - 신규 신청은 `RECRUITING` 상태이면서 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
 - `recruitment_deadline` 이후에는 `CREW_RECRUITMENT_CLOSED` 또는 `CREW_NOT_RECRUITING` 계열 오류로 거절한다.
 - 같은 `member`는 같은 `crew`에 단 하나의 `crew_participant` row만 가질 수 있다 (`unique(crew_id, member_id)`). 한 번 생성된 row는 lifecycle 종료 후에도 재사용/재생성하지 않는다.
-- 진행 중 상태(`APPLIED`, `JOINED`)에서 동일 사용자가 신청 시도하면 `ALREADY_APPLIED`로 거절한다.
+- 진행 중 상태(`PENDING`, `LOCKED`)에서 동일 사용자가 신청 시도하면 `ALREADY_PARTICIPATING`로 거절한다.
 - terminal 상태(`REJECTED`, `CANCELLED`, `EXPIRED`)에서 동일 사용자가 같은 방에 재신청 시도하면 `APPLICATION_NOT_ALLOWED`로 거절한다. MVP에서는 재참여/row 재사용/status 되돌리기를 허용하지 않는다.
-- `APPLIED` 상태는 보증금 lock 전이며 `deposit_locked_amount`는 `0` (필요 시 `null`)이다. capacity, 최소 인원 baseline, activation eligibility, frozen participant baseline, settlement 대상 어디에도 포함하지 않는다.
-- 보증금 lock과 `JOINED` 전이는 방장 승인 endpoint가 단일 트랜잭션으로 수행한다.
+- `PENDING` 상태는 capacity reservation에 포함한다. 신청 생성 시 capacity 확인은 `PENDING + LOCKED < crew.max_participants` 기준이다.
+- `PENDING`은 `deposit_reserved_amount`를 갖지만 activation/minimum/frozen baseline과 settlement eligibility에는 포함하지 않는다. `LOCKED` 전이는 방장 승인 endpoint가 reserve를 확정하는 단일 상태 전이다.
 
 ### `DELETE /api/crews/{crewId}/participants/me`
 
 역할:
 
-- 본인의 `APPLIED` 신청을 취소한다.
-- 방장 승인 전(`APPLIED` 상태)에만 가능하다.
+- 본인의 `PENDING` 신청을 취소한다.
+- 방장 승인 전(`PENDING` 상태)에만 가능하다.
 
 Request:
 
@@ -718,8 +720,8 @@ Error:
 
 정책:
 
-- 취소는 `APPLIED` 상태일 때만 허용한다. `JOINED`, `REJECTED`, `EXPIRED`, `CANCELLED`는 `APPLICATION_NOT_CANCELLABLE`로 거절한다.
-- 보증금 lock 전 상태이므로 환급/포인트 원장 변경이 발생하지 않는다.
+- 취소는 `PENDING` 상태일 때만 허용한다. `LOCKED`, `REJECTED`, `EXPIRED`, `CANCELLED`는 `APPLICATION_NOT_CANCELLABLE`로 거절한다.
+- 기존 reserve는 `CREW_CANCELLED_REFUND` 계열 point_history로 반환하고, `point_account.balance`를 같은 금액만큼 복구한다.
 - 멱등성: 동일 사용자가 이미 `CANCELLED`된 신청에 대해 다시 호출하면 `APPLICATION_NOT_CANCELLABLE`을 반환한다. 동일 idempotency 응답을 원하면 클라이언트가 `204 No Content` polling 패턴을 별도로 처리한다.
 - `CANCELLED`는 pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다.
 
@@ -727,8 +729,8 @@ Error:
 
 역할:
 
-- 방장이 `APPLIED` 신청을 승인한다.
-- 승인 처리는 capacity 확인, 보증금 lock, `JOINED` 전이를 단일 트랜잭션으로 수행한다.
+- 방장이 `PENDING` 신청을 승인한다.
+- 승인 처리는 기존 reserve의 참여 확정과 `LOCKED` 전이를 단일 트랜잭션으로 수행한다. 추가 예치금 차감이나 host settlement 권한은 발생하지 않는다.
 
 Request:
 
@@ -740,9 +742,9 @@ Response `200 OK`:
 {
   "crew_participant_id": 101,
   "crew_id": 42,
-  "status": "JOINED",
+  "status": "LOCKED",
   "deposit_locked_amount": 100000,
-  "joined_at": "2026-05-08T15:00:00+09:00"
+  "locked_at": "2026-05-08T15:00:00+09:00"
 }
 ```
 
@@ -752,29 +754,25 @@ Error:
 - `PARTICIPANT_NOT_FOUND`
 - `FORBIDDEN_NOT_HOST`
 - `APPLICATION_NOT_APPROVABLE`
-- `CAPACITY_FULL`
-- `INSUFFICIENT_BALANCE`
 
 정책:
 
 - 호출자는 해당 `crew.host_member_id`와 일치하는 사용자여야 한다. 아니면 `FORBIDDEN_NOT_HOST`.
-- 승인은 `APPLIED` 상태에서만 가능하다. `JOINED`, `REJECTED`, `CANCELLED`, `EXPIRED`는 `APPLICATION_NOT_APPROVABLE`로 거절한다.
+- 승인은 `PENDING` 상태에서만 가능하다. `LOCKED`, `REJECTED`, `CANCELLED`, `EXPIRED`는 `APPLICATION_NOT_APPROVABLE`로 거절한다.
 - 승인 트랜잭션 단계:
-  1. capacity 확인 (`JOINED` 수 < `crew.max_participants`)
-  2. `point_account.balance >= crew.deposit_amount` 조건부 차감 (`WHERE balance >= crew.deposit_amount`, row count `1`만 성공)
-  3. `CREW_DEPOSIT_LOCK point_history` insert, `idempotency_key = deposit:crew:{crewId}:participant:{crewParticipantId}`
-  4. `crew_participant.deposit_amount = crew.deposit_amount` snapshot
-  5. `crew_participant.status = JOINED`
-  6. `joined_at` 기록
-- 위 단계 중 하나라도 실패하면 `JOINED`로 전이하지 않는다. 별도 중간 상태를 만들지 않고, 신청자 `crew_participant.status`는 `APPLIED`로 유지하거나 승인 실패 응답으로 처리한다.
-- `INSUFFICIENT_BALANCE`는 신청자 잔액 부족 또는 동시 요청으로 조건부 update row count가 `0`이 된 경우다.
-- `CREW_DEPOSIT_LOCK point_history`는 본 승인 트랜잭션의 lock 성공 시점에 생성된다. 사용자 측 별도 deposit-lock endpoint는 제공하지 않는다.
+  1. 대상 row가 `PENDING`이고 기존 reserve가 존재하는지 확인한다.
+  2. `crew_participant.status = LOCKED`
+  3. `locked_at` 기록
+  4. reserve snapshot(`deposit_amount`)은 그대로 유지해 activation/frozen baseline과 정산 입력으로 사용한다.
+- 위 단계 중 하나라도 실패하면 `LOCKED`로 전이하지 않는다. 별도 중간 상태를 만들지 않고, 신청자 `crew_participant.status`는 `PENDING`로 유지하거나 승인 실패 응답으로 처리한다.
+- `INSUFFICIENT_BALANCE`는 신청 생성 시 reserve에 실패할 때 발생한다. 승인 endpoint는 추가 잔액 차감을 수행하지 않는다.
+- `CREW_DEPOSIT_LOCK point_history`는 신청 생성 시점의 reserve 성공 원장으로 생성된다. 사용자 측 별도 deposit-lock endpoint는 제공하지 않는다.
 
 ### `POST /api/crews/{crewId}/applications/{crewParticipantId}/reject`
 
 역할:
 
-- 방장이 `APPLIED` 신청을 거절한다.
+- 방장이 `PENDING` 신청을 거절한다.
 
 Request:
 
@@ -801,9 +799,9 @@ Error:
 정책:
 
 - 호출자는 해당 `crew.host_member_id`와 일치해야 한다. 아니면 `FORBIDDEN_NOT_HOST`.
-- 거절은 `APPLIED` 상태에서만 가능하다. 다른 상태는 `APPLICATION_NOT_REJECTABLE`로 거절한다.
-- 보증금 lock 전 상태이므로 환급/포인트 원장 변경이 발생하지 않는다.
-- `REJECTED`는 pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다.
+- 거절은 `PENDING` 상태에서만 가능하다. 다른 상태는 `APPLICATION_NOT_REJECTABLE`로 거절한다.
+- 기존 reserve는 `CREW_CANCELLED_REFUND` 계열 point_history로 반환하고, `point_account.balance`를 같은 금액만큼 복구한다.
+- `REJECTED`는 terminal pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다. 동일 crew 재신청은 MVP에서 허용하지 않는다.
 
 ### `POST /api/crews/{crewId}/start` (Brownfield / removed from MVP active contract)
 
@@ -815,8 +813,8 @@ Error:
 Canonical replacement:
 
 - `start_at`에 시스템은 frozen eligibility를 평가한다.
-- activation eligibility는 `recruitment_deadline` 경과, `JOINED` participant 수 `min_participants` 이상, host의 시작 전 해체 없음으로 판단한다. `JOINED`는 방장 승인과 보증금 lock이 모두 성공한 상태이므로 별도 lock 확인이 필요 없다.
-- `APPLIED`, `REJECTED`, `CANCELLED`, `EXPIRED`는 보증금 lock 전 상태이므로 activation/minimum/frozen baseline에는 포함하지 않는다.
+- activation eligibility는 `recruitment_deadline` 경과, `LOCKED` participant 수 `min_participants` 이상, host의 시작 전 해체 없음으로 판단한다. `LOCKED`는 reserve가 참여 확정으로 전환된 상태이므로 별도 승인 대기 확인이 필요 없다.
+- `PENDING`, `REJECTED`, `CANCELLED`, `EXPIRED`는 activation/minimum/frozen baseline에는 포함하지 않는다. 단 `PENDING`은 승인 전 capacity reservation에는 포함한다.
 - 조건을 만족하면 `status = ACTIVE`, `activated_at = start_at`이 된다.
 - 조건을 만족하지 못하면 방은 시작 전 취소 정산 대상이 된다.
 - scheduler 실제 실행 시각은 운영 구현 상세이며 product authority는 `start_at`이다.
@@ -832,7 +830,7 @@ Canonical replacement:
 역할:
 
 - ACTIVE withdrawal/재참여 semantics는 MVP active contract가 아니라 brownfield/deferred 영역이다.
-- frozen participant baseline은 `start_at` 자동 activation 시점의 `JOINED` 집합이며, withdrawal wording이 이 baseline을 소급 변경하는 권한으로 해석되면 안 된다.
+- frozen participant baseline은 `start_at` 자동 activation 시점의 `LOCKED` 집합이며, withdrawal wording이 이 baseline을 소급 변경하는 권한으로 해석되면 안 된다.
 
 Request/Response:
 
@@ -848,8 +846,8 @@ Error:
 정책:
 
 - 이 endpoint는 MVP active semantics로 고정하지 않는다.
-- `RECRUITING` 중 사용자 신청 취소는 `DELETE /api/crews/{crewId}/participants/me`로 처리하며 `APPLIED -> CANCELLED` 전이만 발생한다. `JOINED` frozen baseline과 구분한다.
-- `ACTIVE` 이후 withdrawal은 deferred이며, 정산에서는 frozen `JOINED` baseline과 resolved certification state를 소급 변경하지 않는다는 원칙을 우선한다.
+- `RECRUITING` 중 사용자 신청 취소는 `DELETE /api/crews/{crewId}/participants/me`로 처리하며 `PENDING -> CANCELLED` 전이만 발생한다. `LOCKED` frozen baseline과 구분한다.
+- `ACTIVE` 이후 withdrawal은 deferred이며, 정산에서는 frozen `LOCKED` baseline과 resolved certification state를 소급 변경하지 않는다는 원칙을 우선한다.
 - 향후 withdrawal을 재도입하더라도 즉시 환급, final settlement mutation, point ledger 직접 변경으로 해석하면 안 된다.
 - 구현 가이드: MVP 공개 계약은 `WITHDRAW_NOT_ALLOWED` 단일 코드를 사용한다.
 - 구현 단계에서는 필요 시 `WITHDRAW_ALREADY_DONE`, `WITHDRAW_FORBIDDEN`, `WITHDRAW_NOT_ALLOWED`로 세분화할 수 있다.
@@ -963,7 +961,7 @@ Error:
 - `PARTICIPANT_NOT_FOUND`
 - `PARTICIPANT_WITHDRAWN`
 
-`PARTICIPANT_WITHDRAWN`와 `AFTER_WITHDRAWN`은 brownfield/deferred withdrawal 상태를 방어적으로 표현하는 코드다. MVP active settlement에서 frozen `JOINED` baseline을 변경하는 근거가 아니다.
+`PARTICIPANT_WITHDRAWN`와 `AFTER_WITHDRAWN`은 brownfield/deferred withdrawal 상태를 방어적으로 표현하는 코드다. MVP active settlement에서 frozen `LOCKED` baseline을 변경하는 근거가 아니다.
 
 정책:
 
@@ -998,7 +996,7 @@ Error:
 - 최종 정산에서의 인정 여부는 `certification_status`가 아니라 `Settlement` 계산 단계에서 결정된다.
 - `SPECIFIC_DAYS`, `DAILY` 중복처럼 인증은 성공했지만 정산에서 제외되는 경우는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`으로만 표현한다. `WEEKLY_N` 초과는 Phase 2/deferred reference다.
 - 따라서 인증 시점 성공 로그도 최종 정산에서 제외될 수 있다. 예: `DAILY` 중복, `SPECIFIC_DAYS` 비유효 요일, pre-freeze host moderation으로 resolved certification state가 미인정인 경우.
-- Dashboard projection은 추정값이고, `SUCCEEDED` 전 정산 계산값은 `MissionLog`, frozen `JOINED` participant baseline, resolved certification state 기준으로 확정한다.
+- Dashboard projection은 추정값이고, `SUCCEEDED` 전 정산 계산값은 `MissionLog`, frozen `LOCKED` participant baseline, resolved certification state 기준으로 확정한다.
 
 ### `GET /api/crews/{crewId}/mission-logs/me`
 
@@ -1101,7 +1099,7 @@ Error:
 - `day_statuses[]`와 `participant_day_slots[]`는 참여자/일자 표시용 파생 상태다. 값은 `SUCCESS`, `FAILED`, `NOT_SUBMITTED`만 사용한다.
 - 파생 상태는 DB 상태가 아니고 피드 게시물이 아니며 정산 입력도 아니다.
 - feed eligibility는 정산 인정, 환급, 포인트 적립, AI 리포트 입력, `Settlement.status` 또는 크루/참여 생명주기 전이를 의미하지 않는다.
-- Canonical rule: Feed success does NOT guarantee settlement inclusion. `feed_items[].certification_status = 'SUCCESS'`는 UX/social layer 표시 기준이며, 정산 포함 여부는 `MissionLog`, frozen `JOINED` baseline, resolved certification state 기준의 settlement calculation과 `settlement_item.calculation_reason`이 결정한다.
+- Canonical rule: Feed success does NOT guarantee settlement inclusion. `feed_items[].certification_status = 'SUCCESS'`는 UX/social layer 표시 기준이며, 정산 포함 여부는 `MissionLog`, frozen `LOCKED` baseline, resolved certification state 기준의 settlement calculation과 `settlement_item.calculation_reason`이 결정한다.
 - 정산 인정 여부와 최종 성공 횟수는 정산 API와 `settlement_item.calculation_reason`을 기준으로 판단한다.
 
 ### `GET /api/crews/{crewId}/feed`
@@ -1329,7 +1327,7 @@ Error:
 | --- | --- |
 | `NOT_STARTED` | `RECRUITING` 등 미션 수행 전 상태라 진행/환급 projection이 아직 시작되지 않았다. |
 | `LIVE` | `ACTIVE` 상태에서 현재 `MissionLog`와 참여자 상태를 기준으로 current-basis estimate를 계산했다. |
-| `FROZEN` | `CLOSED` 상태에서 `crew.end_at` cutoff로 매 요청 시 deterministic하게 계산한 frozen projection을 보여준다. 저장된 dashboard snapshot이 아니며 최종값도 아니다. |
+| `CLOSED_ESTIMATE` | `CLOSED` 상태에서 매 요청 시 현재 확인 가능한 입력으로 current-basis estimate를 계산한다. 저장된 dashboard snapshot이 아니며 최종값도 아니다. |
 | `NOT_PROVIDED` | `CANCELLED` 등 수행 projection을 제공하지 않는 상태다. 환급/정산 안내는 Settlement API 기준이다. |
 | `SETTLEMENT_SUCCEEDED` | 최종 정산이 성공했다. Dashboard는 최종값을 복제하지 않고 `settlement_id`로 Settlement API 조회를 유도한다. |
 
@@ -1349,21 +1347,21 @@ Error:
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `NOT_STARTED` | `RECRUITING` | `null` | value | `0` | `0` | `0` | `null` | `null` | `null` | `null` | value |
 | `LIVE` | `ACTIVE` | nullable | value | value | value | value | value 또는 `null` | value 또는 `null` | value 또는 `null` | value 또는 `null` | value |
-| `FROZEN` | `CLOSED` + not `SUCCEEDED` | nullable | value | value | value | value | value 또는 `null` | value 또는 `null` | value 또는 `null` | value 또는 `null` | value |
+| `CLOSED_ESTIMATE` | `CLOSED` + not `SUCCEEDED` | nullable | value | value | value | value | value 또는 `null` | value 또는 `null` | value 또는 `null` | value 또는 `null` | value |
 | `NOT_PROVIDED` | `CANCELLED` | nullable | value | `null` | `null` | `null` | `null` | `null` | `null` | `null` | value |
 | `SETTLEMENT_SUCCEEDED` | any + `Settlement.status = SUCCEEDED` | value | value | `null` | `null` | `null` | `null` | `null` | `null` | `null` | value |
 
-- `LIVE` / `FROZEN`에서 `settlement_id`는 실제 `Settlement` row가 있으면 값이고, `settlement_status = NONE`이면 `null`이다.
+- `LIVE` / `CLOSED_ESTIMATE`에서 `settlement_id`는 실제 `Settlement` row가 있으면 값이고, `settlement_status = NONE`이면 `null`이다.
 - `SETTLEMENT_SUCCEEDED`에서 성과/보상 projection 필드를 `null`로 내려주는 이유는 데이터가 없어서가 아니라 최종값의 source of truth가 `GET /api/settlements/{settlementId}`이기 때문이다.
-- 대표 `projection_notice`는 `NOT_STARTED -> NOT_STARTED`, `LIVE/FROZEN -> ESTIMATED_NOT_FINAL`, `NOT_PROVIDED -> NOT_PROVIDED`, `SETTLEMENT_SUCCEEDED -> SETTLEMENT_RESULT_AVAILABLE`이다.
-- `LIVE` / `FROZEN`에서 denominator 등 필수 projection 입력이 부족하면 해당 추정 필드는 `null`이고 `projection_notice = INSUFFICIENT_PROJECTION_INPUT`을 사용한다.
+- 대표 `projection_notice`는 `NOT_STARTED -> NOT_STARTED`, `LIVE/CLOSED_ESTIMATE -> ESTIMATED_NOT_FINAL`, `NOT_PROVIDED -> NOT_PROVIDED`, `SETTLEMENT_SUCCEEDED -> SETTLEMENT_RESULT_AVAILABLE`이다.
+- `LIVE` / `CLOSED_ESTIMATE`에서 denominator 등 필수 projection 입력이 부족하면 해당 추정 필드는 `null`이고 `projection_notice = INSUFFICIENT_PROJECTION_INPUT`을 사용한다.
 
 #### Projection source 역할
 
 | Source | Dashboard에서의 역할 |
 | --- | --- |
 | `mission_log` | 성공 후보와 수행 현황의 primary event source다. `mission_log.certification_status = 'SUCCESS'` 로그만 후보로 사용하고, 인정 판단 시간은 `MissionLog.server_time` 기준이다. |
-| `crew_participant` | 참여자 식별, frozen `JOINED` baseline, `deposit_amount` 보증금 금액 source다. `withdrawn_at`은 brownfield/deferred reference다. |
+| `crew_participant` | 참여자 식별, frozen `LOCKED` baseline, `deposit_amount` 보증금 금액 source다. `withdrawn_at`은 brownfield/deferred reference다. |
 | `crew` | 방 상태, 기간, 미션 주기/규칙 컨텍스트다. 총 보증금 source가 아니다. |
 | `settlement` | `SUCCEEDED` 여부와 최종값 전환 판단용이다. `SUCCEEDED` 전 Dashboard projection 계산 source가 아니다. |
 | `point_history` | 포인트 원장 source of truth다. Dashboard projection 계산 source가 아니다. 최종 환급/잔액 반영은 `Settlement.status = SUCCEEDED` 이후 Settlement API와 `point_history` 기준으로 확인한다. |
@@ -1371,14 +1369,14 @@ Error:
 
 #### 계산 규칙
 
-- Dashboard는 deterministic estimated projection이다. 같은 source 입력과 cutoff를 사용하면 BE/FE/QA가 같은 projection 결과를 기대할 수 있어야 한다.
+- Dashboard는 deterministic estimated projection이다. 같은 source 입력과 입력 상한을 사용하면 BE/FE/QA가 같은 projection 결과를 기대할 수 있어야 한다.
 - `my_success_count`는 raw `mission_log.certification_status = 'SUCCESS'` 성공 로그 수다. 정산 인정 성공 수가 아니다.
 - `my_recognized_success_count_estimated`는 현재 시점에서 정산 규칙을 가능한 범위로 반영한 추정 인정 성공 수다.
 - 추정 인정 성공 수는 `MissionLog.server_time`을 `Asia/Seoul` 기준 날짜/요일/주차로 해석해 계산한다.
-- projection 후보 로그는 `mission_log.certification_status = 'SUCCESS'`이고, `crew.activated_at <= MissionLog.server_time <= projection_cutoff_at`을 만족해야 한다. `activated_at`이 `null`이면 post-activation projection을 계산하지 않는다.
-  - `LIVE`에서는 `projection_cutoff_at = min(응답 생성 시각, crew.end_at)`이다.
-  - `FROZEN`에서는 `projection_cutoff_at = crew.end_at`이다.
-  - `withdrawn_at` cutoff는 brownfield/deferred reference이며 MVP Dashboard active projection에서 frozen `JOINED` baseline을 소급 변경하지 않는다.
+- projection 후보 로그는 `mission_log.certification_status = 'SUCCESS'`이고, `crew.activated_at <= MissionLog.server_time <= projection_input_until_at`을 만족해야 한다. `activated_at`이 `null`이면 post-activation projection을 계산하지 않는다.
+  - `LIVE`에서는 `projection_input_until_at = min(응답 생성 시각, crew.end_at)`이다.
+  - `CLOSED_ESTIMATE`에서는 `projection_input_until_at = crew.end_at`이며, 이는 query-time current-basis estimate의 입력 상한일 뿐 최종 정산 snapshot이 아니다.
+  - `withdrawn_at` 기준은 brownfield/deferred reference이며 MVP Dashboard projection에서 `LOCKED` frozen baseline을 소급 변경하지 않는다.
 - 대표 success 선택은 모든 frequency projection에서 동일하게 `MissionLog.server_time ASC`, 동률이면 `MissionLog.id ASC` 순서를 사용한다.
 - `DAILY`는 같은 KST date의 첫 success만 인정하고 나머지 success는 duplicate로 제외한다.
 - `SPECIFIC_DAYS`는 `mission_schedule_day`에 포함된 KST weekday의 success만 후보로 삼고, valid KST date별 첫 success만 인정한다.
@@ -1390,7 +1388,7 @@ Error:
 - Dashboard는 정산의 `remainder`, `remainder_policy`, deterministic remainder allocation, 1원 단위 잔액 처리를 계산하거나 반영하지 않는다. 해당 최종 지급 차이는 `Settlement.status = SUCCEEDED` 이후 Settlement API에서만 확인한다.
 - `my_expected_refund_delta_amount = my_expected_refund_amount - my_deposit_amount`다. 이 값은 수익 권위값이 아니라 현재 기준 환급 설명용 차이값이다.
 - `rank_estimated`는 예상 환급금/수익/지분율/보증금 기준 순위가 아니라 추정 수행/참여도 표시 순서다. 정렬 기준은 `recognized_success_count_estimated DESC`, 동률이면 `crew_participant_id ASC`다.
-- `total_recognized_success_count_estimated = 0`인 `LIVE` / `FROZEN` projection은 0으로 나누지 않고 all-fail equal-principal refund estimate를 적용한다.
+- `total_recognized_success_count_estimated = 0`인 `LIVE` / `CLOSED_ESTIMATE` projection은 0으로 나누지 않고 all-fail equal-principal refund estimate를 적용한다.
 - 전체 인정 성공 추정값이 `0`인 경우 Dashboard는 all-fail equal-principal refund 철학에 맞춰 각 참여자의 `deposit_amount`를 current-basis refund estimate로 보여준다. `WITHDRAWN`/ACTIVE withdrawal은 brownfield-deferred semantics다.
 - zero-total base estimate의 `my_expected_refund_amount = my_deposit_amount`이며, 이 경우 Dashboard에서도 host/winner/draw remainder를 수행하지 않는다.
 - denominator를 확정할 수 없으면 `my_share_ratio_estimated`, `my_expected_refund_amount`, `my_expected_refund_delta_amount`, `rank_estimated`는 `null`이고 `projection_notice = INSUFFICIENT_PROJECTION_INPUT`이다.
@@ -1403,7 +1401,7 @@ Error:
 | --- | --- |
 | `RECRUITING` | 진행/환급 projection은 시작 전이다. 보증금, 방 규칙, `recruitment_deadline`, `start_at` 중심으로 표시한다. |
 | `ACTIVE` | current-basis estimated projection을 계산한다. 모든 금액/비율/표시 순서는 추정값이다. |
-| `CLOSED` | `crew.end_at` cutoff로 query-time deterministic frozen projection을 계산해 보여준다. 저장된 snapshot이 아니며, `Settlement.status = SUCCEEDED` 전까지 최종값이 아니므로 pending/running/retry 상태 안내를 함께 제공한다. |
+| `CLOSED` | query-time current-basis estimate를 계산해 보여준다. 저장된 snapshot이 아니며, `Settlement.status = SUCCEEDED` 전까지 최종값이 아니므로 pending/running/retry 상태 안내를 함께 제공한다. |
 | `CANCELLED` | 수행 성과 projection을 제공하지 않는다. 시작 전 취소 정산/환급은 Settlement API 기준으로 안내한다. |
 
 #### locked_balance와의 관계
@@ -1412,7 +1410,7 @@ Error:
 - Dashboard의 `my_expected_refund_amount`는 특정 crew/crew_participant 기준 예상 환급금 projection이다.
 - FE는 `locked_balance`, `available_balance`, `total_balance`, `my_expected_refund_amount`를 합산하거나 차감해서 최종 보유 포인트, 출금 가능 금액, 최종 정산 후 확정되는 환급금을 계산하면 안 된다.
 - `total_balance = available_balance + locked_balance` 관계는 포인트 요약 화면 전용이다.
-- `CLOSED`지만 `Settlement.status != SUCCEEDED`인 방은 `locked_balance`에 아직 남을 수 있고, Dashboard는 frozen `my_expected_refund_amount`를 보여줄 수 있다.
+- `CLOSED`지만 `Settlement.status != SUCCEEDED`인 방은 `locked_balance`에 아직 남을 수 있고, Dashboard는 non-final current-basis estimate인 `my_expected_refund_amount`를 보여줄 수 있다.
 - 최종 환급 여부와 금액은 `Settlement.status = SUCCEEDED` 이후 Settlement API와 `point_history` 원장 기준이다.
 
 ## 5.6 정산
@@ -1498,7 +1496,7 @@ Response `200 OK`:
     {
       "settlement_item_id": 7001,
       "crew_participant_id": 101,
-      "participant_status_snapshot": "JOINED",
+      "participant_status_snapshot": "LOCKED",
       "deposit_amount": 100000,
       "success_count_raw": 92,
       "recognized_success_count": 90,
@@ -1539,8 +1537,8 @@ Error:
 - Versioned semantic replay는 v2 runtime이 v1 settlement semantics를 해석 가능하게 하는 것이다. v2 API/엔진이 v1 final settlement를 현재 규칙으로 덮어쓰는 migration-forward reinterpretation을 허용하지 않는다.
 - `SUCCEEDED`는 모든 `settlement_item.point_history_id`가 채워지고 대응 `point_history` 존재가 검증된 상태를 뜻한다.
 - partial 상태에서는 일부 item의 `point_history_id`가 `null`일 수 있고, 이 경우 `status`는 `SUCCEEDED`가 아니라 `RETRY_WAIT` 또는 `FAILED`다.
-- 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. Brownfield `HOST_REMAINDER` 명칭은 fixed rule alias일 뿐 host 지급 권한이 아니다.
-- 전체 인정 성공 `0`이면 all-fail equal-principal refund를 적용한다. 각 참여자는 자기 `deposit_amount`를 환급받고 host/winner/draw remainder 수익은 발생하지 않는다.
+- 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. Brownfield `HOST_REMAINDER` 명칭은 legacy alias일 뿐 host reward/authority/privilege가 아니다.
+- 전체 인정 성공 `0`이면 all-fail equal-principal refund를 적용한다. 각 참여자는 자기 `deposit_amount`를 환급받고 host/winner/draw remainder 추가 지급은 발생하지 않는다.
 - `settlement.algorithm_version`, `settlement.rule_context_snapshot`, `settlement_item.effective_moderation_snapshot`, `settlement_item.moderation_chain_ref`은 정산 시점 컨텍스트 스냅샷 source-of-truth다(ERD §정산/Settlement-design §7 참조). 이 컨텍스트를 API 응답에 어떤 모양으로 노출할지는 deferred decision이다. 노출하더라도 read-only replay/audit 컨텍스트이고, 현재 엔진으로의 reinterpretation/recalculation 권한이 아니다.
 - `settlement_item`에는 저장 `rank` 컬럼이 없다. UI 표시용 최종 순위가 필요하면 `final_rank`라는 logical projection으로 노출하고, `recognized_success_count DESC`, 동률이면 `crew_participant_id ASC` 기준으로 read-time 계산한다. `final_rank`는 payout authority가 아니며 지급 결과 변경에 사용하지 않는다.
 
@@ -1870,36 +1868,39 @@ Response `200 OK`:
 ```json
 {
   "available_balance": 350000,
+  "reserved_balance": 100000,
   "locked_balance": 100000,
-  "total_balance": 450000,
+  "total_balance": 550000,
   "updated_at": "2026-05-07T09:30:00+09:00"
 }
 ```
 
 정책:
 
-- `available_balance`는 `point_account.balance`이며, 현재 사용 가능한 포인트 잔액만 의미한다.
-- `locked_balance`는 DB 컬럼이 아니라 API 응답에서만 제공하는 projection 필드다.
-- `locked_balance`는 정산 전 묶인 보증금 표시를 위한 UX 파생값이며, 포인트 원장의 source of truth가 아니다.
-- MVP 기준 `locked_balance`는 사용자의 `JOINED` 상태 `crew_participant.deposit_amount`를 `crew`과 조인해 계산한다. `APPLIED`/`REJECTED`/`CANCELLED`/`EXPIRED`는 보증금 lock 전 상태이므로 (`deposit_amount` `NULL` 또는 `0`) 합산 대상이 아니다.
+- `available_balance`는 `point_account.balance`이며, `PENDING` reserve 또는 `LOCKED` deposit으로 이미 차감된 뒤 현재 사용 가능한 포인트 잔액만 의미한다.
+- `reserved_balance`와 `locked_balance`는 DB 컬럼이 아니라 API 응답에서만 제공하는 projection 필드다.
+- `reserved_balance`는 승인 전 `PENDING` reserve 표시용이고, `locked_balance`는 승인 후 `LOCKED` deposit 표시용 UX 파생값이다. 둘 다 포인트 원장의 source of truth가 아니다.
+- MVP 기준 `reserved_balance`는 사용자의 `PENDING` 상태 `crew_participant.deposit_amount`, `locked_balance`는 `LOCKED` 상태 `crew_participant.deposit_amount`를 `crew`과 조인해 계산한다. `REJECTED`/`CANCELLED`/`EXPIRED`는 반환 완료 terminal 상태라 합산 대상이 아니다.
 
 ```sql
-SELECT COALESCE(SUM(rp.deposit_amount), 0)
+SELECT rp.status, COALESCE(SUM(rp.deposit_amount), 0) AS amount
 FROM crew_participant rp
 JOIN crew mr ON mr.id = rp.crew_id
 WHERE rp.member_id = :memberId
-  AND rp.status = 'JOINED'
+  AND rp.status IN ('PENDING', 'LOCKED')
   AND rp.deposit_amount > 0
   AND mr.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')
+GROUP BY rp.status
+-- response layer maps PENDING -> reserved_balance, LOCKED -> locked_balance
 ```
 
-- `RECRUITING`은 참여 후 아직 시작 전이지만 보증금이 잠겨 있는 상태다.
+- `RECRUITING`은 신청/승인 후 아직 시작 전이지만 보증금이 reserve 또는 locked 상태다.
 - `ACTIVE`는 미션 진행 중이므로 보증금이 잠겨 있는 상태다.
 - `CLOSED`는 정산 완료 전까지 보증금이 잠겨 있는 것으로 표시한다.
-- `WITHDRAWN`/ACTIVE withdrawal은 brownfield-deferred다. MVP locked balance projection은 frozen `JOINED` baseline과 settlement status를 기준으로 해석한다.
+- `WITHDRAWN`/ACTIVE withdrawal은 brownfield-deferred다. MVP locked balance projection은 frozen `LOCKED` baseline과 settlement status를 기준으로 해석한다.
 - `Settlement.status = SUCCEEDED` 이후에는 해당 방의 보증금 lock이 해제된 것으로 본다.
 - 다만 MVP projection은 settlement 조인을 강제하지 않고 `crew.status` 기반으로 시작한다. 따라서 `CLOSED` 포함은 정산 전 잠금 표시를 위한 근사값이며, 더 정확한 정산 상태 기반 제외 조건은 Settlement 조회/정산 구현 단계에서 보강할 수 있다.
-- `total_balance = available_balance + locked_balance`다.
+- `total_balance = available_balance + reserved_balance + locked_balance`다.
 - `locked_balance`와 `total_balance`는 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단 기준으로 사용하지 않는다.
 - 최종 정산/환급 결과는 정산 API와 `point_history`를 기준으로 판단한다.
 - 내부 검증에서 `available_balance`와 `point_history` 재계산값이 다르면 `point_history` 기준으로 조사/보정한다.
@@ -2069,12 +2070,12 @@ Click/refetch contract:
 
 `MISSION_LOG_VERIFICATION_RESULT`, `DASHBOARD_PROJECTION_UPDATED` 등 일일 결과 알림 문구 후보:
 
-> `[크루명][날짜] 미션 성공! 크루원 [N]명 인증 실패 → 예상 환급금 [금액]도딘으로 상승했습니다 💪`
+> `[크루명][날짜] 현재 인증 결과가 반영되었습니다. 현재 기준 예상 환급금은 [금액]도딘이며 최종 정산 전까지 변동될 수 있습니다.`
 
 - 문구에 인터폴레이트되는 `crewTitle`, `missionDate`, `certificationStatus`, `successMemberCount`, `failedMemberCount`, `pendingMemberCount`, `expectedRefundAmount`, `expectedRefundDelta`는 모두 알림 생성 시점 projection이며 저장 컬럼이 아니다.
 - `crewTitle`은 `crew.title` 현재 값이고, `missionDate`는 `Asia/Seoul` 기준 KST date다.
 - `certificationStatus`는 알림 대상 `MissionLog`의 resolved `certification_status`(`PENDING_REVIEW`/`SUCCESS`/`FAILED`)다.
-- `successMemberCount`, `failedMemberCount`, `pendingMemberCount`는 해당 `missionDate`에 대한 `mission_log` × `crew_participant` projection이며 dashboard projection과 동일 source/cutoff 규칙을 따른다.
+- `successMemberCount`, `failedMemberCount`, `pendingMemberCount`는 해당 `missionDate`에 대한 `mission_log` × `crew_participant` projection이며 dashboard projection과 동일 source/current-basis 규칙을 따른다.
 - `expectedRefundAmount`는 알림 대상 참여자의 `dashboard.my_expected_refund_amount`와 동일한 current-basis projection이다. `expectedRefundDelta`는 직전 알림 발송 시점 대비 변화 hint이며 ledger/settlement authority가 아니다.
 - 알림은 hint/deep-link이고 canonical state가 아니다. 알림 payload는 stale일 수 있고, 알림 클릭/진입 시 클라이언트는 `deep_link`로 이동한 뒤 dashboard / settlement / mission-log canonical API를 refetch해야 한다.
 - 알림 발송 성공/실패는 `certification_status`, `Settlement.status`, `point_history` 상태를 변경하지 않는다.
@@ -2146,10 +2147,10 @@ RECRUITING --start_at eligibility failure cancellation batch--> CANCELLED
 ### 6.2 Participant
 
 ```text
-APPLIED --host approve + deposit lock 성공--> JOINED
-APPLIED --user cancel (DELETE /participants/me)--> CANCELLED
-APPLIED --host reject--> REJECTED
-APPLIED --시작 전까지 처리 안 됨--> EXPIRED
+PENDING --host approve + reserve 확정--> LOCKED
+PENDING --user cancel (DELETE /participants/me)--> CANCELLED
+PENDING --host reject--> REJECTED
+PENDING --시작 전까지 처리 안 됨--> EXPIRED
 WITHDRAWN / ACTIVE withdrawal: brownfield-deferred, not MVP active baseline authority
 ```
 
@@ -2169,11 +2170,11 @@ RUNNING
 
 ## 7. FE에서 바로 써야 하는 필드 설명
 
-- 방 화면은 `status`, `frequency_type`, `frequency_count`, `mission_schedule_days`, `deposit_amount`, `my_participation`을 기준으로 버튼 상태를 결정한다. `my_participation.status`(`APPLIED`/`JOINED`/`REJECTED`/`CANCELLED`/`EXPIRED`)에 따라 가입 신청/취소/대기 UX를 분기한다.
-- 계정/포인트 요약 화면은 `GET /api/points.available_balance`, `GET /api/points.locked_balance`, `GET /api/points.total_balance`를 기준으로 표시한다.
-- FE는 여러 방의 `my_participation.deposit_locked_amount`를 직접 합산해 계정 단위 잠금 잔액을 만들지 않고, `GET /api/points.locked_balance`를 표시한다.
-- `my_participation.deposit_locked_amount`는 방 상세의 해당 참여 보증금 표시용 필드이며, 계정 단위 `locked_balance`나 `total_balance`의 source of truth가 아니다.
-- `locked_balance`와 `total_balance`는 UX 표시용이며, 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단 기준으로 사용하면 안 된다.
+- 방 화면은 `status`, `frequency_type`, `frequency_count`, `mission_schedule_days`, `deposit_amount`, `my_participation`을 기준으로 버튼 상태를 결정한다. `my_participation.status`(`PENDING`/`LOCKED`/`REJECTED`/`CANCELLED`/`EXPIRED`)에 따라 가입 신청/취소/대기 UX를 분기한다.
+- 계정/포인트 요약 화면은 `GET /api/points.available_balance`, `GET /api/points.reserved_balance`, `GET /api/points.locked_balance`, `GET /api/points.total_balance`를 기준으로 표시한다.
+- FE는 여러 방의 `my_participation.deposit_reserved_amount` / `deposit_locked_amount`를 직접 합산해 계정 단위 reserve/lock 잔액을 만들지 않고, `GET /api/points`의 projection 필드를 표시한다.
+- `my_participation.deposit_reserved_amount`와 `my_participation.deposit_locked_amount`는 방 상세의 해당 참여 보증금 표시용 필드이며, 계정 단위 `reserved_balance`, `locked_balance`, `total_balance`의 source of truth가 아니다.
+- `reserved_balance`, `locked_balance`, `total_balance`는 UX 표시용이며, 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단 기준으로 사용하면 안 된다.
 - 탈퇴 버튼/withdrawal UX는 MVP active contract가 아니라 brownfield-deferred로 취급한다. 노출하더라도 frozen baseline, final settlement, point ledger를 직접 변경한다고 안내하면 안 된다.
 - FE는 `certification_status`를 인증 요청의 resolved certification state로만 사용해야 하고, 최종 정산 인정 여부 판단 기준으로 사용하면 안 된다.
 - 피드 화면에서 `feed_items[]`는 성공 인증 게시물이고, `day_statuses[]` / `participant_day_slots[]`는 `SUCCESS`, `FAILED`, `NOT_SUBMITTED` 표시용 projection이다. 둘을 정산 결과나 포인트 원장으로 해석하면 안 된다.
@@ -2203,11 +2204,11 @@ Android FCM push, notification inbox item, deferred SSE signal 모두 `deep_link
 ## 8. 구현 메모
 
 - 인증 시점에는 과도한 분산 락보다 `MissionLog append-only 저장 + 캐시 원자 연산 + 최종 계산/replay 가능성`을 우선한다.
-- `SUCCEEDED` 전 최종 정산 계산은 `MissionLog.server_time`, frozen `JOINED` participant baseline, resolved certification state를 기준으로 수행한다.
+- `SUCCEEDED` 전 최종 정산 계산은 `MissionLog.server_time`, frozen `LOCKED` participant baseline, resolved certification state를 기준으로 수행한다.
 - `exif_taken_at`은 서버가 S3 object에서 추출/검증한 이미지 조작 또는 촬영 시각 이상 여부 검증 보조 정보이며, 인정 횟수 계산 기준 시간으로 사용하지 않는다.
 - 정산 시점에는 DB 조건부 `Settlement(PENDING/RETRY_WAIT -> RUNNING)` claim을 1차 기준으로 사용하고, Redisson crew lock은 보조 수단, DB unique 제약과 `point_history.idempotency_key`는 최종 방어선으로 사용한다.
 - `total_locked_amount`는 정산 시점의 `crew_participant.deposit_amount` 합계 스냅샷이며, `point_account`나 `point_history`를 다시 합산하지 않는다.
-- 일반 정산 remainder는 deterministic remainder allocation rule로 처리한다. 이는 host 지급 권한, winner 지급, draw/random 지급이 아니라 replayable floor-remainder 규칙이다.
+- 일반 정산 remainder는 deterministic remainder allocation rule로 처리한다. 이는 host reward/authority/privilege, winner 지급, draw/random 지급이 아니라 replayable floor-remainder 규칙이다.
 - 취소형 정산에서도 조회 구조는 동일하고 `settlement_type = CANCELLED_BEFORE_START`만 달라진다.
 - 포인트 원장 기록과 `point_account.balance` 갱신은 participant 지급 단위로 같은 트랜잭션에서 처리하되, 전체 정산은 partial 복구가 가능하도록 이미 생성된 원장을 idempotency key로 재사용한다.
 - Replay/retry는 finality를 약화하지 않는다. Replay는 historical semantic truth reconstruction이고, retry는 missing item/linkage completion이다. 둘 다 succeeded settlement snapshot이나 point ledger overwrite 권한이 아니다.
@@ -2217,6 +2218,6 @@ Android FCM push, notification inbox item, deferred SSE signal 모두 `deep_link
 
 ## 9. 확정 메모
 
-- Withdrawal/탈퇴 semantics는 brownfield/deferred다. MVP active contract에서는 frozen `JOINED` baseline, final settlement, point ledger를 직접 변경하지 않는다.
+- Withdrawal/탈퇴 semantics는 brownfield/deferred다. MVP active contract에서는 frozen `LOCKED` baseline, final settlement, point ledger를 직접 변경하지 않는다.
 - MVP 인증 API의 `mission_log.failure_reason`은 인증 시점 실패 사유만 표현하고, `OUT_OF_SCHEDULE`는 사용하지 않는다.
 - 관리자 정산 재시도는 `crewId`가 아니라 `settlementId` 기준으로 수행한다.

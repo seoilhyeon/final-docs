@@ -4,7 +4,7 @@
 
 1. 최신 기획안 및 accepted semantic freeze 결과 — L1 intent authority
 2. [PRD-dondok.md](./PRD-dondok.md) — canonical synthesis layer
-3. `docs/Dondok_요구사항명세서_v0.7.xlsx` — requirement detail reference
+3. `docs/Dondok_요구사항명세서_v0.9.xlsx` — requirement detail reference
 
 이 문서는 위 SoT의 하위 운영/runtime semantics 문서이며, 제품 의미를 새로 정의하거나 PRD synthesis를 override하지 않는다. `API-spec`, 요구사항 명세서, 외부 WBS/GitHub Issues는 downstream 구현/계약 참고 자료로만 교차 확인한다.
 
@@ -66,20 +66,20 @@
 
 ### 3.2 정산 대상 참여자
 
-- 정산 대상 participant는 activation 시점 frozen `JOINED` baseline에 포함된 참여자다. 종료 시점의 locked deposit 조회값은 검증/스냅샷 입력일 뿐, ACTIVE 이후 withdrawal/rejoin으로 baseline을 다시 여는 기준이 아니다.
+- 정산 대상 participant는 activation 시점 frozen `LOCKED` baseline에 포함된 참여자다. 종료 시점의 locked deposit 조회값은 검증/스냅샷 입력일 뿐, ACTIVE 이후 withdrawal/rejoin으로 baseline을 다시 여는 기준이 아니다.
 - 한 `member`는 하나의 `crew`에 대해 하나의 `crew_participant`만 가진다.
 - 이 불변식은 `unique(crew_id, member_id)`로 강제하고, `crew_participant`는 정산과 감사 추적을 위해 물리 삭제하지 않는다.
-- MVP active `crew_participant.status`: `APPLIED`, `JOINED`, `REJECTED`, `CANCELLED`, `EXPIRED`. 중간 상태 (APPROVED + lock 대기) 는 두지 않으며 방장 승인 = 자동 보증금 lock trigger이고 lock 성공 시 즉시 `JOINED`로 전이한다.
-- `APPLIED`는 보증금 lock 전 신청 상태다. capacity, activation eligibility, minimum participant baseline, frozen participant baseline, settlement eligibility 어디에도 포함하지 않는다. `APPLIED` 시점에는 별도 reserve/hold 금액이 발생하지 않으며, `point_account.balance` 차감도 없다.
-- 사용자가 승인 전 신청을 취소하면 `APPLIED -> CANCELLED`. 보증금 lock 전 상태라 환급 처리가 없다.
-- 방장이 거절하거나 시작 전까지 처리되지 않아 자동 만료된 신청은 `REJECTED` / `EXPIRED`다. 보증금 lock 전 상태라 환급 처리가 없으며 settlement baseline에 포함하지 않는다.
-- `JOINED`는 방장 승인과 보증금 lock이 모두 성공한 상태다. MVP에서 activation eligibility, minimum participant baseline, frozen participant baseline, settlement eligibility의 participant anchor는 `JOINED`만 사용한다.
-- `JOINED` 이후에는 MVP에서 participant-side 변경/취소를 허용하지 않는다. 승인 + 예치 Lock 완료 후 상태 변경은 frozen baseline integrity와 deterministic settlement를 흔들 수 있으므로 별도 후속 설계 없이는 열지 않는다.
+- MVP active `crew_participant.status`: `PENDING`, `LOCKED`, `REJECTED`, `CANCELLED`, `EXPIRED`. 승인 후 lock 대기 상태(`APPROVED_LOCK_PENDING`)는 두지 않으며 방장 승인은 기존 reserve를 `PENDING -> LOCKED`로 확정한다.
+- `PENDING`은 신청 제출 + 예치금 reserve 상태다. capacity reservation에는 포함하지만 activation eligibility, minimum participant baseline, frozen participant baseline, settlement eligibility에는 포함하지 않는다. `PENDING` 생성 시 `point_account.balance`(available)가 감소하고 reserve projection이 증가한다.
+- 사용자가 승인 전 신청을 취소하면 `PENDING -> CANCELLED`. 기존 reserve는 취소 환급 원장으로 반환한다.
+- 방장이 거절하거나 시작 전까지 처리되지 않아 자동 만료된 신청은 `REJECTED` / `EXPIRED`다. 기존 reserve는 반환되며 settlement baseline에 포함하지 않는다.
+- `LOCKED`는 방장 승인으로 reserve가 참여 확정된 상태다. MVP에서 activation eligibility, minimum participant baseline, frozen participant baseline, settlement eligibility의 participant anchor는 `LOCKED`만 사용한다.
+- `LOCKED` 이후에는 MVP에서 participant-side 변경/취소를 허용하지 않는다. 승인 + 예치 Lock 완료 후 상태 변경은 frozen baseline integrity와 deterministic settlement를 흔들 수 있으므로 별도 후속 설계 없이는 열지 않는다.
 - 위 lifecycle 문장은 semantic boundary이며, 구체적인 DB column, API status, enum name, account balance column, lock implementation strategy는 `ERD` / `API-spec`이 소유한다.
 - 신규 참여/상태 전이는 `MissionRoom.status = RECRUITING`이고 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
 - `ACTIVE` 이후 신규 참여와 baseline 변경은 허용하지 않는다.
-- ACTIVE 이후 탈퇴/재참여 및 중도 탈퇴 정산은 MVP active semantics가 아니라 brownfield/deferred 영역으로 남긴다. 기존 문서/구현 흔적이 있더라도 `JOINED` frozen baseline을 바꾸는 권한으로 해석하지 않는다.
-- frozen participant baseline은 `start_at` 자동 activation 시점에 `JOINED`인 participant 집합이다. 이 baseline은 final settlement input으로 사용되며 post-freeze에 host/admin이 소급 변경하지 않는다.
+- ACTIVE 이후 탈퇴/재참여 및 중도 탈퇴 정산은 MVP active semantics가 아니라 brownfield/deferred 영역으로 남긴다. 기존 문서/구현 흔적이 있더라도 `LOCKED` frozen baseline을 바꾸는 권한으로 해석하지 않는다.
+- frozen participant baseline은 `start_at` 자동 activation 시점에 `LOCKED`인 participant 집합이다. 이 baseline은 final settlement input으로 사용되며 post-freeze에 host/admin이 소급 변경하지 않는다.
 
 ### 3.3 `min_participants` 정책
 
@@ -87,12 +87,12 @@
 - 방 생성 시 host가 설정할 수 있고, 기본값은 `2`명이다.
 - 제약 조건은 PRD synthesis 기준 `2 <= min_participants <= max_participants <= 15`이다.
 - MVP에서 `min_participants` 충족은 host command의 precondition이 아니라 시스템 자동 activation의 eligibility condition이다.
-- `start_at` 자동 activation 시점에 `JOINED` participant 수를 다시 검증하며, 미달이면 `ACTIVE`로 전이하지 않고 시작 전 취소 정산 대상으로 남긴다.
+- `start_at` 자동 activation 시점에 `LOCKED` participant 수를 다시 검증하며, 미달이면 `ACTIVE`로 전이하지 않고 시작 전 취소 정산 대상으로 남긴다.
 
 ### 3.4 시작 만료 / 인원 미달 취소
 
 - `recruitment_deadline` 이후 신규 참여는 차단한다.
-- `start_at`에 시스템은 frozen eligibility condition을 평가한다. `JOINED` participant 수가 `min_participants` 이상이고 system-recognized terminal cancellation condition이 없으면 자동으로 `ACTIVE` 전이한다.
+- `start_at`에 시스템은 frozen eligibility condition을 평가한다. `LOCKED` participant 수가 `min_participants` 이상이고 system-recognized terminal cancellation condition이 없으면 자동으로 `ACTIVE` 전이한다.
 - `start_at` 이후에도 eligibility condition을 만족하지 못해 `RECRUITING`인 방은 batch가 `CANCELLED` 처리한다.
 - 시작 만료 또는 인원 미달 취소는 일반 정산과 별개가 아니라 `취소형 정산`으로 기록한다.
 - 취소형 정산에서는 각 참여자에게 `잠긴 보증금 전액`을 환급한다.
@@ -107,7 +107,7 @@
 - Host moderation은 certification input/state를 resolve하는 권한이며, settlement engine, refund amount, point ledger, final settlement snapshot을 직접 조작하는 권한이 아니다.
 - 일반 인증 일자는 인증 마감 이후 host에게 최대 `72시간` host moderation correction window가 주어진다. 이 window 안의 결정 변경은 pre-freeze certification input correction이며 settlement input freeze 이전에만 effective하다.
 - 미션 종료일 포함 마지막 `3일`의 인증 결과는 72h grace 없이 즉시 terminal/freeze 처리된다. 이 구간의 host moderation은 해당 일자 정산 batch 시각 이전에 완료되어야 하며, 이후 결정 변경은 frozen settlement snapshot에 반영되지 않는다.
-- 72h grace는 settlement input freeze 이전 host correction window 설명용이지, settlement input freeze 이후 결과를 변경하는 권한이 아니다. Projection cutoff는 이 window를 설명할 수 있지만 final settlement input freeze 이후 host/admin이 resolved certification state를 소급 변경하지 않는다.
+- 72h grace는 settlement input freeze 이전 host correction window 설명용이지, settlement input freeze 이후 결과를 변경하는 권한이 아니다. Projection은 이 window를 현재 기준 예상으로 설명할 수 있지만 final settlement input freeze 이후 host/admin이 resolved certification state를 소급 변경하지 않는다.
 - Moderation persistence는 authoritative moderation transition ledger와 non-authoritative operational context를 분리한다. Settlement truth에 필요한 것은 effective state, state transition, reason-code, actor, timestamp, append-only chain reference이고, human memo/support note/UX wording/운영 코멘트는 정산 truth가 아니다.
 - Pre-freeze moderation resolution은 certification input을 정리하는 행위이고, post-freeze settlement recovery는 누락 row, FK linkage, payout execution failure만 append-only로 복구하는 행위다. 둘은 같은 권한이 아니다.
 - `Settlement.status = SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item` 계산 스냅샷과 연결된 `point_history` 원장이다. 이후 `MissionLog` 기반 replay는 감사/디버깅 검증용이지 지급 결과를 대체하거나 변경하는 기준이 아니다.
@@ -164,7 +164,7 @@
 기본 흐름:
 
 - `RECRUITING -> ACTIVE`: 시스템 lifecycle 규칙이 `start_at`에 frozen eligibility condition을 만족한다고 판단할 때 발생한다. MVP에서 `activated_at = start_at`이다.
-- `RECRUITING -> CANCELLED`: `start_at` 평가 시점에 `JOINED` participant 수가 `min_participants` 미만이거나 기존 취소 정책이 조건부 전이에 성공할 때 발생한다.
+- `RECRUITING -> CANCELLED`: `start_at` 평가 시점에 `LOCKED` participant 수가 `min_participants` 미만이거나 기존 취소 정책이 조건부 전이에 성공할 때 발생한다.
 - `ACTIVE -> CLOSED`: 계획된 `end_at` cutoff 이후 정상 종료 처리로 발생한다.
 
 자동 activation과 시작 만료 취소 batch는 모두 `RECRUITING` 상태를 조건으로 하는 시스템 전이다. 동시에 경합하면 하나만 성공하고, loser는 최종 room 상태를 재조회한다. 취소형 settlement 생성은 unique/idempotent해야 한다.
@@ -361,12 +361,12 @@ where id = :settlementId
 | `status`                          | `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `RETRY_WAIT`                     |
 | `batch_run_key`                   | 배치 실행 식별자                                                              |
 | `retry_count`                     | 누적 재시도 횟수                                                              |
-| `total_participants`              | frozen `JOINED` participant baseline 기준 정산 대상 participant 수           |
+| `total_participants`              | frozen `LOCKED` participant baseline 기준 정산 대상 participant 수           |
 | `total_locked_amount`             | 정산 실행 시점 기준 총 잠긴 보증금 스냅샷                                     |
 | `total_recognized_success`        | 전체 인정 성공 횟수                                                           |
 | `total_base_refund_amount`        | 절사 전 잔액 배분 전 합계                                                     |
 | `total_remainder_amount`          | 잔액 총액                                                                     |
-| `remainder_policy`                | `DETERMINISTIC_REMAINDER_ALLOCATION`; brownfield `HOST_REMAINDER`는 fixed rule alias일 뿐 host discretion이 아님 |
+| `remainder_policy`                | `DETERMINISTIC_REMAINDER_ALLOCATION`; brownfield `HOST_REMAINDER`는 legacy alias일 뿐 host reward/authority/discretion이 아님 |
 | `remainder_winner_participant_id` | deprecated/brownfield. MVP remainder는 participant draw winner/top contributor를 쓰지 않음 |
 | `failure_code`                    | 표준 실패 코드                                                                |
 | `failure_message`                 | 최근 실패 원인 요약                                                           |
@@ -381,9 +381,9 @@ where id = :settlementId
 
 - `unique(room_id, settlement_type)`
 - `status`는 정산 처리의 원천 상태다.
-- `total_participants`는 activation 시점 frozen `JOINED` participant baseline 기준 participant 수를 의미한다.
+- `total_participants`는 activation 시점 frozen `LOCKED` participant baseline 기준 participant 수를 의미한다.
 - `WITHDRAWN`/ACTIVE withdrawal 기반 재계산은 brownfield/deferred semantics이며 MVP frozen baseline을 소급 변경하지 않는다.
-- `total_locked_amount`는 정산 실행 시점의 정산 대상 participant `room_participant.deposit_amount` 합계를 스냅샷으로 고정한 값이다.
+- `total_locked_amount`는 정산 실행 시점의 정산 대상 participant `crew_participant.deposit_amount` 합계를 스냅샷으로 고정한 값이다.
 - `total_locked_amount`는 `point_history`나 `point_account`를 다시 합산해 계산하지 않는다.
 - MVP에서는 별도 `total_active_participants` 컬럼을 두지 않고, 필요 시 조회/분석용 후속 검토 항목으로 남긴다.
 - `algorithm_version`과 rule interpretation snapshot은 versioned semantic replay를 위한 설명/감사 context다. 이 값들은 historical semantics를 reconstruct하기 위한 기준이며, succeeded settlement를 현재 엔진 기준으로 다시 쓰는 migration hook이 아니다.
@@ -411,7 +411,7 @@ where id = :settlementId
 | `settlement_id`               | 정산 헤더 FK                                                          |
 | `participant_id`              | 참여자 FK                                                             |
 | `member_id`                   | 회원 FK, 현재 스키마의 `user_id`와 매핑 가능                          |
-| `participant_status_snapshot` | MVP에서는 frozen baseline의 `JOINED`; `WITHDRAWN`은 brownfield/deferred |
+| `participant_status_snapshot` | MVP에서는 frozen baseline의 `LOCKED`; `WITHDRAWN`은 brownfield/deferred |
 | `deposit_amount`              | 잠긴 보증금 스냅샷                                                    |
 | `success_count_raw`           | 기간 내 원시 성공 로그 수                                             |
 | `recognized_success_count`    | 최종 인정 성공 횟수                                                   |
@@ -443,7 +443,7 @@ where id = :settlementId
 - `calculation_reason`은 `DAILY` 중복 제외, `SPECIFIC_DAYS` 비유효 요일 제외, resolved certification state, Phase 2/deferred cadence reference를 설명할 수 있어야 한다.
 - `calculation_reason`은 reason-code mapping version과 함께 해석되어야 한다. 과거 settlement의 reason code는 현재 wording/UX 문구가 아니라 당시 vocabulary 기준으로 설명한다.
 - Effective moderation state와 append-only moderation chain reference는 settlement-time input truth를 설명하기 위한 replay context다. Human memo, support note, UX wording, 운영 comment는 이 context를 보조할 수 있어도 authoritative settlement truth가 아니다.
-- `AFTER_WITHDRAWN_AT` 같은 withdrawal cutoff 값은 brownfield/deferred reference이며 MVP frozen `JOINED` baseline을 소급 변경하는 active rule이 아니다.
+- `AFTER_WITHDRAWN_AT` 같은 withdrawal cutoff 값은 brownfield/deferred reference이며 MVP frozen `LOCKED` baseline을 소급 변경하는 active rule이 아니다.
 - `reward_amount`는 잠긴 보증금보다 더 많이 환급된 경우를 설명하기 위한 보조 저장값이다.
 - 잠긴 보증금보다 적게 환급된 경우는 `deposit_amount`, `final_amount`, `share_ratio`, `recognized_success_count` 비교로 설명한다.
 - `settlement_item`을 먼저 생성해 계산 결과를 고정하고, 이후 `point_history`를 생성한 뒤 `point_history_id`를 연결한다.
@@ -509,7 +509,7 @@ MVP `calculation_reason` vocabulary:
 | `member_id`        | 회원 FK, 현재 스키마의 `user_id`와 매핑 가능                                           |
 | `amount`           | 증감 금액                                                                              |
 | `balance_after`    | 반영 후 잔액                                                                           |
-| `transaction_type` | `POINT_CHARGE`, `ROOM_DEPOSIT_LOCK`, `ROOM_SETTLEMENT_REFUND`, `ROOM_CANCELLED_REFUND` |
+| `transaction_type` | `POINT_CHARGE`, `CREW_DEPOSIT_LOCK`, `CREW_SETTLEMENT_REFUND`, `CREW_CANCELLED_REFUND` |
 | `reference_type`   | 예: `SETTLEMENT_ITEM`                                                                  |
 | `reference_id`     | 참조 엔티티 PK                                                                         |
 | `idempotency_key`  | 중복 반영 방지 키, 항상 `NOT NULL`                                                     |
@@ -522,8 +522,8 @@ MVP `calculation_reason` vocabulary:
 - `PointAccount` 또는 `MemberPoint` 같은 현재 잔액 테이블이 있다면, 이 값은 항상 `사용 가능한 포인트 잔액`만 나타내는 재계산 가능한 캐시다.
 - 현재 MVP/brownfield 설명은 잔액 캐시에 `pending_balance`, `waiting_balance`, `locked_balance` 같은 대기·잠금 상태 컬럼을 분리하지 않는 형태를 전제로 설명한다. 이는 physical balance shape를 새로 freeze하는 문장이 아니다.
 - 현재 잔액 캐시와 `point_history` 원장 재계산값이 다르면 `point_history`를 source of truth로 삼고, 원인 조사 후 잔액 캐시를 보정하거나 재생성한다.
-- 현재 MVP/brownfield 설명에서는 보증금이 별도의 계좌로 이동하지 않고, 참여 시점에 `point_account.balance`에서 차감되어 `room_participant.deposit_amount`로 잠긴 상태로 관리된다. 이 표현의 semantic 핵심은 participant 단위 잠금 금액과 원장 추적이지, physical balance column 확정이 아니다.
-- `ROOM_DEPOSIT_LOCK`는 자산 이동이 아니라 기존 포인트를 사용 불가 상태로 전환하는 이벤트다.
+- 현재 MVP/brownfield 설명에서는 보증금이 별도의 계좌로 이동하지 않고, 참여 시점에 `point_account.balance`에서 차감되어 `crew_participant.deposit_amount`로 잠긴 상태로 관리된다. 이 표현의 semantic 핵심은 participant 단위 잠금 금액과 원장 추적이지, physical balance column 확정이 아니다.
+- `CREW_DEPOSIT_LOCK`는 자산 이동이 아니라 기존 포인트를 사용 불가 상태로 전환하는 이벤트다.
 - 정산 또는 취소 시점에만 해당 잠금 금액이 환급되며, 환급은 `point_history`를 통해 `member` 계정 잔액에 다시 반영된다.
 - `point_history` insert와 `point_account.balance` 갱신은 동일 트랜잭션에서 처리한다.
 - 정산 지급의 `reference_type + reference_id`는 어느 `settlement_item`에서 발생했는지 추적 가능해야 한다.
@@ -551,17 +551,17 @@ MVP `calculation_reason` vocabulary:
 - 포인트 충전은 현재 brownfield/MVP 설명에서는 `point_account.balance`를 증가시키는 일반 잔액 충전으로 관찰된다. 이 표현은 물리 balance shape를 새로 freeze하지 않는다.
 - Layering note: 이 절의 `point_account` 형태는 현재 brownfield/MVP observation을 설명하는 비권위 구현 맥락이다. semantic invariant는 `point_history`가 금액 source of truth이고 balance 계열 값은 재계산 가능한 조회/캐시라는 점이다. `available/locked/pending/total` 같은 physical balance shape 후보는 이 cleanup에서 새로 freeze하지 않는다.
 - `point_account`는 `member`와 분리해 사용자 식별·인증 책임과 포인트 잔액 갱신 책임을 나눈다. 현재 문서의 `balance` 표현은 사용 가능 잔액 캐시를 설명하는 brownfield/MVP observation이며, 향후 physical balance shape 결정 권한이 아니다.
-- 크루 참여 시 보증금은 별도 자산으로 이동하지 않고, `point_account.balance`에서 차감되어 해당 `room_participant.deposit_amount`에 participant 단위 잠금 금액으로 기록된다.
-- 보증금 잠금 상태는 `point_account.locked_balance`가 아니라 `balance` 차감과 `room_participant.deposit_amount` 기록으로 표현한다.
+- 크루 참여 시 보증금은 별도 자산으로 이동하지 않고, `point_account.balance`에서 차감되어 해당 `crew_participant.deposit_amount`에 participant 단위 잠금 금액으로 기록된다.
+- 보증금 잠금 상태는 `point_account.locked_balance`가 아니라 `balance` 차감과 `crew_participant.deposit_amount` 기록으로 표현한다.
 - 사용자에게 보여줄 `GET /api/points.locked_balance`는 정산 전 참여 보증금 합계를 API projection으로 제공할 수 있다.
 - 이 projection은 UX 표시용이며 정산 계산, 포인트 원장, 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단의 source of truth가 아니다.
-- MVP projection은 `room_participant.deposit_amount`와 `mission_room.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')`를 기준으로 시작하며, settlement 조인을 강제하지 않는다.
+- MVP projection은 `crew_participant.deposit_amount`와 `mission_room.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')`를 기준으로 시작하며, settlement 조인을 강제하지 않는다.
 - `CLOSED` 포함은 정산 완료 전까지 잠겨 있을 것으로 기대되는 보증금 표시를 위한 근사값이다. `Settlement.status = SUCCEEDED` 이후 lock 해제 여부를 더 정확히 제외하는 조건은 Settlement 조회/정산 구현 단계에서 보강할 수 있다.
-- 정산 계산의 입력 금액은 여전히 정산 대상 participant의 `room_participant.deposit_amount` 합계다.
+- 정산 계산의 입력 금액은 여전히 정산 대상 participant의 `crew_participant.deposit_amount` 합계다.
 - 보증금 잠금은 `point_account`에 대한 조건부 update로 수행한다. 즉, `WHERE balance >= deposit_amount` 조건을 포함해 잔액이 충분할 때만 차감한다.
 - 이 update의 row count가 `1`일 때만 잠금 성공으로 간주하고, `0`이면 동시 요청 또는 잔액 부족으로 보고 참여를 실패 처리한다.
-- 보증금 잠금 처리, `room_participant` 생성, `ROOM_DEPOSIT_LOCK` 원장 생성은 반드시 하나의 트랜잭션으로 처리한다.
-- 권장 순서는 `point_account.balance` 조건부 차감 -> `room_participant` 생성 및 `deposit_amount` 반영 -> `ROOM_DEPOSIT_LOCK point_history` 생성이다.
+- 보증금 잠금 처리, `crew_participant` 생성, `CREW_DEPOSIT_LOCK` 원장 생성은 반드시 하나의 트랜잭션으로 처리한다.
+- 권장 순서는 `point_account.balance` 조건부 차감 -> `crew_participant` 생성 및 `deposit_amount` 반영 -> `CREW_DEPOSIT_LOCK point_history` 생성이다.
 - 위 세 단계 중 하나라도 실패하면 전체 롤백한다. 잔액만 차감되고 participant가 생성되지 않거나, participant만 생기고 원장이 누락되는 상태를 허용하지 않는다.
 - ACTIVE withdrawal은 MVP active semantics가 아니라 brownfield/deferred다. 향후 재도입하더라도 `deposit_amount` 즉시 환급이나 frozen settlement input 변경으로 해석하지 않는다.
 - 최종 정산 또는 취소 환급이 일어날 때만 `point_history`를 통해 `balance`가 증가한다.
@@ -576,7 +576,7 @@ MVP `calculation_reason` vocabulary:
 1. 해당 참여자의 로그여야 한다.
 2. `is_success = true`여야 한다.
 3. `server_time`이 `room.activated_at` 이상이고 방의 종료 시점 이전이어야 한다.
-4. participant가 activation 시점 frozen `JOINED` baseline에 포함되어야 한다. Withdrawal cutoff는 MVP active settlement input이 아니라 brownfield/deferred reference다.
+4. participant가 activation 시점 frozen `LOCKED` baseline에 포함되어야 한다. Withdrawal cutoff는 MVP active settlement input이 아니라 brownfield/deferred reference다.
 
 ### 8.2 DAILY
 
@@ -612,7 +612,7 @@ MVP `calculation_reason` vocabulary:
 
 ### 8.6 왜 실시간 수치와 최종 수치가 달라질 수 있는가
 
-- 실시간 대시보드는 빠른 projection이며, `SUCCEEDED` 전 정산 계산은 `MissionLog`, frozen `JOINED` participant baseline, resolved certification state를 다시 읽어 final batch에서 확정한다.
+- 실시간 대시보드는 빠른 projection이며, `SUCCEEDED` 전 정산 계산은 `MissionLog`, frozen `LOCKED` participant baseline, resolved certification state를 다시 읽어 final batch에서 확정한다.
 - 실시간 대시보드는 캐시 반영 지연이 있을 수 있다.
 - `SUCCEEDED` 전 정산 계산은 로그 원본, frozen baseline, resolved certification state, cadence 대표 선택을 계산한다. `SUCCEEDED` 이후 같은 입력으로 다시 검증하는 행위는 replay/audit이며 final payout 변경 권한이 아니다.
 - `mission_log.failure_reason`은 인증 요청 시점의 1차 실패 사유만 저장하고, `DAILY` 중복 제외나 `SPECIFIC_DAYS` 비유효 요일 제외 같은 정산 단계 설명은 `settlement_item.calculation_reason`이 맡는다. `WEEKLY_N` 상한은 Phase 2/deferred reference다.
@@ -656,7 +656,7 @@ refund_amount = final_amount
 3. 각 참여자의 `raw_refund_amount`를 `DECIMAL128`로 계산한다.
 4. 각 참여자의 `base_refund_amount`에 `FLOOR`를 적용한다.
 5. 남은 `remainder`를 계산한다.
-6. 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. MVP brownfield alias가 `HOST_REMAINDER`라면 이는 frozen host participant를 고정 수령자로 쓰는 replayable floor-remainder rule일 뿐이다.
+6. 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. MVP brownfield alias가 `HOST_REMAINDER`로 남아 있더라도 의미는 replayable floor-remainder calculation metadata이며 host reward/authority/privilege가 아니다.
 7. 이 remainder 처리는 host가 settlement authority를 가진다는 뜻이 아니며, host가 금액·원장·최종 정산을 선택하거나 override할 수 없다.
 
 참고:
@@ -685,7 +685,7 @@ total_remainder_amount = 0
 - 각 참여자의 `final_amount = deposit_amount`로 고정한다. 즉, 잠겨 있던 자기 원금을 그대로 환급하는 equal-principal refund다.
 - 이 분기에서는 `remainder_bonus_amount = 0`, `reward_amount = 0`, `remainder = 0`으로 수렴해야 한다.
 - 이 분기에서는 추가 차감 규칙을 두지 않는다.
-- 이 분기에서는 host remainder, legacy top-contributor/draw/winner 지급 규칙을 사용하지 않는다. 누군가의 전원 실패가 다른 참여자의 수익이 되지 않는다.
+- 이 분기에서는 remainder allocation, legacy top-contributor/draw/winner 지급 규칙을 사용하지 않는다. 누군가의 전원 실패가 다른 참여자의 추가 환급으로 이어지지 않는다.
 
 ### 9.4 잔액 상한
 
@@ -695,7 +695,7 @@ total_remainder_amount = 0
 
 ### 9.5 tie / representative ordering 규칙
 
-MVP payout remainder는 draw/winner가 아니라 deterministic remainder allocation rule을 사용한다. Brownfield `HOST_REMAINDER` 명칭이 남아 있더라도 host discretionary payout을 뜻하지 않는다. 따라서 draw/tie ordering은 최종 지급액을 바꾸는 권한이 아니다.
+MVP payout remainder는 draw/winner가 아니라 deterministic remainder allocation rule을 사용한다. Brownfield `HOST_REMAINDER` 명칭이 남아 있더라도 host reward, privilege, or discretionary payout을 뜻하지 않는다. 따라서 draw/tie ordering은 최종 지급액을 바꾸는 권한이 아니다.
 
 필요한 경우 대표 성공 로그, 동일 점수 표시 순서, 설명용 tie-break 같은 비금액성 UX에는 아래처럼 재현 가능한 ordering을 사용할 수 있다.
 
@@ -841,11 +841,11 @@ settlement:room:{roomId}:type:{settlementType}:participant:{participantId}:cance
 | 시나리오                     | 결정                                                                                                           |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | 인원 미달 방 취소            | 방별 `min_participants`를 기준으로 `CANCELLED_BEFORE_START` 정산 생성 후 전액 환급                             |
-| 중도 탈퇴                    | ACTIVE withdrawal은 brownfield/deferred. MVP 정산은 frozen `JOINED` baseline을 소급 변경하지 않음              |
+| 중도 탈퇴                    | ACTIVE withdrawal은 brownfield/deferred. MVP 정산은 frozen `LOCKED` baseline을 소급 변경하지 않음              |
 | DAILY 하루 다중 인증         | 같은 날짜 성공 로그는 1회만 인정, 나머지는 제외 근거 저장                                                      |
 | SPECIFIC_DAYS 비유효 요일    | `mission_schedule_day`에 없는 요일의 성공 로그는 제외                                                          |
 | WEEKLY_N 상한 초과           | Phase 2/deferred reference. MVP active cadence 아님                                                           |
-| 전체 인정 성공 0회           | 각 참여자의 잠겨 있던 자기 보증금을 equal-principal refund로 전액 환급한다. host/winner/draw remainder 수익 없음 |
+| 전체 인정 성공 0회           | 각 참여자의 잠겨 있던 자기 보증금을 equal-principal refund로 전액 환급한다. host/winner/draw remainder 지급 없음 |
 | 참여자별 보증금 상이         | 총 풀은 합산하되, 결과 설명은 `deposit_amount`, `final_amount`, `share_ratio`로 제공                           |
 | `ACTIVE` 이후 신규 참여 요청 | 거절한다. MVP에서는 모집 완료 후 참여자 구성을 고정한다.                                                       |
 | 탈퇴 후 동일 방 재참여 요청  | MVP active flow에서는 지원하지 않고 거절한다. WITHDRAWN/rejoin은 brownfield/deferred이며 frozen baseline을 변경하지 않는다. |
@@ -1042,7 +1042,7 @@ A base = 115384
 나머지 4명 base = 96153
 base 합계 = 115384 + 96153×4 = 499996
 remainder = 4
-deterministic remainder allocation rule에 따라 frozen host participant item에 remainder 4원이 설명상 배정됨. 이는 host authority나 winner payout이 아님
+deterministic remainder allocation rule에 따라 replayable calculation context에 remainder 4원이 설명상 배정됨. 이는 host reward/authority/privilege나 winner payout이 아님
 ```
 
 최종:
@@ -1077,7 +1077,7 @@ total_remainder_amount = 0
 최종:
 
 - 전원 `100,000원`
-- 이 all-fail 분기에서는 각자 자기 보증금을 그대로 돌려받으므로 잔액/보너스/수익이 생기지 않는다. host remainder, winner/draw payout을 적용하지 않는다.
+- 이 all-fail 분기에서는 각자 자기 보증금을 그대로 돌려받으므로 잔액/보너스/추가 환급이 생기지 않는다. remainder allocation, winner/draw payout을 적용하지 않는다.
 
 ### 예시 C. 동점 표시 / 설명 ordering
 
@@ -1135,9 +1135,9 @@ total_remainder_amount = 0
 ### 18.0 Lifecycle / activation 테스트
 
 - `TS-LC-01` 시스템 자동 activation 성공
-  기대 결과: `start_at`에 `JOINED` participant 수가 `min_participants` 이상이고 terminal action이 없으면 시스템이 `ACTIVE`로 전이하고 `activated_at = start_at`이 기록된다.
+  기대 결과: `start_at`에 `LOCKED` participant 수가 `min_participants` 이상이고 terminal action이 없으면 시스템이 `ACTIVE`로 전이하고 `activated_at = start_at`이 기록된다.
 - `TS-LC-02` `min_participants` 미달 자동 activation 실패
-  기대 결과: `start_at` 평가 시점의 `JOINED` participant 수가 `min_participants` 미만이면 `ACTIVE`로 전이하지 않고 취소형 정산 대상으로 남는다.
+  기대 결과: `start_at` 평가 시점의 `LOCKED` participant 수가 `min_participants` 미만이면 `ACTIVE`로 전이하지 않고 취소형 정산 대상으로 남는다.
 - `TS-LC-03` host manual start 비권한
   기대 결과: host는 `ACTIVE` 전이를 직접 만들 수 없고, StartRoom brownfield endpoint/command는 MVP active contract가 아니다.
 - `TS-LC-04` 시작 만료 취소 settlement 멱등성
@@ -1158,17 +1158,17 @@ total_remainder_amount = 0
 - `TS-02` `min_participants > max_participants`이면 생성 실패
   기대 결과: `2 <= min_participants <= max_participants <= 15` 검증을 통과하지 못하면 요청이 reject된다.
 - `TS-03` participant lifecycle baseline
-  기대 결과: `APPLIED`, `JOINED`, `REJECTED`, `CANCELLED`, `EXPIRED`가 구분되고, capacity/activation/minimum/frozen baseline 및 settlement eligibility에는 `JOINED`만 포함된다. 별도 중간 상태는 두지 않는다.
-- `TS-03A` 방장 승인 시 보증금 자동 잠금 처리
-  기대 결과: 방장 승인 = 자동 보증금 lock trigger로 단일 transaction 내에서 `point_account.balance`가 보증금만큼 감소하고, 같은 금액이 `crew_participant.deposit_amount`에 snapshot되며 `CREW_DEPOSIT_LOCK` 원장이 append되고 `crew_participant.status`가 `JOINED`, `joined_at`이 기록된다.
-- `TS-03B` `APPLIED` 단계 격리
-  기대 결과: `APPLIED`는 `point_account.balance` 변동을 만들지 않고, capacity/activation eligibility/minimum baseline/frozen participant baseline/settlement eligibility 어디에도 포함되지 않는다.
-- `TS-03C` 보증금 잠금 시 사용 가능 잔액 음수 방지
-  기대 결과: 승인 transaction 내 `point_account.balance >= deposit_amount` 조건부 update의 row count가 `1`일 때만 잠금이 성공하고, 동시 승인 또는 잔액 부족으로 row count가 `0`이면 승인 transaction 전체가 rollback되어 신청자는 `APPLIED`로 유지된다.
-- `TS-03D` 승인 전 신청 취소
-  기대 결과: `APPLIED` 신청자는 `DELETE /api/crews/{crewId}/participants/me`로 직접 취소할 수 있고 상태가 `CANCELLED`로 전이되며 `point_history` ledger에 환불 항목이 생성되지 않는다. `JOINED` 이후에는 취소가 reject된다.
-- `TS-04` non-JOINED 인증 요청 차단
-  기대 결과: `participant.status != JOINED`이면 인증 API가 reject된다.
+  기대 결과: `PENDING`, `LOCKED`, `REJECTED`, `CANCELLED`, `EXPIRED`가 구분되고, capacity reservation에는 `PENDING + LOCKED`, activation/minimum/frozen baseline 및 settlement eligibility에는 `LOCKED`만 포함된다. 별도 중간 상태는 두지 않는다.
+- `TS-03A` 신청 시 예치금 reserve 처리
+  기대 결과: 신청 생성 transaction 내에서 `point_account.balance`가 보증금만큼 감소하고, 같은 금액이 `crew_participant.deposit_amount`에 snapshot되며 `CREW_DEPOSIT_LOCK` 원장이 append되고 `crew_participant.status`가 `PENDING`으로 기록된다.
+- `TS-03B` `PENDING` 단계 경계
+  기대 결과: `PENDING`은 capacity reservation과 reserved balance projection에는 포함되지만 activation eligibility/minimum baseline/frozen participant baseline/settlement eligibility에는 포함되지 않는다.
+- `TS-03C` reserve 시 사용 가능 잔액 음수 방지
+  기대 결과: 신청 생성 transaction 내 `point_account.balance >= deposit_amount` 조건부 update의 row count가 `1`일 때만 reserve가 성공하고, 동시 신청 또는 잔액 부족으로 row count가 `0`이면 신청 transaction 전체가 rollback된다.
+- `TS-03D` 승인 전 신청 취소/거절/만료 환급
+  기대 결과: `PENDING` 신청자는 `DELETE /api/crews/{crewId}/participants/me`로 직접 취소할 수 있고 상태가 `CANCELLED`로 전이되며 reserve 금액이 취소 환급 원장으로 반환된다. `REJECTED`/`EXPIRED`도 동일하게 reserve를 반환하고, `LOCKED` 이후에는 취소가 reject된다.
+- `TS-04` non-LOCKED 인증 요청 차단
+  기대 결과: `participant.status != LOCKED`이면 인증 API가 reject된다.
 - `TS-04A` `ACTIVE` 이후 신규 참여 불가
   기대 결과: `MissionRoom.status != RECRUITING`이면 신규 참여 요청이 reject된다.
 - `TS-04B` ACTIVE 이후 baseline 변경 불가
@@ -1187,14 +1187,14 @@ total_remainder_amount = 0
   기대 결과: MVP에서는 `DAILY`, `SPECIFIC_DAYS` 각각에서 대응 전략 1개만 선택되고, `recognized_success_count`, `recognized_dates_count`, `excluded_success_count`, `calculation_reason` 출력 계약이 동일하게 유지된다.
 - `TS-09` 전체 성공 0회 시 equal-principal refund 적용
   기대 결과: 모든 참여자의 `base_refund_amount`, `final_amount`, `refund_amount`가 각자의 `deposit_amount`와 같고 별도 차감 규칙이 적용되지 않는다.
-- `TS-10` 전체 성공 0회에서 host/winner/draw remainder 수익이 없는지
+- `TS-10` 전체 성공 0회에서 remainder/winner/draw 추가 지급이 없는지
   기대 결과: 모든 참여자의 `final_amount`가 각자 `deposit_amount`와 같고, `remainder_bonus_amount = 0`, `reward_amount = 0`, `total_remainder_amount = 0`으로 고정된다.
 - `TS-11` 참여자별 보증금이 다른 경우
   기대 결과: `total_locked_amount`는 합산되고 각 참여자의 `deposit_amount` 대비 `final_amount`가 일관되게 계산된다.
-- `TS-11A` `total_participants`가 frozen `JOINED` baseline 기준으로 계산되는지
-  기대 결과: activation 시점 frozen `JOINED` participant baseline이 `total_participants`와 `settlement_item` 생성 대상의 기준이다.
+- `TS-11A` `total_participants`가 frozen `LOCKED` baseline 기준으로 계산되는지
+  기대 결과: activation 시점 frozen `LOCKED` participant baseline이 `total_participants`와 `settlement_item` 생성 대상의 기준이다.
 - `TS-11B` 동일 `member`가 여러 방에 참여한 경우 보증금 잠금이 방별로 분리되는지
-  기대 결과: 각 방의 `room_participant.deposit_amount`와 관련 `point_history`가 독립적으로 기록되고, 한 방의 정산이 다른 방 잠금 금액을 변경하지 않는다.
+  기대 결과: 각 방의 `crew_participant.deposit_amount`와 관련 `point_history`가 독립적으로 기록되고, 한 방의 정산이 다른 방 잠금 금액을 변경하지 않는다.
 - `TS-11C` `total_locked_amount`가 participant 잠금 스냅샷 기준으로 계산되는지
   기대 결과: 정산 실행 시점의 정산 대상 participant `deposit_amount` 합계가 그대로 `total_locked_amount`에 저장되고, `point_history`나 `point_account` 재합산값은 사용되지 않는다.
 - `TS-12` 일반 정산 로직이 영향받지 않았는지
@@ -1210,9 +1210,9 @@ total_remainder_amount = 0
 - `TS-14AA` `SUCCEEDED` 전환 전에 모든 환급 원장 연결이 검증되는지
   기대 결과: `point_history` 생성 또는 `point_history_id` 연결이 하나라도 누락되면 `Settlement.status`는 `SUCCEEDED`로 바뀌지 않고 `RETRY_WAIT` 또는 `FAILED`로 남는다.
 - `TS-14B` 정산 환급 후 사용 가능 잔액이 증가하는지
-  기대 결과: `ROOM_SETTLEMENT_REFUND` 또는 `ROOM_CANCELLED_REFUND` 기록과 함께 `point_account.balance`가 `final_amount`만큼 증가한다.
+  기대 결과: `CREW_SETTLEMENT_REFUND` 또는 `CREW_CANCELLED_REFUND` 기록과 함께 `point_account.balance`가 `final_amount`만큼 증가한다.
 - `TS-14C` 포인트 원장 기록이 충전, 잠금, 환급 흐름과 일치하는지
-  기대 결과: 같은 `member` 기준으로 `POINT_CHARGE -> ROOM_DEPOSIT_LOCK -> ROOM_SETTLEMENT_REFUND` 또는 `ROOM_CANCELLED_REFUND` 순서의 잔액 변화가 `balance_after`와 함께 일관되게 남는다.
+  기대 결과: 같은 `member` 기준으로 `POINT_CHARGE -> CREW_DEPOSIT_LOCK -> CREW_SETTLEMENT_REFUND` 또는 `CREW_CANCELLED_REFUND` 순서의 잔액 변화가 `balance_after`와 함께 일관되게 남는다.
 - `TS-14D` `point_account.balance`와 `point_history` 재계산값이 불일치할 때 원장 기준으로 복구되는지
   기대 결과: 운영 검증은 `point_history`를 source of truth로 삼아 불일치 원인을 기록하고, `point_account.balance` 캐시를 원장 재계산값으로 보정한다.
 - `TS-15` 배치 재시도 시 `point_history.idempotency_key`로 중복 지급이 차단되는지
@@ -1226,7 +1226,7 @@ total_remainder_amount = 0
 - `TS-17A1` terminal 상태 재신청 차단
   기대 결과: 동일 `member`가 같은 `crew`에 `REJECTED` / `CANCELLED` / `EXPIRED` 상태 row를 보유한 상태에서 `POST /api/crews/{crewId}/participants`를 재호출하면 `APPLICATION_NOT_ALLOWED`로 reject되고 기존 row의 status는 변경되지 않으며 신규 row도 생성되지 않는다.
 - `TS-17B` 실시간 대시보드 캐시와 `SUCCEEDED` 전 정산 계산 결과가 일시적으로 달라도 authoritative settlement input으로 정산값이 확정되는지
-  기대 결과: 캐시 누락 또는 지연이 있어도 `settlement_item` 계산값은 `MissionLog` 원본, frozen `JOINED` baseline, resolved certification state 기준으로 일관되게 생성된다.
+  기대 결과: 캐시 누락 또는 지연이 있어도 `settlement_item` 계산값은 `MissionLog` 원본, frozen `LOCKED` baseline, resolved certification state 기준으로 일관되게 생성된다.
 
 ### 18.3 동시성 테스트
 

@@ -15,7 +15,7 @@
 3. 계약: FE/BE가 어떤 인터페이스로 연결되는가
 4. 실행: 어떤 순서로 구현하고 검증하는가
 
-원본 기획안(`.docx`)은 출발점이자 제품/UX 배경 참고 자료다. 현재 활성 제품/UX 참고 문서는 `docs/Dondok_프로젝트기획안_v1.3.docx`이며, 구현과 운영 판단의 기준은 여전히 이 폴더의 Markdown 문서(`docs/*.md`)다. 제안서 표현이 Markdown 문서와 충돌하면 Markdown 문서가 우선한다.
+원본 기획안(`.docx`)은 출발점이자 제품/UX 배경 참고 자료다. 현재 활성 제품/UX 참고 문서는 `docs/Dondok_프로젝트기획안_v1.7.docx`이며, 구현과 운영 판단의 기준은 여전히 이 폴더의 Markdown 문서(`docs/*.md`)다. 제안서 표현이 Markdown 문서와 충돌하면 Markdown 문서가 우선한다.
 
 ## 2. 추천 읽기 순서
 
@@ -29,9 +29,9 @@
    PRD와 Usecase bridge를 읽은 뒤에는 정산 규칙과 도메인 구조를 같이 본다. `Settlement-design`은 정산/포인트/동시성/재시도 같은 운영 규칙을 설명하고, `ERD`는 데이터 모델의 경계를 설명한다. 두 문서를 함께 봐야 데이터 구조와 비즈니스 계산 규칙이 연결된다.
 4. [API-spec-dondok.md](./API-spec-dondok.md)
    앞선 문서들을 기반으로 FE/BE 계약을 확인한다. API는 독립 출발점이 아니라 PRD, Usecase bridge, 정산 설계, ERD를 외부 인터페이스로 고정한 결과물이다.
-5. [Dondok_요구사항명세서_v0.7.xlsx](./Dondok_요구사항명세서_v0.7.xlsx), wireframe/QA 자료, 외부 WBS/GitHub Issues
+5. [Dondok_요구사항명세서_v0.9.xlsx](./Dondok_요구사항명세서_v0.9.xlsx), wireframe/QA 자료, [Dondok_WBS_v0.6.xlsx](./Dondok_WBS_v0.6.xlsx), 외부 WBS/GitHub Issues
    마지막으로 실행 계획과 검증 단위를 본다. 여기서는 무엇을 만들지 다시 정의하지 않고, 이미 결정된 범위를 어떤 단위로 구현하고 검증할지 확인한다.
-6. [Dondok_프로젝트기획안_v1.3.docx](./Dondok_프로젝트기획안_v1.3.docx)
+6. [Dondok_프로젝트기획안_v1.7.docx](./Dondok_프로젝트기획안_v1.7.docx)
    활성 제품/UX 참고 자료다. 배경, 화면 의도, 소셜 피드 표현을 확인할 때만 본다. 구현 판단은 Markdown source of truth 문서에 승격된 내용만 따른다.
 
 ## 3. 문서별 역할 정의
@@ -43,8 +43,9 @@
 | [Settlement-design.md](./Settlement-design.md)                  | 정산 계산, 상태 흐름, 멱등성, 동시성, 실패/재시도 정책을 정의한다.    | 정산/포인트/배치 구현 또는 운영 정책 검토 시    | 정산 도메인 규칙과 운영 안전성 정책    |
 | [ERD-dondok.md](./ERD-dondok.md)                        | 핵심 테이블, 관계, 제약, 스냅샷 저장 구조를 정의한다.                 | DB 설계, 쿼리 설계, 영속성 모델 검토 시         | 데이터 구조와 DB 제약                  |
 | [API-spec-dondok.md](./API-spec-dondok.md)              | FE/BE가 공유하는 엔드포인트, 요청/응답, 에러, 상태값 계약을 정의한다. | 화면 연동, API 구현, QA 시나리오 작성 시        | 외부 API 계약. 알림 transport 세부는 API 및 외부 implementation/infra decision docs 후속 propagation 대상 |
-| [Dondok_요구사항명세서_v0.7.xlsx](./Dondok_요구사항명세서_v0.7.xlsx) | 상세 요구사항 참고 자료다.                                            | 요구사항 세부 항목과 검증 단위를 확인할 때      | Downstream 요구사항 reference          |
-| [Dondok_프로젝트기획안_v1.3.docx](./Dondok_프로젝트기획안_v1.3.docx) | 활성 제품/UX 참고 자료다.                                             | 배경, UX 의도, 제안서 표현 확인이 필요할 때     | 현재 source of truth 아님. 참고용 입력 |
+| [Dondok_요구사항명세서_v0.9.xlsx](./Dondok_요구사항명세서_v0.9.xlsx) | 상세 요구사항 참고 자료다.                                            | 요구사항 세부 항목과 검증 단위를 확인할 때      | Downstream 요구사항 reference          |
+| [Dondok_프로젝트기획안_v1.7.docx](./Dondok_프로젝트기획안_v1.7.docx) | 활성 제품/UX 참고 자료다.                                             | 배경, UX 의도, 제안서 표현 확인이 필요할 때     | 현재 source of truth 아님. 참고용 입력 |
+| [Dondok_WBS_v0.6.xlsx](./Dondok_WBS_v0.6.xlsx) | MVP 일정/구현 범위 참고 자료다. | 실행 우선순위와 일정 확인이 필요할 때 | Downstream 실행 reference |
 
 문서 충돌 시 우선순위는 아래를 따른다.
 
@@ -66,7 +67,7 @@
 - 72h grace는 pre-freeze correction window일 뿐이며, final 3 mission days는 즉시 freeze된다. Post-freeze mutation은 금지된다.
 - `NOTIFY-003`은 projection 기반 알림이며 final settlement guarantee가 아니다. 상세 event/API 문구는 `API-spec` 후속 propagation에서 정렬한다.
 - `point_history`는 authoritative append-only ledger이고, `point_account.balance`는 projection/cache layer다. 이 경계의 source of truth는 `ERD`다.
-- 크루 참여 lifecycle 중 `APPLIED`는 보증금 lock 전 신청 상태이고, capacity/activation eligibility/minimum baseline/frozen baseline/settlement eligibility 어디에도 포함되지 않는다. 방장 승인 = 자동 보증금 lock trigger이며 단일 transaction 내 lock 성공 시 즉시 `JOINED`로 전이한다. Activation/min baseline은 `JOINED` participant만 센다.
+- 크루 참여 lifecycle은 `PENDING`(신청 제출 + 예치금 reserve)과 `LOCKED`(방장 승인 후 확정)를 사용한다. `PENDING`은 사용 가능 잔액을 줄이고 reserve projection을 늘리며 capacity reservation에는 포함되지만 activation eligibility/minimum baseline/frozen baseline/settlement eligibility에는 포함되지 않는다. `LOCKED`만 activation/minimum/frozen participant baseline에 포함된다.
 - EXIF/`image_hash`는 fraud/risk signal이며 인증/정산 authority가 아니다. `image_hash`는 서버가 S3 object에서 직접 계산한 SHA-256이고 클라이언트 제출 값을 신뢰하지 않는다.
 - FCM/알림 inbox는 non-authoritative UX hint다. delivery attempt나 read state를 settlement evidence/lifecycle authority로 끌어올리지 않는다.
 - `moderation_history`는 append-only audit trail이다. 기존 레코드를 수정/삭제하지 않으며, host moderation 결정도 mission_log 컬럼 update + history row append로만 진행한다. MVP에서 admin/correction workflow는 존재하지 않는다.
@@ -113,7 +114,7 @@ API-spec
 - 테이블, 컬럼, FK, unique 제약, 스냅샷 저장 구조는 `ERD`에만 상세 정의한다.
 - 엔드포인트, 요청/응답 JSON, 에러 응답, API enum, 알림 transport/API 외부 계약은 `API-spec`에만 상세 정의한다.
 - 실행 우선순위, 선행 의존성, 병렬 실행 순서는 요구사항 명세서, wireframe/QA 자료, 외부 WBS, GitHub Issues에서 추적하되 상위 제품/정산/API 의미를 재정의하지 않는다.
-- 활성 기획안(`docs/Dondok_프로젝트기획안_v1.3.docx`)의 표현이 현재 Markdown 문서와 다르면 docx를 직접 구현 기준으로 사용하지 않는다. 필요한 내용은 먼저 소유 Markdown source of truth 문서로 승격한 뒤 구현한다.
+- 활성 기획안(`docs/Dondok_프로젝트기획안_v1.7.docx`)의 표현이 현재 Markdown 문서와 다르면 docx를 직접 구현 기준으로 사용하지 않는다. 필요한 내용은 먼저 소유 Markdown source of truth 문서로 승격한 뒤 구현한다.
 - AI 비트랜잭션 경계는 `PRD`, `API-spec`, `ERD`가 같은 정책을 유지해야 한다.
 - DB enum/constraint와 `member.uuid` identity persistence invariant의 source of truth는 `ERD`가 소유하고, `API-spec`은 FE/BE 계약에 필요한 consumer-facing enum, auth subject, 알림 recipient/transport contract만 반복한다. 예: `point_history.reference_type`, `settlement_status`, `settlement_type`, `frequency_type`, `transaction_type`.
 

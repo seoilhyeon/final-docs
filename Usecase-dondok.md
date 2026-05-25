@@ -109,8 +109,7 @@ Host는 accepted/rejected certification input과 contextual review만 판단한�
 
 Projection은 사용자의 불안을 낮추고 최종 정산을 설명 가능하게 만드는 current-basis UX estimate다. Projection은 감정적으로 중요하지만 최종 정산 권한은 없고, profit/dopamine loop가 아니다.
 
-- Live projection: 현재 입력 기준 예상.
-- Cutoff/frozen projection: 마감 기준 예상. 최종 아님. “frozen” 표현은 finality를 암시할 수 있으므로 downstream copy에서는 `마감 기준 예상`처럼 설명형 표현을 우선한다.
+- Current-basis projection: 응답 시점에 확인 가능한 현재 입력 기준 예상. 미션 종료 이후에도 final settlement 전에는 이 표현만 사용한다.
 - Final settlement: settlement snapshot + settlement item + point history.
 
 ### 2.4 Append-only philosophy
@@ -157,7 +156,7 @@ Dondok에서 UX copy는 단순 polish가 아니다. 다음 오해를 만들면 s
 - host rejection이 몰수처럼 보임
 - retry가 지급 재작성처럼 보임
 - correction이 몰래 과거 수정처럼 보임
-- frozen projection이 final settlement처럼 보임
+- post-end projection이 final settlement처럼 보임
 - all-fail이 전원 0원/house edge/처벌처럼 보임
 - ranking/profit 화면이 도박성 경쟁처럼 보임
 - 실패자/1위 수익자/공격적 leaderboard가 상대 실패를 기대하게 만듦
@@ -182,11 +181,11 @@ Hardening은 engagement mechanics 제거가 아니다. 실시간 지분율, 상�
 | Domain | Authority Owner | Key Lifecycle Boundaries | Key Semantic Risks | Related Usecases |
 |---|---|---|---|---|
 | Lifecycle | System lifecycle rules | create/recruiting/baseline/activation/closed/cancelled | host lifecycle authority leakage; activation anchor drift | UC-A01, UC-A04, UC-A05 |
-| Recruitment / Activation | System + deposit/participant constraints | recruitment deadline, approval, deposit lock, baseline, automatic activation | `StartRoom` and `/start` brownfield conflict; JOINED vs pending confusion | UC-A02, UC-A03, UC-A04 |
+| Recruitment / Activation | System + deposit/participant constraints | recruitment deadline, approval, deposit lock, baseline, automatic activation | `StartRoom` and `/start` brownfield conflict; `PENDING` reserve vs `LOCKED` baseline confusion | UC-A02, UC-A03, UC-A04 |
 | Certification / Upload | MissionLog + server validation | upload object, mission-log creation, server_time, validation, risk signal | upload success treated as certification; EXIF/hash treated as final authority | UC-A06, UC-A07, UC-A08, UC-A09 |
 | Moderation | Host contextual review only | moderation event, correction-before-freeze, post-freeze no host mutation | host rejection perceived as confiscation; append-only hidden by latest-only UI; host treated as payout approver | UC-A10, UC-A11, UC-A12 |
-| Projection | Query-time UX calculation | live estimate, cutoff/frozen estimate, final settlement handoff | estimate treated as guaranteed payout/profit loop; frozen treated as final | UC-A13, UC-A14, UC-A15 |
-| Settlement | Settlement engine + settlement snapshot | input freeze, deterministic calculation, item snapshot, ledger link, succeeded | all-fail zero-refund brownfield drift; host remainder as authority; duplicate payout | UC-A15, UC-A16, UC-A17 |
+| Projection | Query-time UX calculation | current-basis estimate, post-end estimate, final settlement handoff | estimate treated as guaranteed payout/profit loop; post-end estimate treated as final | UC-A13, UC-A14, UC-A15 |
+| Settlement | Settlement engine + settlement snapshot | input freeze, deterministic calculation, item snapshot, ledger link, succeeded | all-fail zero-refund brownfield drift; host-framed remainder authority; duplicate payout | UC-A15, UC-A16, UC-A17 |
 | Replay / Audit | Audit/reconciliation process | replay inputs, version/snapshot, comparison result | replay confused with recalculation; version drift breaks reproducibility | UC-A18 |
 | Retry / Recovery | Admin recovery + idempotent system constraints | failed/retry-wait, partial point_history, missing item link | retry treated as correction or rerun payout | UC-A17, UC-A18 |
 | Notification / State Drift | Non-authoritative delivery | send, receive, stale payload, reconnect, canonical refresh | notification implies final state; failure is mistaken for settlement retry | UC-A19 |
@@ -216,19 +215,19 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Participant, host, system
 - **Classification**: actor-performed usecase (Participant join action; host approval is contextual review context only)
 - **Preconditions**: Room recruiting; participant eligible; sufficient point balance.
-- **Main Flow**: Participant applies/joins according to room visibility. Application may create a deposit reserve/hold UX, but approval and deposit lock must complete before participant is part of the frozen baseline.
+- **Main Flow**: Participant submits a public-crew join request. The request creates a `PENDING` reserve that decreases available balance and reserves capacity, but only host approval to `LOCKED` can make the participant part of activation/frozen baseline.
 - **Lifecycle Semantics**:
-  - Before approval, participant withdrawal is allowed and reserved/held deposit must be immediately refunded or released.
-  - Host rejection before lock excludes the application from baseline and reserved/held deposit must be immediately refunded or released.
-  - Unreviewed applications at the relevant recruitment cutoff are auto-rejected for baseline purposes and reserved/held deposit must be immediately refunded or released.
-  - After approval + deposit lock, MVP does not allow participant-side change/cancel; the participant becomes a `JOINED` baseline candidate until activation freeze.
-  - This is behavioral semantics only; it does not freeze DB columns, API statuses, enum values, or point-account physical shape.
-- **Failure Flow**: Insufficient balance, duplicate join, deadline passed, approval pending, participant withdrawal before approval, host rejection, auto-rejection at cutoff, reserve/release failure, lock failure.
+  - Before approval, participant cancellation is allowed and the `PENDING` reserve must be refunded/released through ledger-backed balance restoration.
+  - Host rejection before `LOCKED` excludes the row from baseline and the `PENDING` reserve must be refunded/released through ledger-backed balance restoration.
+  - Unreviewed `PENDING` rows at the relevant recruitment cutoff are auto-rejected/expired for baseline purposes and their reserve must be refunded/released through ledger-backed balance restoration.
+  - After approval to `LOCKED`, MVP does not allow participant-side change/cancel; the participant becomes a baseline candidate until activation freeze.
+  - Canonical API/ERD statuses are `PENDING` and `LOCKED`; this usecase intentionally leaves physical cache/column implementation to ERD/API.
+- **Failure Flow**: Insufficient balance, duplicate join, deadline passed, participant cancellation before approval, host rejection, auto-rejection/expiration at cutoff, reserve/refund failure, `LOCKED` transition failure.
 - **Authority Boundary**: Deposit lock and participant inclusion are system/ledger constrained; host approval here is contextual review context (not payout approval, not deposit-waive authority); host cannot waive settlement rules.
-- **Projection Impact**: Reserve/held/locked balance and participant-count visibility may update as UX projection, but these displays do not make the participant part of final baseline before approval + lock.
-- **Settlement Impact**: Only properly joined/deposit-locked participants can become payout baseline candidates.
-- **UX Risk**: Users may confuse “applied”, “approved”, “reserved”, or “pending” with fully joined baseline status, or interpret rejection/auto-rejection as confiscation.
-- **Related Domain Objects**: `room_participant`, `point_account`, `point_history`.
+- **Projection Impact**: `reserved_balance`, `locked_balance`, and participant-count visibility may update as UX projection, but these displays do not make `PENDING` part of final baseline before approval to `LOCKED`.
+- **Settlement Impact**: Only `LOCKED` participants can become payout baseline candidates.
+- **UX Risk**: Users may confuse `PENDING` reserve with fully `LOCKED` baseline status, or interpret rejection/auto-rejection as confiscation.
+- **Related Domain Objects**: `crew_participant`, `point_account`, `point_history`.
 
 ### UC-A03 — Concurrent Join and Capacity/Balance Race
 
@@ -236,12 +235,12 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Classification**: extension / edge case (UC-A02 race variant; DB/account consistency invariant)
 - **Preconditions**: Room still accepts participants; concurrent join requests occur.
 - **Main Flow**: System commits each join/deposit lock atomically according to balance, capacity, and state.
-- **Failure Flow**: Duplicate participant row, double balance deduction, optimistic UI showing joined before lock commits.
+- **Failure Flow**: Duplicate participant row, double balance deduction, optimistic UI showing locked before lock commits.
 - **Authority Boundary**: DB/account consistency wins over client optimism.
 - **Projection Impact**: Locked balance and participant count projections may briefly lag.
 - **Settlement Impact**: Only committed lock/baseline records count.
-- **UX Risk**: User sees a temporary “joined” state and later loses it.
-- **Related Domain Objects**: `room_participant`, `point_history`, participant status.
+- **UX Risk**: User sees a temporary “locked” state and later loses it.
+- **Related Domain Objects**: `crew_participant`, `point_history`, participant status.
 
 ### UC-A04 — Automatic Activation and Baseline Freeze
 
@@ -254,7 +253,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Projection Impact**: Dashboard moves from not-started to live estimate after activation.
 - **Settlement Impact**: Activation/baseline anchors drive certification eligibility and settlement inputs.
 - **UX Risk**: Host or participants think host controls when money-affecting lifecycle starts.
-- **Related Domain Objects**: `mission_room`, `room_participant`.
+- **Related Domain Objects**: `mission_room`, `crew_participant`.
 
 ### UC-A05 — Recruitment Expiry or Start Failure Cancellation
 
@@ -316,7 +315,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Main Flow**: Raw logs remain append-only; projection/settlement recognizes only allowed count according to cadence.
 - **Failure Flow**: Feed success count inflates final settlement recognized count.
 - **Authority Boundary**: Feed visibility is not settlement recognition.
-- **Projection Impact**: Projection must apply the same recognition semantics as final settlement where frozen.
+- **Projection Impact**: Projection must apply current-basis recognition rules consistent with settlement inputs, but remains a non-final estimate until Settlement.status = SUCCEEDED and point_history is committed.
 - **Settlement Impact**: Excluded logs need calculation reasons.
 - **UX Risk**: User thinks every successful feed post increases payout.
 - **Related Domain Objects**: `mission_log`, `settlement_item`, `calculation_reason`.
@@ -373,17 +372,17 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **UX Risk**: Estimate decrease feels like money being taken away, or increase feels like profiting from someone else's failure.
 - **Related Domain Objects**: `mission_log`, dashboard projection response.
 
-### UC-A14 — Cutoff/Frozen Projection Before Final Settlement
+### UC-A14 — Post-End Current-Basis Projection Before Final Settlement
 
 - **Actors**: Participant, system
-- **Classification**: system-driven projection (non-authoritative cutoff estimate; “frozen” ≠ final settlement)
+- **Classification**: system-driven projection (non-authoritative current-basis estimate after mission end)
 - **Preconditions**: Mission ended; settlement not yet succeeded.
-- **Main Flow**: System shows cutoff-basis estimate using end cutoff.
-- **Failure Flow**: “Frozen” is interpreted as final settlement or payout certainty.
-- **Authority Boundary**: Cutoff-basis estimate remains non-authoritative.
-- **Projection Impact**: Projection no longer moves with current time but may still differ from final.
-- **Settlement Impact**: Final settlement may differ due to authoritative rules and frozen inputs.
-- **UX Risk**: User disputes final result because it differs from “frozen” estimate.
+- **Main Flow**: System shows a current-basis estimate from currently resolved inputs and explicitly labels it as not final settlement.
+- **Failure Flow**: Post-end estimate is interpreted as final settlement or payout certainty.
+- **Authority Boundary**: Post-end estimate remains non-authoritative until Settlement API/ledger finality.
+- **Projection Impact**: Projection may become less volatile after mission end but remains a query-time estimate and may still differ from final.
+- **Settlement Impact**: Final settlement may differ due to authoritative settlement rules and input freeze.
+- **UX Risk**: User disputes final result because it differs from the last estimate.
 - **Related Domain Objects**: `mission_room`, projection response, `settlement` status.
 
 ### UC-A15 — Final Settlement Success and Ledger Authority
@@ -402,11 +401,11 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A16 — All-Fail Settlement and Deterministic Remainder
 
 - **Actors**: System, participants, host
-- **Classification**: variant / exceptional branch of UC-A15 (all-fail = equal principal refund; host remainder = deterministic replayable rule, not host authority)
+- **Classification**: variant / exceptional branch of UC-A15 (all-fail = equal principal refund; remainder = deterministic replayable calculation rule, not host authority/reward)
 - **Preconditions**: Settlement input has no recognized successes, or rounding/remainder exists.
 - **Main Flow**: All-fail settles by equal principal refund so that nobody's failure becomes another participant's profit. Any separate rounding/remainder rule must be deterministic, replayable, and not host-discretionary.
 - **Failure Flow**: “전원 0원 환급”, “환급 없음”, house-edge wording, or host discretionary remainder wording conflicts with canonical settlement semantics.
-- **Authority Boundary**: Host receiving deterministic remainder is not host authority.
+- **Authority Boundary**: Remainder calculation is deterministic metadata, not host authority/reward/privilege.
 - **Projection Impact**: Estimate must not imply discretionary host benefit, punitive pool loss, or failure-profit upside.
 - **Settlement Impact**: All-fail equal principal refund is canonical; prior zero-refund wording remains brownfield drift only.
 - **UX Risk**: Users see unfair host favoritism or gambling-like pool behavior.
@@ -529,8 +528,8 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 
 | PF Ref | Finding | Semantic Danger | Canonical Direction | Downstream Impact |
 |---|---|---|---|---|
-| PF-001 | Projection as promised payout or profit loop | Money-shaped estimates feel contractual or gambling-like | Always frame as current/cutoff-basis estimate for anxiety reduction and settlement explanation; final settlement has separate source | PRD, API, Wireframe, QA, Support |
-| PF-002 | Frozen projection wording | “Frozen” sounds final | Use “마감 기준 예상” or equivalent; show settlement status and 변동 가능성 beside it | API, Wireframe, QA |
+| PF-001 | Projection as promised payout or profit loop | Money-shaped estimates feel contractual or gambling-like | Always frame as current-basis estimate for anxiety reduction and settlement explanation; final settlement has separate source | PRD, API, Wireframe, QA, Support |
+| PF-002 | Post-end projection wording | Post-end estimates can sound final | Use “현재 기준 예상” with settlement status and 변동 가능성; avoid finality wording before settlement succeeds | API, Wireframe, QA |
 | PF-003 | Final differs from last estimate | User sees final delta as arbitrary | Provide explanation drivers: moderation, cadence cap, server-time cutoff, withdrawal/defer rule, tie/remainder | Settlement, API, Support, QA |
 | PF-004 | Host rejection as confiscation | Moderation feels like money authority | Copy must state certification review input, not deposit/ledger decision | PRD, Wireframe, Support |
 | PF-005 | Append-only hidden by latest-only UI | Users suspect tampering | Show timeline/progressive audit visibility where relevant | ERD, API, Wireframe |
@@ -544,7 +543,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 | PF-013 | Retry/correction confusion | Admin retry becomes payout editor | Retry resumes failed settlement processing; correction remains separate/deferred unless frozen | API, Runbook, Support |
 | PF-014 | Correction as hidden history mutation | Users believe history can be edited | Do not design here; preserve unresolved hard blocker, separate support semantics, and append-only prohibition | PRD, ERD, Settlement |
 | PF-015 | Live rank toxicity | Users hope others fail | Prefer contribution/progress/share framing over adversarial leaderboard or “1위 수익자” framing | PRD, Wireframe |
-| PF-016 | Failure visibility shame | Accountability becomes humiliation | Avoid public shame mechanics and “실패자” labels; use private/supportive cues | Wireframe, QA |
+| PF-016 | Failure visibility shame | Accountability becomes humiliation | Avoid public shame mechanics and “실패자” labels; use supportive/private-to-user cues | Wireframe, QA |
 | PF-017 | All-fail / tie / remainder fairness | Deterministic can still feel unfair or house-like | All-fail = equal principal refund; remainder must be replayable rule, not host discretion | Settlement detail, Support |
 | PF-018 | Brownfield host-start drift | Host lifecycle authority contradicts canonical model | Label/remove/reframe as Drift Candidate | PRD, API, Settlement, QA |
 | PF-019 | Support source confusion | Support answers become semantic authority drift | Lifecycle-specific support source hierarchy | Runbook, Support QA |
@@ -559,7 +558,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 
 2. Recruitment / approval / deposit lock
    authority: system + ledger constraints
-   risk: pending vs joined baseline confusion
+   risk: pending vs locked baseline confusion
 
 3. Frozen participant baseline
    authority: canonical lifecycle rules
@@ -589,9 +588,9 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
    authority: non-authoritative query-time current-basis estimate
    risk: estimate treated as contract, profit/loss, or failure-profit loop
 
-10. End cutoff / cutoff-basis projection
-    authority: timing cutoff for estimate
-    risk: frozen projection treated as final settlement
+10. Mission end / post-end current-basis projection
+    authority: non-authoritative estimate using currently resolved inputs
+    risk: post-end estimate treated as final settlement
 
 11. Settlement input freeze
     authority: canonical freeze boundary
@@ -624,7 +623,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 - `start_at`: planned activation anchor in PRD synthesis.
 - `activated_at`: effective activation anchor; any divergence must be explicitly resolved across PRD/API/Settlement.
 - `server_time`: certification timing authority.
-- `end_at`: mission/certification cutoff and cutoff-basis projection anchor.
+- `end_at`: mission/certification cutoff and one input boundary for current-basis projection.
 - settlement input freeze: hard blocker because it determines whether moderation/projection inputs can still affect final settlement.
 - `Settlement.status = SUCCEEDED`: final authority transition only after settlement item and point history consistency are verified.
 
@@ -638,11 +637,11 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 | Replay/version snapshot requirements | Hard Blocker | Minimum data for settlement-time replay not fully frozen | Replay can become current-rule recalculation | Audit reproduction can differ | ERD/Settlement cannot prove replayability |
 | Post-success correction lifecycle | Hard Blocker / Deferred Semantic | Formal correction/dispute workflow is not MVP-frozen | Hidden mutation or admin payout editing risk | Final settlement could be overwritten without append-only model | Do not design in API/ERD until L1 freezes it |
 | All-fail refund mismatch | Resolved upstream / Brownfield Conflict | PRD now requires all-fail equal principal refund, but prior docs may still say all fail => 0 refund | Settlement constitution conflict if old wording propagates | Direct payout difference | Settlement/ERD/API/requirements/QA must remove or label zero-refund wording before propagation |
-| Deterministic host remainder | Hard Blocker / UX Warning | Host receives deterministic remainder but must not look discretionary | Host authority leakage | Remainder replay rule misunderstood as host privilege | PRD/Settlement/API/Support wording drift |
+| Deterministic remainder | Hard Blocker / UX Warning | Remainder is replayable calculation metadata, not host reward/privilege | Host authority leakage | Remainder replay rule misunderstood as host privilege | PRD/Settlement/API/Support wording drift |
 | Host manual start / `/start` | Brownfield Conflict | Existing docs/API may imply host lifecycle authority | Host becomes activation authority | Eligibility and projection anchors drift | Must be removed, deferred, or labeled before propagation |
 | Moderation timeout / inactive host | Propagation Warning, possibly blocker if it affects freeze | What happens when host does not moderate before freeze? | Participant may feel hostage to host | If unresolved input affects final settlement, can become hard blocker | PRD/API/QA need label; no invented workflow here |
 | Moderation visibility scope | Propagation Warning | Who sees full history vs latest effective result? | Append-only guarantee may be invisible | No direct payout change | Wireframe/API/support drift |
-| Frozen projection wording | Propagation Warning | Name sounds final | Projection becomes pseudo-settlement | Users dispute final delta | API/Wireframe copy drift |
+| Post-end projection wording | Propagation Warning | Post-end estimate sounds final | Projection becomes pseudo-settlement | Users dispute final delta | API/Wireframe copy drift |
 | Notification stale-state reconciliation | Propagation Warning | Reconnect/late notification behavior wording incomplete | Notification becomes pseudo-authority | No direct settlement change | Client/QA/support drift |
 | Support explanation hierarchy | Propagation Warning | Support may cite wrong source depending on lifecycle | Support becomes informal authority | Disputes handled from projection instead of settlement item | Runbook/support QA drift |
 | Emotional trust framing | Propagation Warning | Ranking, rejection, warnings can feel punitive/gambling-like | Product trust erodes | No direct payout change | Wireframe/PRD/requirements/QA may drop as polish |
@@ -677,10 +676,10 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 ### 8.3 Dangerous wording patterns
 
 - “Host starts/activates mission” without Drift Candidate label.
-- “Expected refund” without current-basis/cutoff-basis qualifier.
+- “Expected refund” without current-basis qualifier.
 - “예상 손익”, “실시간 수익 증가”, “더 벌었다”, or “수익률” as projection framing.
 - “누군가 실패해서 상승”, “1위 수익자”, “지분왕”, or other failure-profit leaderboard copy.
-- “Frozen” without “not final settlement.”
+- Post-end estimate phrased as final settlement.
 - “Approved” implying payout approval.
 - “Rejected” implying confiscation, punishment, or person-level judgment.
 - “전원 0원”, “환급 없음”, “몰수”, “처벌”, or house-edge all-fail wording as canonical settlement.
@@ -736,7 +735,7 @@ Avoid:
 | Situation | Safer Direction | Dangerous Direction |
 |---|---|---|
 | Live estimate | “현재 기준 예상 환급입니다. 최종 정산 전 변동될 수 있어요.” | “받을 환급금” |
-| Cutoff projection | “마감 기준 예상입니다. 정산 확정 전 참고값입니다.” | “Frozen / 확정 금액” |
+| Post-end estimate | “현재 기준 예상입니다. 최종 정산 전까지 변동될 수 있어요.” | “확정 금액 / 받을 환급금” |
 | Projection update | “현재 인증 결과가 반영되었습니다. 크루 전체 진행 상황이 업데이트되었습니다.” | “누군가 실패해서 상승 / 더 벌었습니다” |
 | Host moderation accepted | “방장이 인증 내용을 검토했어요. 정산 입력에 반영될 수 있습니다.” | “환급 승인 완료” |
 | Host moderation rejected | “인증 검토 결과 정산 입력에서 제외될 수 있어요. 사유와 이력을 확인할 수 있습니다.” | “몰수 / 실패 확정 / 문제 사용자” |
@@ -746,7 +745,7 @@ Avoid:
 | Replay | “감사용으로 당시 기준 결과를 재현합니다.” | “결과를 다시 산정합니다.” |
 | Correction | “최종 정산 이후 별도 운영 기준으로 진행되는 보정/지원 처리입니다.” | “정산 결과를 수정했습니다 / 몰래 보정했습니다” |
 | Notification | “알림을 눌러 최신 상태를 확인하세요.” / “알림은 놓치지 않도록 돕는 안내이며, 최신 상태는 앱에서 다시 확인합니다.” | “이 알림이 최종 상태입니다.” / “알림 실패로 정산을 재시도합니다.” |
-| All-fail | “이번 미션에서는 인정된 성공 기록이 없어, 누군가의 실패가 다른 참여자의 수익으로 이어지지 않도록 원금을 기준으로 정산되었습니다.” | “전원 0원 / 환급 없음 / 실패자 몰수” |
+| All-fail | “이번 미션에서는 인정된 성공 기록이 없어, 누군가의 실패가 다른 참여자의 추가 환급으로 이어지지 않도록 원금을 기준으로 정산되었습니다.” | “전원 0원 / 환급 없음 / 실패자 몰수” |
 | Tie/remainder | “정해진 deterministic rule에 따라 처리됩니다.” | “방장에게 임의 지급됩니다.” |
 | Contribution visibility | “현재 상위 기여 그룹입니다 / 크루 평균 이상 달성 중입니다.” | “1위 수익자 / 지분왕 / 실패자 덕분에 상승” |
 | Result share card | “이번 크루를 끝까지 버텼습니다 / 함께 인증을 쌓았습니다.” | “남들을 이겨서 벌었습니다” |
@@ -761,7 +760,7 @@ A UX state/copy is semantically risky if it causes users to believe any of the f
 - Host can take money.
 - Retry rewrites payout.
 - Correction hides history mutation.
-- Frozen estimate is final settlement.
+- Post-end estimate is final settlement.
 - Ranking rewards other people’s failure.
 - All-fail means punishment, house edge, or zero-refund elimination.
 - Reject reason is a moral judgment about the person.
