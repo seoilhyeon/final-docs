@@ -227,10 +227,10 @@
 
 ### 3.17 MissionLogReactionType
 
-- `reaction_type`은 고정 enum이 아니라 OS 기본 emoji picker 기반 string / normalized emoji token 후보다.
+- `reaction_type`은 고정 enum이 아니라 FE-selected emoji grapheme/token string이며 OS emoji/free token string을 그대로 저장한다.
 - FE는 사용자가 선택한 emoji grapheme/token 문자열을 그대로 전송한다.
 - BE는 `trim`, blank reject, 기존 `VARCHAR(20)` 저장 길이 검증만 수행한다.
-- MVP에서는 NFC/NFD 정규화, variation selector collapsing, ZWJ/skin-tone equivalence normalization을 적용하지 않는다. 같은 문자열만 같은 `reaction_type`으로 본다.
+- MVP에서는 NFC/NFD 정규화, variation selector collapsing, ZWJ/skin-tone 동등성 정규화를 적용하지 않는다. 같은 저장 문자열만 같은 `reaction_type`으로 본다.
 - API는 동일 `(mission_log_id, member_id, reaction_type)` 단위로 toggle/delete/idempotency를 판단한다. 한 회원이 같은 feed item에 여러 emoji token을 동시에 남길 수 있지만, 같은 token은 1회만 허용한다.
 - 리액션은 소셜 메타데이터 전용이다. 포인트 원장, 정산, 환급, AI 리포트, 상태 생명주기 enum과 연결하지 않는다.
 
@@ -931,8 +931,7 @@ Response `201 Created`:
   "certification_status": "SUCCESS",
   "failure_reason": null,
   "decision_type": null,
-  "reject_reason_code": null,
-  "reject_memo": null
+  "reject_reason_code": null
 }
 ```
 
@@ -1006,8 +1005,8 @@ Error:
 - `certification_status = PENDING_REVIEW`는 업로드 직후 검수/판정 대기 상태다.
 - `certification_status`는 인증 피드 badge, dashboard projection, 알림 input에 쓰이는 resolved state이며 EXIF/hash raw signal이나 host moderation `decision_type`/`reject_reason_code`와 동일 axis로 해석하지 않는다.
 - `mission_log.failure_reason`은 인증 시점 실패 사유(system/timing axis)다.
-- `decision_type`, `reject_reason_code`, `reject_memo`는 호스트 검수자 결과 axis이며 시스템 `failure_reason`과 의미 vocabulary가 다르다. 자세한 사항은 §3.9/§3.10 참조.
-- POST 응답에서 `decision_type`, `reject_reason_code`, `reject_memo`는 검수가 일어나지 않은 시점에는 `null`이다. 검수 갱신은 별도 흐름이며 이 API는 검수 결과를 입력받지 않는다.
+- `decision_type`, `reject_reason_code`는 호스트 검수자 결과 axis이며 시스템 `failure_reason`과 의미 vocabulary가 다르다. `reject_memo`는 internal/private non-response context다. 자세한 사항은 §3.9/§3.10 참조.
+- POST 응답에서 `decision_type`, `reject_reason_code`는 검수가 일어나지 않은 시점에는 `null`이다. `reject_memo`는 participant-facing 응답 필드가 아니다. 검수 갱신은 별도 흐름이며 이 API는 검수 결과를 입력받지 않는다.
 - `settlement_item.calculation_reason`은 정산 시점 포함/제외 근거다.
 - MVP 인증 API에서 `OUT_OF_SCHEDULE`는 사용하지 않는다.
 - 최종 정산에서의 인정 여부는 `certification_status`가 아니라 `Settlement` 계산 단계에서 결정된다.
@@ -1223,7 +1222,7 @@ Request:
 
 | 필드            | 타입     | 필수 | 설명                      |
 | --------------- | -------- | ---- | ------------------------- |
-| `reaction_type` | `string` | Y    | OS emoji string / normalized emoji token 후보 |
+| `reaction_type` | `string` | Y    | FE-selected emoji grapheme/token string |
 
 ```json
 {
@@ -1257,7 +1256,7 @@ Error:
 - 구현은 `(mission_log_id, member_id, reaction_type)` unique constraint 기반의 DB-level idempotency를 MUST로 한다. SQL 문법은 실제 MySQL 8.0 stack에 맞춘다.
 - 동일 `(mission_log_id, member_id, reaction_type)`에 대한 동시 중복 요청은 DB unique conflict 때문에 API 에러가 되어서는 안 되며, 최종 상태는 해당 token 1개 존재로 수렴해야 한다.
 - 한 회원은 한 `MissionLog`에 여러 emoji token을 남길 수 있지만, 동일 token은 1회만 허용한다.
-- Emoji token minimal-freeze: FE-selected token을 서버가 새 등가 규칙으로 바꾸지 않는다. BE는 trim 후 blank를 거절하고 `VARCHAR(20)` 저장 길이를 검증한다. NFC/NFD, variation selector, ZWJ/skin-tone 동등성 처리는 MVP에서 적용하지 않는다.
+- Emoji token minimal-freeze: FE-selected token을 서버가 새 등가 규칙으로 바꾸지 않는다. BE는 trim 후 blank를 거절하고 `VARCHAR(20)` 저장 길이를 검증한다. NFC/NFD 정규화, variation selector collapsing, ZWJ/skin-tone 동등성 정규화는 MVP에서 적용하지 않는다.
 - 리액션 생성/수정은 `mission_log`를 mutate하지 않는다.
 - 리액션은 정산, 환급, 포인트 원장, AI 리포트, 방/참여/정산 상태 전이에 side effect를 만들지 않는다.
 
@@ -1271,7 +1270,7 @@ Query:
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| `reaction_type` | `string` | Y | 삭제할 OS emoji string / normalized emoji token 후보. URL encoding 필요 |
+| `reaction_type` | `string` | Y | 삭제할 FE-selected emoji grapheme/token string. URL encoding 필요 |
 
 Response `200 OK`:
 
@@ -1294,7 +1293,7 @@ Error:
 정책:
 
 - 리액션이 이미 없어도 성공 응답을 반환한다.
-- 삭제는 `(mission_log_id, member_id, reaction_type)` 기준 멱등 delete다. 같은 token만 삭제하며 다른 emoji token row는 유지한다.
+- 삭제는 `(mission_log_id, member_id, reaction_type)` 기준 멱등 delete다. 같은 저장 문자열만 삭제하며 다른 emoji token row는 유지한다.
 - `reaction_type` query parameter는 required다. 클라이언트는 emoji token을 URL encoding해서 전송해야 하며, 서버는 POST와 같은 trim/blank/length 검증을 적용한다.
 - 삭제도 `mission_log` 원본, 정산, 환급, 포인트 원장, AI 리포트, 상태 생명주기에 side effect를 만들지 않는다.
 

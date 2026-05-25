@@ -602,7 +602,7 @@ Unique / Index:
 | `id`             | `BIGINT`      | N        | 리액션 PK           |
 | `mission_log_id` | `BIGINT`      | N        | 인증 로그 FK        |
 | `member_id`      | `BIGINT`      | N        | 리액션 작성 회원 FK |
-| `reaction_type`  | `VARCHAR(20)` | N        | OS emoji string / normalized emoji token 후보 |
+| `reaction_type`  | `VARCHAR(20)` | N        | FE-selected emoji grapheme/token string |
 | `created_at`     | `DATETIME(6)` | N        | 생성 시각           |
 | `updated_at`     | `DATETIME(6)` | N        | 수정 시각           |
 
@@ -623,12 +623,12 @@ Unique / Index:
 
 상태값 / Token:
 
-- `reaction_type`: 고정 enum이 아니라 OS 기본 emoji picker 기반 문자열 또는 normalized emoji token 후보를 저장한다. MVP는 trim/blank validation과 기존 `VARCHAR(20)` 길이 검증만 적용하며 NFC/NFD 정규화, variation selector collapsing, ZWJ/skin-tone 동등성 처리는 적용하지 않는다.
+- `reaction_type`: 고정 enum이 아니라 FE-selected emoji grapheme/token string을 저장한다. MVP는 trim/blank validation과 기존 `VARCHAR(20)` 길이 검증만 적용하며 NFC/NFD 정규화, variation selector collapsing, ZWJ/skin-tone 동등성 정규화는 적용하지 않는다.
 
 주의사항:
 
 - 리액션은 `mission_log.certification_status = 'SUCCESS'`인 feed-eligible 로그에만 허용한다. 이 제약은 API/애플리케이션 계층에서 검증한다.
-- 한 회원은 한 `mission_log`에 여러 `reaction_type`을 남길 수 있지만, 동일 `(mission_log_id, member_id, reaction_type)`은 한 번만 허용한다. 토글/idempotency/delete 기준은 같은 `reaction_type` token 단위다.
+- 한 회원은 한 `mission_log`에 여러 `reaction_type`을 남길 수 있지만, 동일 `(mission_log_id, member_id, reaction_type)`은 한 번만 허용한다. 토글/idempotency/delete 기준은 같은 저장 문자열 단위다.
 - 리액션 수는 이 테이블에서 파생 계산한다. `mission_log`에 `reaction_count` 같은 저장 카운터를 추가하지 않는다.
 - 리액션 생성, 수정, 삭제는 `mission_log.certification_status`, `failure_reason`, 이미지, 서버 시간 등 원본 로그를 변경하지 않는다.
 - 리액션은 `settlement`, `settlement_item`, `point_history`, 환급 상태, `Crew.status`, `CrewParticipant.status`, `Settlement.status`를 생성하거나 수정하거나 롤백하지 않는다.
@@ -1059,8 +1059,8 @@ erDiagram
         DATETIME created_at
         DATETIME updated_at
     }
-    %% MISSION_LOG_REACTION: UK(mission_log_id, member_id, reaction_type); IDX(mission_log_id), IDX(member_id, created_at); reaction_type is an OS emoji string / normalized emoji token candidate, not a fixed enum; no emoji canonicalization beyond trim/blank/length validation.
-    %% MISSION_LOG_REACTION note: feed/social metadata only; same emoji token toggles/deletes idempotently per member/log; multiple emoji tokens may coexist; counts are derived and do not affect certification or payout state.
+    %% MISSION_LOG_REACTION: UK(mission_log_id, member_id, reaction_type); IDX(mission_log_id), IDX(member_id, created_at); reaction_type is a FE-selected emoji grapheme/token string, not a fixed enum; validation is limited to trim, blank reject, and VARCHAR(20) length.
+    %% MISSION_LOG_REACTION note: feed/social metadata only; same stored string toggles/deletes idempotently per member/log; multiple emoji tokens may coexist; counts are derived and do not affect certification or payout state.
 
     SETTLEMENT {
         BIGINT id PK
