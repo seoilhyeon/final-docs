@@ -84,10 +84,11 @@ locked_balance == active_locked_amount + settlement_pending_amount
 
 - `point_history`는 authoritative append-only ledger다.
 - 포인트 금액 변경은 `point_account` cache만으로 완료된 것으로 보지 않는다.
-- `point_account`와 `point_history`가 불일치하면 `point_history` 기준으로 조사하고 cache를 보정한다.
+- `point_account`와 reconciliation 결과가 불일치하면 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage를 함께 기준으로 조사하고 cache를 보정한다.
 - `point_history` row를 수정/삭제해 결과를 맞추지 않는다.
 - `point_history.idempotency_key`는 `UNIQUE`이며 권장 길이는 `VARCHAR(160)` 또는 동등한 안전 canonical size다.
 - `payload_hash` 저장과 payload consistency framework는 MVP에서 명시적으로 deferred이며 필수 구현 요건이 아니다.
+- 잔액/버킷 reconciliation은 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage, `point_account` cached balances를 함께 사용한다. 승인(`PENDING -> LOCKED`)은 원장 row 없이 bucket transition으로 처리된다.
 
 ### Balance-after snapshots
 
@@ -101,6 +102,7 @@ MVP 구현에서 이 guardrail 범위의 canonical transaction type은 아래와
 
 | Flow | Transaction type | Meaning |
 | --- | --- | --- |
+| Point charge | `POINT_CHARGE` | 결제 승인 후 포인트 충전 반영 |
 | Apply reserve | `CREW_DEPOSIT_RESERVE` | `PENDING` 신청 reserve 생성 |
 | Reserve release | `CREW_RESERVE_RELEASE` | `PENDING` reserve를 terminal 전이와 함께 반환 |
 | Settlement refund | `CREW_SETTLEMENT_REFUND` | final settlement item 환급 반영 |
@@ -117,19 +119,27 @@ MVP 구현에서 이 guardrail 범위의 canonical transaction type은 아래와
 
 - Apply reserve: `crew:{crewId}:participant:{participantId}:reserve`
 - Reserve release: `crew:{crewId}:participant:{participantId}:reserve-release`
-- Settlement refund: `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}`
+- Settlement refund: `crew:{crewId}:participant:{participantId}:settlement-refund`
 
 ### Reserve release once per participant
 
 - reserve release는 `crew_participant.id` 기준으로 한 번만 허용한다.
 - terminal transition과 reserve release ledger creation은 같은 transaction 안에서 처리한다.
 - 구현은 `released_point_history_id`를 둔다. 이 값은 authoritative reserve-release ledger evidence이며, `reserve_released_at`만으로 release 완료를 증명하지 않는다.
+- `released_point_history_id`는 nullable unique로 강제한다. 여러 row가 `NULL`일 수는 있지만, 하나의 reserve-release `point_history` row를 여러 `crew_participant`가 공유할 수 없다.
 
 ### Settlement refund once per settlement item
 
 - settlement refund는 `settlement_item` 기준으로 한 번만 반영한다.
 - `settlement_item.point_history_id`는 최종 환급 ledger row와 연결되어야 한다.
 - `settlement.status = SUCCEEDED` 전 모든 `settlement_item`이 point history link를 가져야 한다.
+- MVP 정산 환급 idempotency identity는 crew/participant 단위 자연키다. Runtime-generated `settlement.id`는 `settlement_item`/`point_history` linkage metadata이며 idempotency key 구성값으로 사용하지 않는다.
+
+### One final settlement per crew
+
+- MVP에는 crew당 authoritative final settlement row가 정확히 하나만 존재할 수 있다.
+- DB는 `unique(crew_id)`로 중복 settlement header 생성을 막는다.
+- retry/replay는 기존 `settlement` row와 기존 `settlement_item` snapshot/linkage를 대상으로 수행하며, 새 settlement type이나 새 settlement row를 만들어 의미를 갈라타지 않는다.
 
 ### Duplicate payload conflict guidance
 

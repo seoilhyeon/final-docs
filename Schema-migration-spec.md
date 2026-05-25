@@ -29,6 +29,7 @@ Canonical rules for this migration round:
 - FK delete policy:
   - use `RESTRICT` / `NO ACTION` for money, audit, participant, settlement, and ledger relationships.
 - `point_history` is append-only. Do not update or soft-delete ledger rows after insertion.
+- Balance reconciliation uses `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage, and `point_account` cached balances together because approval is a bucket transition without a ledger row.
 - Money/audit entities do not use soft delete.
 - Terminal `crew_participant` rows are preserved; no physical delete or row reuse for MVP re-application.
 
@@ -66,6 +67,7 @@ Participant-level lifecycle row for one member in one crew. It owns the particip
 - FK: `member_id -> member.id` with `RESTRICT` / `NO ACTION`.
 - FK: `released_point_history_id -> point_history.id` with `RESTRICT` / `NO ACTION`.
 - UNIQUE: `unique(crew_id, member_id)`.
+- UNIQUE: `unique(released_point_history_id)` with normal nullable-unique semantics; multiple `NULL` values are allowed, but a non-null release ledger row cannot be shared by multiple participants.
 - CHECK:
   - `deposit_amount >= 0`.
   - `status in ('PENDING', 'LOCKED', 'REJECTED', 'CANCELLED', 'EXPIRED')` if DB-level enum checks are used.
@@ -75,7 +77,7 @@ Participant-level lifecycle row for one member in one crew. It owns the particip
 
 - `index(crew_id, status)` for capacity reservation, activation eligibility, and settlement baseline queries.
 - `index(member_id, status)` for member participation lookup.
-- `index(released_point_history_id)` for release evidence lookup; uniqueness is not required because `point_history.id` is already unique and nullable FK behavior is dialect-specific.
+- `unique(released_point_history_id)` also serves release evidence lookup and prevents multiple participants from sharing one reserve-release ledger row.
 
 #### Notes
 
@@ -166,8 +168,8 @@ Append-only authoritative point ledger. It records every reserve, reserve releas
   - `available_after >= 0`.
   - `reserved_after >= 0`.
   - `locked_after >= 0`.
-  - `transaction_type in ('CREW_DEPOSIT_RESERVE', 'CREW_RESERVE_RELEASE', 'CREW_SETTLEMENT_REFUND')` for this Dondok crew/settlement migration scope if DB-level enum checks are used.
-  - `reference_type in ('CREW_PARTICIPANT', 'SETTLEMENT_ITEM')` for this Dondok crew/settlement migration scope if DB-level enum checks are used.
+  - `transaction_type in ('POINT_CHARGE', 'CREW_DEPOSIT_RESERVE', 'CREW_RESERVE_RELEASE', 'CREW_SETTLEMENT_REFUND')` if DB-level enum checks are used.
+  - `reference_type in ('POINT_CHARGE', 'CREW_PARTICIPANT', 'SETTLEMENT_ITEM')` if DB-level enum checks are used.
 
 #### Indexes
 
@@ -189,7 +191,7 @@ Append-only authoritative point ledger. It records every reserve, reserve releas
 
 #### Table purpose
 
-Settlement header and execution claim row for one crew settlement type. It stores frozen aggregate totals, retry metadata, and completion state.
+Settlement header and execution claim row for one crew. It stores frozen aggregate totals, retry metadata, and completion state.
 
 #### Columns
 
@@ -197,7 +199,6 @@ Settlement header and execution claim row for one crew settlement type. It store
 | --- | --- | --- | --- | --- |
 | `id` | `BIGINT` | N | auto increment | Primary key. |
 | `crew_id` | `BIGINT` | N | none | FK to `crew.id`. |
-| `settlement_type` | `VARCHAR(30)` | N | none | STRING enum: `NORMAL`, `CANCELLED_BEFORE_START`. |
 | `status` | `VARCHAR(20)` | N | `PENDING` | STRING enum: `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `RETRY_WAIT`. |
 | `baseline_frozen_at` | `DATETIME(6)` | N | settlement creation/freeze time | Timestamp when LOCKED-only settlement baseline is frozen. |
 | `batch_run_key` | `VARCHAR(100)` | Y | `NULL` | Worker/batch execution identifier. |
@@ -213,7 +214,7 @@ Settlement header and execution claim row for one crew settlement type. It store
 | `total_remainder_amount` | `BIGINT` | N | `0` | Deterministic remainder total. |
 | `remainder_policy` | `VARCHAR(30)` | N | canonical MVP policy | STRING enum; MVP uses deterministic remainder allocation semantics. |
 | `algorithm_version` | `VARCHAR(50)` | N | current settlement algorithm version | Historical semantic replay context. |
-| `rule_context_snapshot` | `JSON` | N | none | Cadence/timezone/cutoff/lifecycle/remainder/reason mapping context. |
+| `rule_context_snapshot` | `JSON` | N | none | Minimal opaque cadence/timezone/cutoff/lifecycle/remainder/reason mapping context required for historical settlement explanation. |
 | `started_at` | `DATETIME(6)` | Y | `NULL` | Execution start timestamp. |
 | `finished_at` | `DATETIME(6)` | Y | `NULL` | Execution finish timestamp. |
 | `version` | `BIGINT` | N | `0` | Optimistic locking version. |
@@ -224,17 +225,16 @@ Settlement header and execution claim row for one crew settlement type. It store
 
 - PK: `primary key (id)`.
 - FK: `crew_id -> crew.id` with `RESTRICT` / `NO ACTION`.
-- UNIQUE settlement strategy: `unique(crew_id, settlement_type)`.
+- UNIQUE settlement strategy: `unique(crew_id)`.
 - CHECK:
   - `status in ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'RETRY_WAIT')` if DB-level enum checks are used.
-  - `settlement_type in ('NORMAL', 'CANCELLED_BEFORE_START')` if DB-level enum checks are used.
   - `retry_count >= 0`.
   - money aggregate columns are `>= 0`.
   - count aggregate columns are `>= 0`.
 
 #### Indexes
 
-- `unique(crew_id, settlement_type)` for duplicate settlement prevention.
+- `unique(crew_id)` for duplicate settlement prevention.
 - `index(status, retry_count, created_at)` for batch claim/retry scans.
 - Optional: `index(next_retry_at, status)` if retry scheduling uses DB polling.
 
@@ -242,6 +242,7 @@ Settlement header and execution claim row for one crew settlement type. It store
 
 - Settlement baseline uses `LOCKED` participants only.
 - `PENDING`, `REJECTED`, `CANCELLED`, and `EXPIRED` participants are excluded from settlement baseline.
+- MVP has exactly one authoritative final settlement row per crew. Normal end and before-start cancellation are lifecycle/reason inputs to that row, not separate settlement types.
 - `baseline_frozen_at` records when baseline selection is frozen; retry must complete the same settlement row rather than replace baseline semantics.
 - `Settlement.status = SUCCEEDED` is allowed only after every `settlement_item` has a valid `point_history_id` and corresponding `point_history` row.
 - Retry/replay/correction remain separated. Retry completes unfinished execution; replay is audit/reconstruction; correction workflow is deferred.
@@ -269,17 +270,10 @@ Participant-level settlement calculation snapshot and refund ledger linkage row.
 | `period_start_at` | `DATETIME(6)` | N | none | Calculation period start. |
 | `period_end_at` | `DATETIME(6)` | N | none | Calculation period end. |
 | `share_ratio` | `DECIMAL(18,8)` | N | none | Calculation share ratio. |
-| `raw_refund_amount` | `BIGINT` | N | none | Pre-floor/rounding explanatory amount in point minor unit; no decimal money storage. |
-| `base_refund_amount` | `BIGINT` | N | `0` | Floored base refund amount. |
-| `remainder_bonus_amount` | `BIGINT` | N | `0` | Deterministic remainder allocation amount. |
-| `reward_amount` | `BIGINT` | N | `0` | Amount above locked principal, if any under canonical calculation. |
-| `refund_amount` | `BIGINT` | N | `0` | Actual refund amount. |
-| `final_amount` | `BIGINT` | N | `0` | Final amount credited. |
+| `refund_amount` | `BIGINT` | N | `0` | Final credited/refunded amount. Other per-item amount values are calculation intermediates and are not persisted in MVP. |
 | `draw_key_snapshot` | `CHAR(64)` | Y | `NULL` | Non-payout display/explanation ordering key. |
 | `tie_break_rank` | `INT` | Y | `NULL` | Non-payout display/explanation rank. |
-| `calculation_reason` | `JSON` | N | none | Inclusion/exclusion calculation reason context. |
-| `effective_moderation_snapshot` | `JSON` | Y | `NULL` | Effective moderation state context at settlement. |
-| `moderation_chain_ref` | `JSON` | Y | `NULL` | Append-only moderation chain reference. |
+| `calculation_reason` | `JSON` | N | none | Minimal opaque inclusion/exclusion reason context required for MVP explanation/replay. Do not model it as query-heavy JPA subgraphs. |
 | `point_history_id` | `BIGINT` | Y | `NULL` | FK to refund ledger row; nullable until payout link completes. |
 | `created_at` | `DATETIME(6)` | N | current timestamp | Audit create time. |
 | `updated_at` | `DATETIME(6)` | N | current timestamp | Audit update time / ledger link completion time. |
@@ -300,10 +294,8 @@ Participant-level settlement calculation snapshot and refund ledger linkage row.
 
 #### Indexes
 
-- `index(settlement_id)` for settlement item scans.
 - `index(member_id)` for member refund history.
 - `index(crew_participant_id)` for participant settlement lookup.
-- `index(point_history_id)` for ledger linkage verification.
 
 #### Notes
 
@@ -316,6 +308,7 @@ Participant-level settlement calculation snapshot and refund ledger linkage row.
 
 Active canonical MVP ledger transaction types:
 
+- `POINT_CHARGE`: created for successful point charge confirmation.
 - `CREW_DEPOSIT_RESERVE`: created when application reserve succeeds and participant enters `PENDING`.
 - `CREW_RESERVE_RELEASE`: created once when `PENDING` transitions to `REJECTED`, `CANCELLED`, or `EXPIRED` and reserve is returned.
 - `CREW_SETTLEMENT_REFUND`: created for final settlement refund linked to `settlement_item`.
@@ -332,7 +325,7 @@ Canonical idempotency key formats:
 
 - Reserve: `crew:{crewId}:participant:{participantId}:reserve`
 - Reserve release: `crew:{crewId}:participant:{participantId}:reserve-release`
-- Settlement refund: `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}`
+- Settlement refund: `crew:{crewId}:participant:{participantId}:settlement-refund`
 
 Rules:
 
@@ -342,6 +335,7 @@ Rules:
 - `crew_participant.released_point_history_id` links the terminal participant row to the authoritative release ledger row.
 - Settlement refund is allowed once per `settlement_item.id` / participant settlement item.
 - `settlement_item.point_history_id` links the settlement calculation snapshot to the authoritative refund ledger row.
+- Runtime-generated `settlement.id` is linkage metadata, not authoritative idempotency identity. Settlement linkage is tracked through `settlement_item` and `point_history` linkage.
 - Same-key retry with same canonical input returns/reuses the existing `point_history` and linkage.
 - Same-key retry with different canonical input is an idempotency conflict; do not create a second ledger row.
 - `payload_hash` is deferred for MVP, so same/different canonical input checks are application-level rules, not a persisted payload consistency framework.

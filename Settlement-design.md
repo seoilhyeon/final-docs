@@ -88,15 +88,15 @@
 - 방 생성 시 host가 설정할 수 있고, 기본값은 `2`명이다.
 - 제약 조건은 PRD synthesis 기준 `2 <= min_participants <= max_participants <= 15`이다.
 - MVP에서 `min_participants` 충족은 host command의 precondition이 아니라 시스템 자동 activation의 eligibility condition이다.
-- `start_at` 자동 activation 시점에 `LOCKED` participant 수를 다시 검증하며, 미달이면 `ACTIVE`로 전이하지 않고 시작 전 취소 정산 대상으로 남긴다.
+- `start_at` 자동 activation 시점에 `LOCKED` participant 수를 다시 검증하며, 미달이면 `ACTIVE`로 전이하지 않고 시작 전 취소 사유를 가진 단일 settlement 대상으로 남긴다.
 
 ### 3.4 시작 만료 / 인원 미달 취소
 
 - `recruitment_deadline` 이후 신규 참여는 차단한다.
 - `start_at`에 시스템은 frozen eligibility condition을 평가한다. `LOCKED` participant 수가 `min_participants` 이상이고 system-recognized terminal cancellation condition이 없으면 자동으로 `ACTIVE` 전이한다.
 - `start_at` 이후에도 eligibility condition을 만족하지 못해 `RECRUITING`인 방은 batch가 `CANCELLED` 처리한다.
-- 시작 만료 또는 인원 미달 취소는 일반 정산과 별개가 아니라 `취소형 정산`으로 기록한다.
-- 취소형 정산에서는 각 참여자에게 `잠긴 보증금 전액`을 환급한다.
+- 시작 만료 또는 인원 미달 취소는 별도 settlement type이 아니라 같은 crew의 단일 settlement row에 lifecycle/reason input으로 기록한다.
+- 시작 전 취소 사유에서는 각 참여자에게 `잠긴 보증금 전액`을 환급한다.
 
 ### 3.5 정산 계산 입력과 성공 후 운영 원천
 
@@ -171,7 +171,7 @@
 - `RECRUITING -> CANCELLED`: `start_at` 평가 시점에 `LOCKED` participant 수가 `min_participants` 미만이거나 기존 취소 정책이 조건부 전이에 성공할 때 발생한다.
 - `ACTIVE -> CLOSED`: 계획된 `end_at` cutoff 이후 정상 종료 처리로 발생한다.
 
-자동 activation과 시작 만료 취소 batch는 모두 `RECRUITING` 상태를 조건으로 하는 시스템 전이다. 동시에 경합하면 하나만 성공하고, loser는 최종 room 상태를 재조회한다. 취소형 settlement 생성은 unique/idempotent해야 한다.
+자동 activation과 시작 만료 취소 batch는 모두 `RECRUITING` 상태를 조건으로 하는 시스템 전이다. 동시에 경합하면 하나만 성공하고, loser는 최종 room 상태를 재조회한다. 시작 전 취소 사유의 settlement 생성은 `unique(crew_id)` 기준으로 unique/idempotent해야 한다.
 
 ### 5.2 Settlement 상태
 
@@ -205,8 +205,8 @@ MissionRoom 종료/취소 감지
 
 규칙:
 
-- 하나의 방에 대해 MVP 기준 정산은 `settlement_type`별 1건만 생성한다.
-- `Settlement.status`는 생성 후 변경되지만, `settlement_type`과 `room_id`는 변경하지 않는다.
+- 하나의 방에 대해 MVP 기준 authoritative final settlement row는 정확히 1건만 생성한다.
+- `Settlement.status`는 생성 후 변경되지만, 대상 `crew_id`는 변경하지 않는다.
 - 이미 `SUCCEEDED`인 정산은 다시 `PENDING`으로 되돌리지 않는다.
 - `SUCCEEDED`는 immutable finality boundary다. replay, retry, support/admin recovery가 succeeded settlement snapshot이나 이미 기록된 point ledger를 overwrite하지 않는다.
 - 일부 participant 지급만 완료됐거나 원장-FK 연결이 누락된 partial 상태는 복구 가능한 중간 상태이며, `SUCCEEDED`가 아니라 `RETRY_WAIT` 또는 `FAILED`로 남긴다.
@@ -241,7 +241,7 @@ MissionRoom 종료/취소 감지
 
 ```text
 MissionRoom 상태가 ACTIVE -> CLOSED
--> Settlement(type=NORMAL, status=PENDING) 생성
+-> Settlement(status=PENDING) 생성
 -> 배치가 PENDING Settlement를 조회
 -> claim 후 실행
 ```
@@ -250,7 +250,7 @@ MissionRoom 상태가 ACTIVE -> CLOSED
 
 ```text
 MissionRoom 상태가 RECRUITING -> CANCELLED
--> Settlement(type=CANCELLED_BEFORE_START, status=PENDING) 생성
+-> Settlement(status=PENDING) 생성
 -> 배치가 PENDING Settlement를 조회
 -> claim 후 전액 환급 실행
 ```
@@ -266,8 +266,8 @@ MissionRoom 상태가 RECRUITING -> CANCELLED
 
 - 종료 감지 로직이 실패해 `Settlement`가 생성되지 않은 경우를 대비해, 운영용 누락 탐지 잡 또는 관리자 API로 `PENDING` row 생성 복구를 할 수 있다.
 - 이 복구는 누락 row 생성 continuation일 뿐, frozen certification outcome이나 settlement input을 수정하는 correction workflow가 아니다.
-- 복구 절차는 `room_id` 기준으로 `CLOSED` 또는 `CANCELLED` 상태와 정산 대상 participant 존재 여부를 다시 확인한 뒤, 누락된 `Settlement(PENDING)`를 생성하는 흐름으로 고정한다.
-- 이 복구 경로도 동일하게 `unique(room_id, settlement_type)` 제약을 통과해야 하며, 요청자/사유/시각/대상 `room_id`를 감사 로그에 append-only로 남긴다.
+- 복구 절차는 `crew_id` 기준으로 `CLOSED` 또는 `CANCELLED` 상태와 정산 대상 participant 존재 여부를 다시 확인한 뒤, 누락된 `Settlement(PENDING)`를 생성하는 흐름으로 고정한다.
+- 이 복구 경로도 동일하게 `unique(crew_id)` 제약을 통과해야 하며, 요청자/사유/시각/대상 `crew_id`를 감사 로그에 append-only로 남긴다.
 
 ### 6.2 배치 대상 선택
 
@@ -360,8 +360,7 @@ where id = :settlementId
 | 컬럼                              | 설명                                                                          |
 | --------------------------------- | ----------------------------------------------------------------------------- |
 | `id`                              | 정산 PK                                                                       |
-| `room_id`                         | 대상 방                                                                       |
-| `settlement_type`                 | `NORMAL`, `CANCELLED_BEFORE_START`                                            |
+| `crew_id`                         | 대상 방                                                                       |
 | `status`                          | `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `RETRY_WAIT`                     |
 | `batch_run_key`                   | 배치 실행 식별자                                                              |
 | `retry_count`                     | 누적 재시도 횟수                                                              |
@@ -371,11 +370,10 @@ where id = :settlementId
 | `total_base_refund_amount`        | 절사 전 잔액 배분 전 합계                                                     |
 | `total_remainder_amount`          | 잔액 총액                                                                     |
 | `remainder_policy`                | `DETERMINISTIC_REMAINDER_ALLOCATION`; brownfield `HOST_REMAINDER`는 legacy alias일 뿐 host reward/authority/discretion이 아님 |
-| `remainder_winner_participant_id` | deprecated/brownfield. MVP remainder는 participant draw winner/top contributor를 쓰지 않음 |
 | `failure_code`                    | 표준 실패 코드                                                                |
 | `failure_message`                 | 최근 실패 원인 요약                                                           |
 | `algorithm_version`               | 정산 semantic version (historical replay context)                              |
-| `rule_context_snapshot`           | cadence/timezone/cutoff/lifecycle/remainder/reason mapping context JSON         |
+| `rule_context_snapshot`           | MVP historical settlement explanation에 필요한 최소 opaque cadence/timezone/cutoff/lifecycle/remainder/reason context |
 | `started_at`                      | 실행 시작 시각                                                                |
 | `finished_at`                     | 실행 종료 시각                                                                |
 | `created_at`                      | 생성 시각                                                                     |
@@ -383,8 +381,9 @@ where id = :settlementId
 
 제약:
 
-- `unique(room_id, settlement_type)`
+- `unique(crew_id)`
 - `status`는 정산 처리의 원천 상태다.
+- 하나의 crew에는 MVP authoritative final settlement row가 하나만 존재한다. retry/replay는 기존 settlement row를 대상으로 하며 새 settlement type 또는 새 settlement row를 만들지 않는다.
 - `total_participants`는 activation 시점 frozen `LOCKED` participant baseline 기준 participant 수를 의미한다.
 - `WITHDRAWN`/ACTIVE withdrawal 기반 재계산은 brownfield/deferred semantics이며 MVP frozen baseline을 소급 변경하지 않는다.
 - `total_locked_amount`는 정산 실행 시점의 정산 대상 participant `crew_participant.deposit_amount` 합계를 스냅샷으로 고정한 값이다.
@@ -423,19 +422,11 @@ where id = :settlementId
 | `excluded_success_count`      | 제외된 성공 로그 수                                                   |
 | `period_start_at`             | 계산 기간 시작                                                        |
 | `period_end_at`               | 계산 기간 종료                                                        |
-| `withdrawn_at_snapshot`       | brownfield/deferred withdrawal reference. MVP active settlement input 아님 |
 | `share_ratio`                 | 최종 지분율                                                           |
-| `raw_refund_amount`           | 절사 전 계산 금액                                                     |
-| `base_refund_amount`          | `FLOOR` 적용 금액                                                     |
-| `remainder_bonus_amount`      | deterministic remainder allocation이 특정 participant item에 설명상 귀속될 때의 잔액 가산분. winner/top contributor/host discretion 보너스 아님. all-fail equal-principal refund에서는 `0` |
-| `reward_amount`               | 잠긴 보증금 대비 초과 환급분, `max(final_amount - deposit_amount, 0)` |
-| `refund_amount`               | 실제 환급 총액, MVP에서는 `final_amount`와 동일                       |
-| `final_amount`                | 최종 지급 금액                                                        |
+| `refund_amount`               | 최종 지급/환급 총액. 절사 전 금액, base refund, remainder bonus, reward는 MVP에서 저장 컬럼이 아닌 계산 중간값이다 |
 | `draw_key_snapshot`           | non-payout 표시/설명 ordering에 사용한 키. 지급액 결정 권한 아님       |
 | `tie_break_rank`              | non-payout 표시/설명 정렬 순위                                        |
-| `calculation_reason`          | 포함/제외 근거 JSON 또는 TEXT                                         |
-| `effective_moderation_snapshot` | 정산 시점 effective moderation state 설명 context (JSON)              |
-| `moderation_chain_ref`        | append-only moderation transition chain reference (JSON)              |
+| `calculation_reason`          | MVP 설명/검증에 필요한 최소 opaque 포함/제외 근거 JSON 또는 TEXT      |
 | `point_history_id`            | 환급 원장 FK                                                          |
 | `created_at`                  | 생성 시각                                                             |
 
@@ -446,10 +437,8 @@ where id = :settlementId
 - `deposit_amount`는 participant 단위로 잠겨 있던 보증금의 입력 스냅샷이며, 실제 잔액 반영은 `point_history`가 담당한다.
 - `calculation_reason`은 `DAILY` 중복 제외, `SPECIFIC_DAYS` 비유효 요일 제외, resolved certification state, Phase 2/deferred cadence reference를 설명할 수 있어야 한다.
 - `calculation_reason`은 reason-code mapping version과 함께 해석되어야 한다. 과거 settlement의 reason code는 현재 wording/UX 문구가 아니라 당시 vocabulary 기준으로 설명한다.
-- Effective moderation state와 append-only moderation chain reference는 settlement-time input truth를 설명하기 위한 replay context다. Human memo, support note, UX wording, 운영 comment는 이 context를 보조할 수 있어도 authoritative settlement truth가 아니다.
 - `AFTER_WITHDRAWN_AT` 같은 withdrawal cutoff 값은 brownfield/deferred reference이며 MVP frozen `LOCKED` baseline을 소급 변경하는 active rule이 아니다.
-- `reward_amount`는 잠긴 보증금보다 더 많이 환급된 경우를 설명하기 위한 보조 저장값이다.
-- 잠긴 보증금보다 적게 환급된 경우는 `deposit_amount`, `final_amount`, `share_ratio`, `recognized_success_count` 비교로 설명한다.
+- 잠긴 보증금보다 적게 환급된 경우는 `deposit_amount`, `refund_amount`, `share_ratio`, `recognized_success_count` 비교로 설명한다.
 - `settlement_item`을 먼저 생성해 계산 결과를 고정하고, 이후 `point_history`를 생성한 뒤 `point_history_id`를 연결한다.
 - 두 단계는 단일 row FK로만 강결합하지 않고, participant별 `idempotency_key`를 통해 느슨하게 이어진다. 따라서 partial 재시도에서도 이미 반영된 환급은 재사용하고 누락된 환급만 안전하게 이어서 처리할 수 있어야 한다.
 - `point_history_id`는 정산 실행 중간 상태에서는 nullable일 수 있지만, `Settlement.status = SUCCEEDED`인 결과에서는 모두 채워져 있어야 한다.
@@ -527,7 +516,7 @@ MVP `calculation_reason` vocabulary:
 - `point_history`는 항상 `member_id` 기준으로 기록되며, 정산 계산 결과를 실제 계정 잔액 변화로 반영하는 금액 source of truth다.
 - `PointAccount` 또는 `MemberPoint` 같은 현재 잔액 테이블이 있다면, 이 값은 항상 `사용 가능한 포인트 잔액`만 나타내는 재계산 가능한 캐시다.
 - MVP balance model은 `available_balance`(즉시 사용 가능), `reserved_balance`(`PENDING` 신청 reserve), `locked_balance`(`LOCKED` 크루 보증금)로 노출한다. `settlement_pending_amount`는 종료 후 최종 정산 전 `LOCKED` 금액을 보여주는 wallet/projection 응답 필드이며 DB/account column이 아니다. 별도 `settlement_pending_balance` persisted column은 두지 않는다.
-- 현재 잔액 캐시와 `point_history` 원장 재계산값이 다르면 `point_history`를 source of truth로 삼고, 원인 조사 후 잔액 캐시를 보정하거나 재생성한다.
+- 현재 잔액 캐시와 운영 검증 결과가 다르면 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage, `point_account` cached balances를 함께 대조해 원인을 조사하고 잔액 캐시를 보정하거나 재생성한다. 승인 bucket transition은 ledger row 없이 처리된다.
 - 보증금 reserve는 `point_account.available_balance`에서 차감되고 `reserved_balance`에 반영되며, 승인 시 `locked_balance` bucket으로 전이된다.
 - `CREW_DEPOSIT_RESERVE`는 `PENDING` 신청 reserve 생성 이벤트다. 승인은 bucket/state transition이며 새 원장 이벤트를 만들지 않는다.
 - 정산 또는 취소 시점에만 해당 잠금 금액이 환급되며, 환급은 `point_history`를 통해 `member` 계정 잔액에 다시 반영된다.
@@ -539,7 +528,7 @@ MVP `calculation_reason` vocabulary:
   - 포인트 충전: `charge:{paymentKey}`
   - 보증금 reserve: `crew:{crewId}:participant:{participantId}:reserve`
   - PENDING reserve release: `crew:{crewId}:participant:{participantId}:reserve-release`
-  - 일반 정산 환급: `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}`
+  - 일반 정산 환급: `crew:{crewId}:participant:{participantId}:settlement-refund`
 - `POINT_CHARGE`의 API field `payment_id`는 TossPayments `paymentKey`를 의미한다.
 - `orderId`는 confirm 검증과 로그 상관관계 추적용이며 `point_history.idempotency_key`에 사용하지 않는다.
 - 동일한 `paymentKey`는 반드시 하나의 충전 이벤트만 의미해야 하며, 재사용되거나 중복 발급되어서는 안 된다.
@@ -572,7 +561,7 @@ MVP `calculation_reason` vocabulary:
 - `PENDING -> CANCELLED/REJECTED/EXPIRED` terminal 전이와 reserve release는 같은 transaction에서 처리한다. reserve release는 `crew_participant.id`당 한 번만 허용하며, 구현은 `released_point_history_id`를 authoritative reserve-release ledger evidence로 사용한다.
 - ACTIVE withdrawal은 MVP active semantics가 아니라 brownfield/deferred다. 향후 재도입하더라도 `deposit_amount` 즉시 환급이나 frozen settlement input 변경으로 해석하지 않는다.
 - 최종 정산 또는 reserve release가 일어날 때만 `point_history`를 통해 해당 balance bucket이 변경된다.
-- 운영 검증이나 복구 중 `point_account` balance bucket이 `point_history` 기반 재계산값과 다르면 `point_history`를 기준으로 캐시를 복구한다.
+- 운영 검증이나 복구 중 `point_account` balance bucket이 reconciliation 결과와 다르면 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage를 함께 기준으로 캐시를 복구한다.
 
 ## 8. 인정 성공 횟수 계산 규칙
 
@@ -646,12 +635,10 @@ MVP `calculation_reason` vocabulary:
 
 ```text
 지분율 = 참여자 인정 성공 횟수 / 전체 참여자 인정 성공 횟수 합계
-raw_refund_amount = total_locked_amount × 지분율
-base_refund_amount = FLOOR(raw_refund_amount)
-remainder = total_locked_amount - SUM(base_refund_amount)
-final_amount = base_refund_amount + remainder_bonus_amount
-reward_amount = max(final_amount - deposit_amount, 0)
-refund_amount = final_amount
+raw_refund = total_locked_amount × 지분율
+base_refund = FLOOR(raw_refund)
+remainder = total_locked_amount - SUM(base_refund)
+refund_amount = base_refund + per-item deterministic remainder allocation
 ```
 
 ### 9.2 일반 정산
@@ -660,8 +647,8 @@ refund_amount = final_amount
 
 1. 전체 인정 성공 횟수를 계산한다.
 2. 각 참여자의 지분율을 계산한다.
-3. 각 참여자의 `raw_refund_amount`를 `DECIMAL128`로 계산한다.
-4. 각 참여자의 `base_refund_amount`에 `FLOOR`를 적용한다.
+3. 각 참여자의 raw refund를 `DECIMAL128`로 계산한다.
+4. 각 참여자의 base refund에 `FLOOR`를 적용한다.
 5. 남은 `remainder`를 계산한다.
 6. 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. MVP brownfield alias가 `HOST_REMAINDER`로 남아 있더라도 의미는 replayable floor-remainder calculation metadata이며 host reward/authority/privilege가 아니다.
 7. 이 remainder 처리는 host가 settlement authority를 가진다는 뜻이 아니며, host가 금액·원장·최종 정산을 선택하거나 override할 수 없다.
@@ -671,7 +658,7 @@ refund_amount = final_amount
 - 잠긴 보증금이 참여자마다 달라도 공식은 동일하다.
 - `total_locked_amount`는 정산 실행 시점의 정산 대상 participant `deposit_amount` 합계 스냅샷이다.
 - `total_locked_amount`는 `point_history`나 `point_account` 잔액을 다시 합산해 계산하지 않는다.
-- 누가 본인 보증금보다 많이 또는 적게 돌려받았는지는 `deposit_amount`와 `final_amount` 비교로 설명한다.
+- 누가 본인 보증금보다 많이 또는 적게 돌려받았는지는 `deposit_amount`와 `refund_amount` 비교로 설명한다.
 
 ### 9.3 전원 성공 0회 정산
 
@@ -679,18 +666,14 @@ refund_amount = final_amount
 
 ```text
 for each participant:
-  base_refund_amount = deposit_amount
-  final_amount = deposit_amount
   refund_amount = deposit_amount
-  remainder_bonus_amount = 0
 total_remainder_amount = 0
 ```
 
 규칙:
 
-- 모든 참여자의 `base_refund_amount = deposit_amount`
-- 각 참여자의 `final_amount = deposit_amount`로 고정한다. 즉, 잠겨 있던 자기 원금을 그대로 환급하는 equal-principal refund다.
-- 이 분기에서는 `remainder_bonus_amount = 0`, `reward_amount = 0`, `remainder = 0`으로 수렴해야 한다.
+- 각 참여자의 `refund_amount = deposit_amount`로 고정한다. 즉, 잠겨 있던 자기 원금을 그대로 환급하는 equal-principal refund다.
+- 이 분기에서는 remainder가 0으로 수렴해야 한다.
 - 이 분기에서는 추가 차감 규칙을 두지 않는다.
 - 이 분기에서는 remainder allocation, legacy top-contributor/draw/winner 지급 규칙을 사용하지 않는다. 누군가의 전원 실패가 다른 참여자의 추가 환급으로 이어지지 않는다.
 
@@ -752,7 +735,7 @@ ordering_key = stable domain input(room_id, participant_id/member_id, event_id �
 
 ### 10.5 DB unique 제약
 
-- `unique(room_id, settlement_type)`
+- `unique(crew_id)`
 - `unique(settlement_id, participant_id)`
 - `unique(point_history.idempotency_key)`
 
@@ -770,14 +753,14 @@ ordering_key = stable domain input(room_id, participant_id/member_id, event_id �
 charge:{paymentKey}
 crew:{crewId}:participant:{participantId}:reserve
 crew:{crewId}:participant:{participantId}:reserve-release
-crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}
+crew:{crewId}:participant:{participantId}:settlement-refund
 ```
 
 원칙:
 
 - 모든 포인트 이벤트는 `idempotency_key`가 필수고, 이벤트 타입별 생성 규칙을 고정한다.
 - `settlement.id`는 실행 시 생성되는 PK이므로 `idempotency_key` 구성값으로 쓰지 않는다.
-- `crew_id`, `settlement_id`, `participant_id`처럼 입력 기반 식별자를 사용해 재시도, replay/audit 테스트, 데이터 이관 상황에서도 같은 키가 재현되도록 한다.
+- `crew_id`, `participant_id`처럼 입력 기반 식별자를 사용해 재시도, replay/audit 테스트, 데이터 이관 상황에서도 같은 키가 재현되도록 한다. Settlement linkage는 `settlement_item.point_history_id`와 `point_history.reference_type/reference_id`로 추적한다.
 - `participant`는 물리 삭제하지 않고 같은 방 재참여도 지원하지 않으므로, 같은 정산 대상에 대한 `participant_id`는 생명주기 동안 안정적으로 유지된다.
 - 이 규칙은 non-payout stable ordering과 같은 철학을 따른다. 즉, 런타임 생성값이 아니라 동일 입력이면 동일 결과가 나와야 한다.
 - 동일 이벤트는 항상 동일한 `idempotency_key`를 사용한다.
@@ -847,17 +830,17 @@ crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}
 
 | 시나리오                     | 결정                                                                                                           |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| 인원 미달 방 취소            | 방별 `min_participants`를 기준으로 `CANCELLED_BEFORE_START` 정산 생성 후 전액 환급                             |
+| 인원 미달 방 취소            | 방별 `min_participants`를 기준으로 같은 crew의 단일 settlement row를 생성한 뒤 전액 환급                      |
 | 중도 탈퇴                    | ACTIVE withdrawal은 brownfield/deferred. MVP 정산은 frozen `LOCKED` baseline을 소급 변경하지 않음              |
 | DAILY 하루 다중 인증         | 같은 날짜 성공 로그는 1회만 인정, 나머지는 제외 근거 저장                                                      |
 | SPECIFIC_DAYS 비유효 요일    | `mission_schedule_day`에 없는 요일의 성공 로그는 제외                                                          |
 | WEEKLY_N 상한 초과           | Phase 2/deferred reference. MVP active cadence 아님                                                           |
 | 전체 인정 성공 0회           | 각 참여자의 잠겨 있던 자기 보증금을 equal-principal refund로 전액 환급한다. host/winner/draw remainder 지급 없음 |
-| 참여자별 보증금 상이         | 총 풀은 합산하되, 결과 설명은 `deposit_amount`, `final_amount`, `share_ratio`로 제공                           |
+| 참여자별 보증금 상이         | 총 풀은 합산하되, 결과 설명은 `deposit_amount`, `refund_amount`, `share_ratio`로 제공                          |
 | `ACTIVE` 이후 신규 참여 요청 | 거절한다. MVP에서는 모집 완료 후 참여자 구성을 고정한다.                                                       |
 | 탈퇴 후 동일 방 재참여 요청  | MVP active flow에서는 지원하지 않고 거절한다. WITHDRAWN/rejoin은 brownfield/deferred이며 frozen baseline을 변경하지 않는다. |
 | 같은 방 중복 정산 시도       | 상태 claim + unique 제약 + `point_history.idempotency_key` + `point_history_id` 연결 검증으로 차단 |
-| `Settlement` 누락            | 운영 복구 경로로 `PENDING` 생성, 단 `unique(room_id, settlement_type)` 준수                                    |
+| `Settlement` 누락            | 운영 복구 경로로 `PENDING` 생성, 단 `unique(crew_id)` 준수                                                     |
 | 이미 `SUCCEEDED`인 방 재요청 | 새 정산 생성 금지, 기존 결과 조회만 허용                                                                       |
 
 ## 13. 내부 계약
@@ -865,7 +848,7 @@ crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}
 ### 13.1 서비스 인터페이스
 
 ```text
-Settlement createPendingSettlementIfAbsent(roomId, settlementType)
+Settlement createPendingSettlementIfAbsent(roomId)
 SettlementInput loadSettlementInput(settlementId)
 SettlementResult calculateSettlement(input)
 SettlementExecutionResult executeSettlement(settlementId, batchRunKey)
@@ -891,7 +874,7 @@ MissionRecognitionStrategy
 ```text
 settlementId
 roomId
-settlementType
+settlementReasonInput
 roomStatus
 frequencyType
 frequencyDays
@@ -940,7 +923,7 @@ remainderPolicy
 용도:
 
 - 방 기준으로 현재 정산 상태와 정산 식별자를 조회한다.
-- 취소형 정산도 같은 응답 구조 사용
+- 시작 전 취소 사유의 settlement도 같은 응답 구조 사용
 
 응답 예시:
 
@@ -948,7 +931,6 @@ remainderPolicy
 {
   "room_id": 42,
   "settlement_id": 501,
-  "settlement_type": "NORMAL",
   "status": "RUNNING",
   "retry_count": 1,
   "failure_code": null,
@@ -972,7 +954,6 @@ remainderPolicy
     {
       "settlement_id": 501,
       "room_id": 42,
-      "settlement_type": "NORMAL",
       "status": "FAILED",
       "retry_count": 3,
       "failure_code": "POINT_CREDIT_FAILED",
@@ -1002,7 +983,7 @@ remainderPolicy
 - `FAILED` 또는 `RETRY_WAIT` 상태에서만 허용
 - 이미 `SUCCEEDED`면 재시도 불가
 - retry 대상은 특정 `Settlement` row다
-- 같은 `room_id`라도 `settlement_type`에 따라 별도 `Settlement`가 존재할 수 있으므로 기준 식별자는 `settlement_id`다
+- MVP에서는 crew당 settlement row가 하나만 존재한다. 기준 식별자는 `settlement_id`이며, retry는 그 기존 row를 다시 claim한다.
 - 내부적으로는 지정된 기존 `Settlement`를 다시 claim한다
 - partial 상태에서는 기존 `point_history`와 payload가 일치하면 재사용해 FK만 보정하고, 미지급 participant만 새로 지급한다
 - retry는 current-engine recalculation이나 payout rewrite가 아니라 기존 authoritative snapshot의 unfinished execution completion이다
@@ -1075,9 +1056,7 @@ deterministic remainder allocation rule에 따라 replayable calculation context
 
 ```text
 for each participant:
-  base_refund_amount = deposit_amount = 100000
-  final_amount = deposit_amount = 100000
-  remainder_bonus_amount = 0
+  refund_amount = deposit_amount = 100000
 total_remainder_amount = 0
 ```
 
@@ -1144,11 +1123,11 @@ total_remainder_amount = 0
 - `TS-LC-01` 시스템 자동 activation 성공
   기대 결과: `start_at`에 `LOCKED` participant 수가 `min_participants` 이상이고 terminal action이 없으면 시스템이 `ACTIVE`로 전이하고 `activated_at = start_at`이 기록된다.
 - `TS-LC-02` `min_participants` 미달 자동 activation 실패
-  기대 결과: `start_at` 평가 시점의 `LOCKED` participant 수가 `min_participants` 미만이면 `ACTIVE`로 전이하지 않고 취소형 정산 대상으로 남는다.
+  기대 결과: `start_at` 평가 시점의 `LOCKED` participant 수가 `min_participants` 미만이면 `ACTIVE`로 전이하지 않고 시작 전 취소 사유의 단일 settlement 대상으로 남는다.
 - `TS-LC-03` host manual start 비권한
   기대 결과: host는 `ACTIVE` 전이를 직접 만들 수 없고, StartRoom brownfield endpoint/command는 MVP active contract가 아니다.
 - `TS-LC-04` 시작 만료 취소 settlement 멱등성
-  기대 결과: `RECRUITING -> CANCELLED` batch가 성공하면 `CANCELLED_BEFORE_START` settlement가 1회만 생성되고 재시도해도 중복 환급되지 않는다.
+  기대 결과: `RECRUITING -> CANCELLED` batch가 성공하면 해당 crew의 단일 settlement row가 1회만 생성되고 재시도해도 중복 환급되지 않는다.
 - `TS-LC-05` 자동 activation과 취소 batch 경합
   기대 결과: 하나의 시스템 조건부 전이만 성공하고 loser는 최종 상태를 재조회한다.
 - `TS-LC-06` 인증/log eligibility anchor
@@ -1193,11 +1172,11 @@ total_remainder_amount = 0
 - `TS-08A` `frequency_type`별 recognition strategy가 올바르게 선택되는지
   기대 결과: MVP에서는 `DAILY`, `SPECIFIC_DAYS` 각각에서 대응 전략 1개만 선택되고, `recognized_success_count`, `recognized_dates_count`, `excluded_success_count`, `calculation_reason` 출력 계약이 동일하게 유지된다.
 - `TS-09` 전체 성공 0회 시 equal-principal refund 적용
-  기대 결과: 모든 참여자의 `base_refund_amount`, `final_amount`, `refund_amount`가 각자의 `deposit_amount`와 같고 별도 차감 규칙이 적용되지 않는다.
+  기대 결과: 모든 참여자의 `refund_amount`가 각자의 `deposit_amount`와 같고 별도 차감 규칙이 적용되지 않는다.
 - `TS-10` 전체 성공 0회에서 remainder/winner/draw 추가 지급이 없는지
-  기대 결과: 모든 참여자의 `final_amount`가 각자 `deposit_amount`와 같고, `remainder_bonus_amount = 0`, `reward_amount = 0`, `total_remainder_amount = 0`으로 고정된다.
+  기대 결과: 모든 참여자의 `refund_amount`가 각자 `deposit_amount`와 같고, `total_remainder_amount = 0`으로 고정된다.
 - `TS-11` 참여자별 보증금이 다른 경우
-  기대 결과: `total_locked_amount`는 합산되고 각 참여자의 `deposit_amount` 대비 `final_amount`가 일관되게 계산된다.
+  기대 결과: `total_locked_amount`는 합산되고 각 참여자의 `deposit_amount` 대비 `refund_amount`가 일관되게 계산된다.
 - `TS-11A` `total_participants`가 frozen `LOCKED` baseline 기준으로 계산되는지
   기대 결과: activation 시점 frozen `LOCKED` participant baseline이 `total_participants`와 `settlement_item` 생성 대상의 기준이다.
 - `TS-11B` 동일 `member`가 여러 방에 참여한 경우 보증금 잠금이 방별로 분리되는지
@@ -1220,13 +1199,13 @@ total_remainder_amount = 0
   기대 결과: `CREW_SETTLEMENT_REFUND` 또는 `CREW_RESERVE_RELEASE` 기록과 함께 `point_account` balance bucket이 변경된다.
 - `TS-14C` 포인트 원장 기록이 충전, 잠금, 환급 흐름과 일치하는지
   기대 결과: 같은 `member` 기준으로 `POINT_CHARGE -> CREW_DEPOSIT_RESERVE -> CREW_SETTLEMENT_REFUND` 또는 `CREW_RESERVE_RELEASE` 순서의 잔액 변화가 `available_after`, `reserved_after`, `locked_after` snapshot과 함께 일관되게 남는다.
-- `TS-14D` `point_account` balance bucket과 `point_history` 재계산값이 불일치할 때 원장 기준으로 복구되는지
-  기대 결과: 운영 검증은 `point_history`를 source of truth로 삼아 불일치 원인을 기록하고, `point_account` balance bucket cache를 원장 재계산값으로 보정한다.
+- `TS-14D` `point_account` balance bucket과 reconciliation 결과가 불일치할 때 원장/상태/linkage 기준으로 복구되는지
+  기대 결과: 운영 검증은 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage, `point_account` cached balances를 함께 대조해 불일치 원인을 기록하고, 필요한 경우 `point_account` balance bucket cache를 보정한다.
 - `TS-15` 배치 재시도 시 `point_history.idempotency_key`로 중복 지급이 차단되는지
-  기대 결과: `crew:{crewId}:participant:{participantId}:reserve`, `crew:{crewId}:participant:{participantId}:reserve-release`, `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}` 규칙으로 같은 입력이면 같은 `idempotency_key`가 재사용되고, 동일 canonical input duplicate는 기존 원장 재사용/연결로 수렴하며, 다른 canonical input duplicate는 idempotency conflict로 실패한다.
+  기대 결과: `crew:{crewId}:participant:{participantId}:reserve`, `crew:{crewId}:participant:{participantId}:reserve-release`, `crew:{crewId}:participant:{participantId}:settlement-refund` 규칙으로 같은 입력이면 같은 `idempotency_key`가 재사용되고, 동일 canonical input duplicate는 기존 원장 재사용/연결로 수렴하며, 다른 canonical input duplicate는 idempotency conflict로 실패한다.
 - `TS-15A` `point_history`는 존재하지만 `settlement_item.point_history_id`만 누락된 partial 상태를 안전하게 복구하는지
   기대 결과: 해당 participant는 이미 지급 완료로 간주되고 새 환급 원장은 생성되지 않으며, 관리자 API 또는 배치가 기존 `point_history`를 조회해 FK만 연결한 뒤 전체 연결이 완료되면 `Settlement.status`가 `SUCCEEDED`로 전이된다.
-- `TS-16` 취소형 정산과 일반 정산이 같은 조회 API 구조로 반환되는지
+- `TS-16` 정상 종료 사유와 시작 전 취소 사유의 settlement가 같은 조회 API 구조로 반환되는지
 - `TS-17` 종료/취소 감지 시 `Settlement(PENDING)`가 먼저 생성되는지
 - `TS-17A` `unique(crew_id, member_id)` 제약이 같은 크루 중복 participant row 생성을 막는지
   기대 결과: 동일 `member`가 같은 `crew`에 두 번째 `crew_participant` row 생성을 시도하면 DB 제약 또는 동일 수준의 저장 전 검증으로 차단된다.
@@ -1241,7 +1220,7 @@ total_remainder_amount = 0
   기대 결과: 같은 시점 인증 요청이 겹쳐도 로그는 유실 없이 저장되고, 실시간 지표는 일부 지연될 수 있지만 최종 정산 결과는 변하지 않는다.
 - `TS-18` 같은 방에 대해 동시 정산 요청이 들어온 경우 조건부 claim에서 1개 워커만 성공하는지
   기대 결과: 같은 `Settlement`에 대해 동시 실행 요청이 들어와도 조건부 claim에서 하나의 실행자만 성공하고 나머지는 skip된다.
-- `TS-20` `unique(room_id, settlement_type)` 제약이 중복 생성 시도를 막는지
+- `TS-20` `unique(crew_id)` 제약이 중복 생성 시도를 막는지
 
 ### 18.4 운영 검증
 
@@ -1249,7 +1228,7 @@ total_remainder_amount = 0
 - `TS-22` `FAILED` 건이 관리자 API에서 조회되는지
 - `TS-23` `RUNNING` timeout 건을 운영 배치가 `RETRY_WAIT`로 복구할 수 있는지
 - `TS-23A` 종료 감지 누락 시 운영 복구로 `Settlement(PENDING)`를 생성할 수 있는지
-  기대 결과: `room_id` 기준 정산 대상 여부 재검사 후 누락된 정산만 복구 생성되고, `unique(room_id, settlement_type)` 제약 위반 시 중복 생성되지 않는다.
+  기대 결과: `crew_id` 기준 정산 대상 여부 재검사 후 누락된 정산만 복구 생성되고, `unique(crew_id)` 제약 위반 시 중복 생성되지 않는다.
 
 ## 19. 구현 전 비권위 체크포인트
 
