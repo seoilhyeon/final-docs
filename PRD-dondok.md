@@ -170,7 +170,7 @@ AI, 인증 피드/리액션, 알림, 운영 탭, 반응형 UX는 제품 경험�
 핵심 사용자 흐름은 아래와 같다.
 
 1. 사용자는 공개 크루 탐색에서 카테고리/상태 필터로 참여 가능한 미션을 찾는다.
-2. Host는 제목, 기간, 인증 방식, 보증금, `min_participants`, `max_participants`, `recruitment_deadline`, `start_at`, 인증·정산 cadence를 설정한다.
+2. Host는 제목, 기간, 인증 안내/기준 설명 텍스트, 보증금, `min_participants`, `max_participants`, `recruitment_deadline`, `start_at`, 인증·정산 cadence를 설정한다.
 3. AI 크루 생성 도우미는 입력 보조로 사용할 수 있지만, 수동 입력 fallback은 항상 가능해야 한다.
 4. 참여자는 모집 마감 전 포인트/도딘을 충전하고 참여 신청·승인·예치 Lock을 완료한다.
 5. `recruitment_deadline`까지 승인 + 예치 Lock 완료된 참여자만 frozen participant baseline에 포함된다.
@@ -185,12 +185,14 @@ AI, 인증 피드/리액션, 알림, 운영 탭, 반응형 UX는 제품 경험�
 
 - 랜딩 / 홈
 - 크루 목록 / 검색 / 카테고리·상태 필터
+- 크루 대표 이미지가 포함된 크루 카드/상세 표시
 - 크루 생성 폼 + AI 크루 생성 도우미 + 수동 입력 fallback
 - 크루 상세 / 참여 / 승인 / 예치 Lock
 - 자동 시작 상태 안내(`recruitment_deadline`, `start_at`, baseline)
 - 사진+텍스트 인증 업로드
 - 인증 피드 / 리액션
 - 방장 moderation / moderation history / 운영 탭
+- 방장 공지 / 댓글 / 공지 리액션 기반 크루 내 소통
 - 예상 환급금 projection 대시보드
 - 정산 결과 설명 화면
 - 마이페이지 / 포인트·도딘 내역
@@ -251,8 +253,10 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 | 기능                         | 포함 이유                                                        | Boundary                                                                                 |
 | ---------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | AI 크루 생성 도우미          | 사용자가 미션명/인증 규칙/문구를 쉽게 작성하도록 돕는다.         | Manual fallback 필수. AI 결과는 policy/settlement authority가 아니다.                    |
+| 크루 대표 이미지             | 크루 목록/상세/생성 흐름에서 방의 정체성과 탐색성을 돕는다.       | Display metadata다. lifecycle, settlement, moderation authority가 아니다.                |
 | 인증 피드                    | 인증 로그를 참여자에게 보여준다.                                 | Feed ordering/display는 settlement input을 직접 바꾸지 않는다.                           |
 | 리액션                       | 참여자 간 응원/가벼운 반응을 제공한다.                           | Reaction은 인증 성공/실패나 지분율에 영향 없음.                                          |
+| 크루 공지/댓글/공지 리액션   | 채팅 없는 MVP에서 방장 안내와 참여자 반응을 제공한다.             | Communication surface다. mission rule override, certification, settlement, ledger, lifecycle authority가 아니다. |
 | 실시간 현황 / 기여 visibility | 현재 기준 지분율, 상대적 위치, 예상 환급 흐름, 기여도를 보여준다. | Projection/current-basis UX다. final settlement, ledger, payout certainty가 아니다.       |
 | 운영 탭                      | 검토 대기/거절/누락 등 상태를 설명한다.                          | Contextual visibility, not ledger control.                                               |
 | 최종 결과 entry point        | final settlement 이후 완주 기록과 공동 성취를 다시 보게 한다.     | 결과 카드 intent는 유지하되 저장/공유 polish는 P1 가능. Projection 공유 카드는 금지한다. |
@@ -276,15 +280,15 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 | --- | --- | --- |
 | Android FCM push | 포함 | Background/off-app 재진입 transport. Delivery success/failure는 domain success/failure가 아니다. |
 | 인앱 토스트 | 포함 | Foreground 즉시 피드백. Durable history나 canonical state가 아니다. |
-| 알림 목록/읽음 | 포함 | UX hint history/read affordance. Audit history, certification history, settlement history, ledger history가 아니다. |
-| notification event/log | 후보 포함 | 알림 목록과 운영 추적을 위한 non-authoritative 기록 후보. |
+| 알림 목록/읽음 | 얇은 후보 | UX hint/read affordance 후보일 뿐 backend persistence 기본값이 아니다. Frontend local state/browser permission으로 충분한 상태는 서버 저장으로 승격하지 않는다. Audit history, certification history, settlement history, ledger history가 아니다. |
+| notification event/log | 얇은 후보 | 알림 목록과 운영 추적이 꼭 필요할 때만 검토하는 non-authoritative 기록 후보이며 Core persistence default가 아니다. |
 | delivery attempt observability | 후보 포함 | FCM 발송/실패/transport retry 관측 후보. Settlement retry/replay/correction과 분리한다. |
 | notification preference matrix | Phase 2 | OS permission 또는 최소 설정 이상은 후속 결정으로 둔다. |
 | notification template CMS/table | Phase 2 | MVP는 문서/코드 상수로 시작할 수 있으며 문구 안정화 전 table을 freeze하지 않는다. |
 | SSE/Web realtime reliability | Phase 2/drift candidate | Android-first FCM MVP를 역으로 결정하지 않는다. 기존 SSE 문구는 재사용 가능한 non-authority semantics만 흡수한다. |
 | campaign/broadcast/advanced analytics | Phase 2 | Trust-loop MVP 이후 확장 후보. |
 
-Notification payload/list item은 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 같은 refetch hint 중심으로 제한한다. 최종 환급금, 인증 truth, ledger truth, settlement retry/replay 상태를 notification-owned truth로 싣지 않는다.
+Notification payload/list item을 도입하더라도 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 같은 refetch hint 중심으로 제한한다. 최종 환급금, 인증 truth, ledger truth, settlement retry/replay 상태를 notification-owned truth로 싣지 않는다.
 
 
 #### Phase 2 Defer
@@ -384,8 +388,9 @@ PRD는 기술 선택의 상세 정책을 소유하지 않는다. MVP 기술 스�
 - 작은 크루 단위가 몰입감과 운영 난이도 사이에서 가장 현실적이다.
 - 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 final settlement batch는 사용자 기대와 정산 안정성 사이의 현실적 기준이다.
 - MVP 단계에서는 포인트 환급까지만 있어도 제품 가치 검증이 가능하다.
-- AI 크루 생성 도우미, 알림, 인증 피드, 리액션, 운영 탭, 반응형 UX는 P0 Engagement UX일 수 있지만 P0 Authority flow를 막는 조건이 아니다.
-- 인증 피드와 리액션은 소셜 표현 기능이지만, 정산/환급/포인트/AI/상태 생명주기 기준이 아니다.
+- AI 크루 생성 도우미, 알림, 인증 피드, 리액션, 크루 공지/댓글/공지 리액션, 운영 탭, 반응형 UX는 P0 Engagement UX일 수 있지만 P0 Authority flow를 막는 조건이 아니다.
+- 크루 대표 이미지는 표시 metadata이며, fallback 이미지가 가능하다. 대표 이미지 유무나 값은 정산/생명주기/검수 권한이 아니다.
+- 인증 피드, 리액션, 크루 공지/댓글/공지 리액션은 소셜/소통 표현 기능이지만, 정산/환급/포인트/AI/상태 생명주기 기준이 아니다.
 - 포인트/도딘 잔액 화면의 현재값은 사용자 표시용 현재값이며, final refund와 authoritative point ledger/history 기준 설명이 우선한다.
 - 공개 크루 운영은 초기에는 복잡한 신고/제재 시스템 없이도 가능하다.
 - 더 정교한 부정행위 탐지, 현금 인출, 대규모 크루 운영은 후속 버전 과제로 둔다.
@@ -608,7 +613,7 @@ Phase 2 후보는 아래와 같다.
 
 1. EXIF hard-fail assumption
 2. realtime projection certainty / profit-like projection wording
-3. AI/social/notification mandatory-authority wording
+3. AI/social/communication/notification mandatory-authority wording
 4. downstream docs as intent/policy authority wording
 5. remainder recipient conflict
 6. unrestricted admin/operator mutation wording

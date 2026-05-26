@@ -251,6 +251,16 @@
 | 크루/참여   | `DELETE` | `/api/crews/{crewId}/participants/me`           | 가입 신청 취소 (승인 전 `PENDING`만)     |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/applications/{crewParticipantId}/approve` | 방장 승인 → 기존 reserve 확정 → `LOCKED` |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/applications/{crewParticipantId}/reject`  | 방장 거절 → `REJECTED`               |
+| 크루 공지   | `GET`    | `/api/crews/{crewId}/notices`                  | 크루 공지 목록 후보. communication surface |
+| 크루 공지   | `POST`   | `/api/crews/{crewId}/notices`                  | 방장 공지 작성 후보                  |
+| 크루 공지   | `PATCH`  | `/api/crews/{crewId}/notices/{noticeId}`       | 방장 공지 수정 후보                  |
+| 크루 공지   | `DELETE` | `/api/crews/{crewId}/notices/{noticeId}`       | 공지 표시 상태 삭제 후보             |
+| 크루 공지   | `GET`    | `/api/crews/{crewId}/notices/{noticeId}/comments` | 공지 댓글 목록 후보               |
+| 크루 공지   | `POST`   | `/api/crews/{crewId}/notices/{noticeId}/comments` | 공지 댓글 작성 후보               |
+| 크루 공지   | `PATCH`  | `/api/crews/{crewId}/notices/{noticeId}/comments/{commentId}` | 공지 댓글 수정 후보 |
+| 크루 공지   | `DELETE` | `/api/crews/{crewId}/notices/{noticeId}/comments/{commentId}` | 공지 댓글 표시 상태 삭제 후보 |
+| 크루 공지   | `POST`   | `/api/crews/{crewId}/notices/{noticeId}/reactions` | 공지 리액션 멱등 upsert 후보      |
+| 크루 공지   | `DELETE` | `/api/crews/{crewId}/notices/{noticeId}/reactions/me?reaction_type={reaction_type}` | 내 공지 리액션 멱등 삭제 후보 |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/withdraw`                  | Brownfield/deferred withdrawal           |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/start`                     | Brownfield/removed manual start          |
 | 미션 인증   | `POST`   | `/api/mission-logs`                             | 인증 제출                                |
@@ -509,6 +519,7 @@ Response `200 OK`:
     {
       "crew_id": 42,
       "title": "새벽 기상 챌린지",
+      "image_url": null,
       "status": "RECRUITING",
       "deposit_amount": 100000,
       "min_participants": 2,
@@ -529,6 +540,7 @@ Response `200 OK`:
 
 - MVP는 공개 크루만 지원한다.
 - 참여자 수 같은 집계 필드는 본 명세의 필수 응답에 포함하지 않는다.
+- `image_url`은 `crew.image_s3_key`에서 파생한 nullable display URL이다. DB 저장 URL이나 lifecycle/settlement/moderation authority가 아니다.
 
 ### `POST /api/crews`
 
@@ -542,6 +554,7 @@ Request:
 | ----------------------- | ---------- | ---- | ------------------------------------------------------- |
 | `title`                 | `string`   | Y    | 크루 제목. 표시용 텍스트이며 lifecycle/moderation/settlement authority가 아니다. |
 | `description`           | `string`   | Y    | 크루 설명. 표시용 텍스트이며 lifecycle/moderation/settlement authority가 아니다. |
+| `image_s3_key`          | `string \| null` | N    | 사전 업로드된 대표 이미지 object key. 표시용 metadata이며 없으면 기본/fallback 이미지 사용 |
 | `category`              | `string`   | Y    | 방 카테고리. 값 catalog는 deferred decision이며 string으로 받는다. 자세한 사항은 §3 enum 정책을 따른다. |
 | `deposit_amount`        | `integer`  | Y    | 기본 보증금                                             |
 | `min_participants`      | `integer`  | N    | 기본값 `2`                                              |
@@ -562,6 +575,7 @@ Response `201 Created`:
   "crew_id": 42,
   "title": "새벽 기상 챌린지",
   "description": "매일 새벽 6시 전 기상 인증",
+  "image_url": null,
   "category": "EXERCISE",
   "status": "RECRUITING",
   "deposit_amount": 100000,
@@ -601,6 +615,7 @@ Error:
 - `category`는 필수다. 정확한 enum 값 catalog는 deferred decision이라 contract에서 freeze하지 않는다. 서버는 알려진 값만 통과시키고 unknown 값은 `INVALID_CATEGORY`로 거절한다.
 - `daily_settlement_type`은 필수다. cadence anchor는 `Settlement-design.md`가 소유한다.
 - `host_agreement`는 방 생성 시점 약관/규칙 동의의 스냅샷이다. 서버는 `host_agreement_snapshot`(JSON), `host_agreement_version`, `host_agreed_at`을 함께 저장한다. 이후 약관 본문이 바뀌어도 이 방의 동의 컨텍스트는 변하지 않는다.
+- `image_s3_key`는 크루 대표 이미지 표시용 metadata다. 서버는 object key 검증/업로드 흐름이 준비된 경우에만 저장하고, 조회 응답의 `image_url`은 해당 key에서 파생한다. 이 값은 정산, lifecycle, moderation authority가 아니다.
 
 ### `GET /api/crews/{crewId}`
 
@@ -616,6 +631,7 @@ Response `200 OK`:
   "host_member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
   "title": "새벽 기상 챌린지",
   "description": "매일 아침 6시 전에 인증",
+  "image_url": null,
   "category": "EXERCISE",
   "status": "ACTIVE",
   "settlement_status": "NONE",
@@ -653,6 +669,7 @@ Error:
 - `my_participation`이 없으면 아직 참여하지 않은 회원이다.
 - `category`, `daily_settlement_type`, `host_agreement_version`, `host_agreed_at`은 방 생성 시점 컨텍스트의 read-only 노출이며 변경할 수 없다.
 - `host_agreement_snapshot` JSON 본문은 본 응답에서 직접 노출하지 않는다. 본문 노출 방식은 deferred decision이다.
+- `image_url`은 크루 대표 이미지 display URL이며 저장 URL source-of-truth가 아니다. 값이 `null`이면 클라이언트는 기본/fallback 이미지를 표시한다.
 
 ### `POST /api/crews/{crewId}/participants`
 
@@ -812,6 +829,36 @@ Error:
 - 거절은 `PENDING` 상태에서만 가능하다. 다른 상태는 `APPLICATION_NOT_REJECTABLE`로 거절한다.
 - 기존 reserve는 `CREW_CANCELLED_REFUND` 계열 point_history로 반환하고, `point_account.balance`를 같은 금액만큼 복구한다. terminal 전이와 reserve release는 같은 transaction에서 처리하며, release는 `crew_participant.id`당 한 번만 허용한다. 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
 - `REJECTED`는 terminal pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다. 동일 crew 재신청은 MVP에서 허용하지 않는다.
+
+### Crew notice/comment/reaction endpoint candidates
+
+역할:
+
+- 채팅 없는 MVP에서 크루 내 방장 공지, 댓글, 공지 리액션 communication surface를 제공하는 후보 endpoint다.
+- 이 섹션은 후보 수준의 surface만 고정한다. 과도한 DTO shape, 신고/제재, audit/correction workflow는 여기서 발명하지 않는다.
+
+Endpoint candidates:
+
+| Method | Path | 설명 |
+| --- | --- | --- |
+| `GET` | `/api/crews/{crewId}/notices` | 공지 목록 조회 후보 |
+| `POST` | `/api/crews/{crewId}/notices` | 방장 중심 공지 작성 후보 |
+| `PATCH` | `/api/crews/{crewId}/notices/{noticeId}` | 방장 중심 공지 수정 후보 |
+| `DELETE` | `/api/crews/{crewId}/notices/{noticeId}` | 물리 삭제보다 `DELETED`/`HIDDEN` 표시 상태 전이 후보 |
+| `GET` | `/api/crews/{crewId}/notices/{noticeId}/comments` | 공지 댓글 목록 후보 |
+| `POST` | `/api/crews/{crewId}/notices/{noticeId}/comments` | 공지 댓글 작성 후보 |
+| `PATCH` | `/api/crews/{crewId}/notices/{noticeId}/comments/{commentId}` | 공지 댓글 수정 후보 |
+| `DELETE` | `/api/crews/{crewId}/notices/{noticeId}/comments/{commentId}` | 댓글 표시 상태 삭제 후보 |
+| `POST` | `/api/crews/{crewId}/notices/{noticeId}/reactions` | 공지 리액션 emoji/token 멱등 upsert 후보 |
+| `DELETE` | `/api/crews/{crewId}/notices/{noticeId}/reactions/me?reaction_type={reaction_type}` | 내 공지 리액션 멱등 삭제 후보 |
+
+정책:
+
+- 공지 작성/수정 권한은 host 중심으로 검증한다. 단, host가 lifecycle, settlement, ledger, certification authority가 되는 것은 아니다.
+- 공지 본문은 `crew`, `mission_rule`, `mission_log`, `settlement`, `point_history`의 canonical rule/state를 변경하지 않는다.
+- 댓글과 공지 리액션은 social interaction only이며, 정산 인정 횟수, 환급액, 지분율, 포인트 원장, 인증 성공/실패, lifecycle 전이에 side effect를 만들지 않는다. 공지/댓글/리액션 표시 상태 전이는 moderation authority나 audit-grade moderation workflow가 아니다.
+- `reaction_type`은 기존 미션 로그 리액션과 동일하게 FE-selected emoji/token string 후보이며 고정 enum으로 freeze하지 않는다.
+- 삭제 계열 후보는 물리 삭제가 아니라 표시 상태 전이(`HIDDEN`/`DELETED`)를 우선한다.
 
 ### `POST /api/crews/{crewId}/start` (Brownfield / removed from MVP active contract)
 
@@ -2012,8 +2059,8 @@ Error:
 | 범위 | MVP 판단 | 권한 경계 |
 | ---- | -------- | --------- |
 | FCM token/device lifecycle | 포함 후보 | token/device transport state만 변경한다 |
-| notification inbox/list/read | 포함 후보 | UX hint history/read affordance이며 audit/canonical history가 아니다 |
-| unread count | 포함 후보 | badge 표시용 UX count이며 unresolved settlement/certification task가 아니다 |
+| notification inbox/list/read | 얇은 후보 | UX hint/read affordance 후보일 뿐 backend persistence 기본값이 아니다. Frontend local state/browser permission으로 충분한 상태는 서버 저장으로 승격하지 않는다 |
+| unread count | 얇은 후보 | badge 표시용 UX count 후보이며 unresolved settlement/certification task가 아니다. 필요 시 클라이언트 상태로 처리할 수 있다 |
 | delivery attempt observability | 포함 후보 | FCM send attempt 관측/transport retry용이며 settlement evidence가 아니다 |
 | SSE realtime stream | Phase 2/deferred drift 후보 | Android-first FCM MVP의 source가 아니며 realtime reliability 보장은 deferred다 |
 | notification preference matrix | Phase 2 | 채널/이벤트별 수신 설정 freeze 대상 아님 |
@@ -2048,6 +2095,8 @@ Policy:
 - FCM token은 delivery credential에 가까운 민감 데이터로 취급하고, public response에서 불필요하게 재노출하지 않는다.
 
 ### Notification inbox/list/read 후보
+
+> Thin notification 전략에서는 이 surface가 backend persistence 기본값이 아니다. Frontend local state/browser permission과 deep-link refetch로 충분하면 서버 저장 계약으로 승격하지 않는다.
 
 | Method | Candidate path | 역할 |
 | ------ | -------------- | ---- |

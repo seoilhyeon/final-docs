@@ -173,6 +173,7 @@ Hardening은 engagement mechanics 제거가 아니다. 실시간 지분율, 상�
 - 상대적 순위/위치: cooperative persistence를 돕는 상대 위치 표시이며 adversarial leaderboard가 아니다.
 - 예상 환급금: 불안 완화와 정산 설명을 위한 current-basis estimate이며 payout promise가 아니다.
 - 인증 피드/리액션: social richness와 응원을 위한 engagement surface이며 certification result authority가 아니다. 리액션은 OS emoji/free token 기반 social metadata이고, FE가 선택한 token 문자열 그대로 같은 reaction_type으로 취급한다. 동일 token 단위로만 toggle/delete/idempotency를 판단하며 여러 token은 공존할 수 있다.
+- 크루 공지/댓글/공지 리액션: 채팅 없는 MVP에서 방장 안내와 참여자 반응을 지원하는 communication surface이며, mission rule override나 settlement/ledger/certification/lifecycle authority가 아니다.
 - 결과 카드/공유 욕구: final settlement 이후 completion ritual과 virality intent이며 projection 공유 카드나 금전적 우위 자랑 카드가 아니다.
 - 알림 richness: 사용자를 canonical 화면으로 다시 데려오는 hint/deep-link이며 state authority가 아니다.
 
@@ -190,6 +191,7 @@ Hardening은 engagement mechanics 제거가 아니다. 실시간 지분율, 상�
 | Retry / Recovery | Admin recovery + idempotent system constraints | failed/retry-wait, partial point_history, missing item link | retry treated as correction or rerun payout | UC-A17, UC-A18 |
 | Notification / State Drift | Non-authoritative delivery | send, receive, stale payload, reconnect, canonical refresh | notification implies final state; failure is mistaken for settlement retry | UC-A19 |
 | Support / Explanation | Support follows source-of-truth hierarchy | pre-settlement explanation vs post-settlement explanation | support cites projection as final; correction/replay promises too much | UC-A20 |
+| Crew Communication | Non-authoritative social/communication surface | host notice, comment, notice reaction, visibility status | notice content is mistaken for rule override or settlement/certification authority | UC-A21 |
 | Emotional / Trust UX | Product semantics / UX | estimate changes, rejection, contribution visibility, tie, shame, warning density | deceptive certainty, punitive/legalistic product feel, or adversarial ranking | PF-001, PF-004, PF-015–PF-017 |
 | Brownfield Conflicts | Canonical semantic register until resolved | manual start, old enums, deferred endpoints, mismatched examples | legacy wording silently becomes active semantics | UC-A04, UC-A12, UC-A16 |
 
@@ -463,6 +465,20 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **UX Risk**: Conflicting support answers destroy trust.
 - **Related Domain Objects**: projection response, `settlement_item`, `point_history`, moderation timeline.
 
+
+### UC-A21 — Crew Notice, Comment, and Notice Reaction Surface
+
+- **Actors**: Host, participant/member, system
+- **Classification**: cross-cutting non-authoritative communication semantics (crew notice/comment/reaction = social communication only)
+- **Preconditions**: Crew exists; actor is authorized for the relevant communication action.
+- **Main Flow**: Host posts operational notice; participants/members read, comment, or react to the notice. Hidden/deleted states affect visibility only.
+- **Failure Flow**: Notice text is treated as mission rule override, host settlement decision, certification decision, point ledger mutation, or lifecycle command.
+- **Authority Boundary**: Crew notice/comment/reaction are communication metadata. They do not own crew lifecycle, certification, moderation, settlement, point ledger, participant baseline, or replay/retry/correction truth.
+- **Projection Impact**: UI may show notice/comment/reaction counts or lists as engagement context. Counts are derived social metadata and are not projection/final settlement inputs.
+- **Settlement Impact**: None; communication activity cannot change final settlement inputs, settlement snapshots, refund amount, or point history.
+- **UX Risk**: Users may follow a notice as if it changed canonical mission rules. Downstream copy must point to canonical crew/mission rule state when rules are discussed.
+- **Related Domain Objects**: `crew_notice`, `crew_notice_comment`, `crew_notice_reaction`, `crew`, `mission_rule`.
+
 ### 4.A Usecase Classification Taxonomy
 
 각 UC의 `**Classification**` 필드는 아래 카테고리 중 하나로 분류된다. UML usecase diagram 상에서 actor-performed usecase 노드로 표현되는 것과, invariant/boundary/shared-rule로 표현되는 것을 구분하기 위한 분류 체계다.
@@ -477,7 +493,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 | extension / variant | 상위 UC의 edge-case branch | UC-A03, UC-A11, UC-A16 |
 | recovery | 미완료 작업의 operational resume (mutation 없음) | UC-A17 |
 | audit | 결과 검증·재현 (mutation 없음) | UC-A18 |
-| cross-cutting non-authoritative semantics | hint 또는 설명 레이어 (state authority 없음) | UC-A19, UC-A20 |
+| cross-cutting non-authoritative semantics | hint 또는 설명 레이어 (state authority 없음) | UC-A19, UC-A20, UC-A21 |
 
 ### 4.B Diagram Projection Note
 
@@ -493,6 +509,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 | UC-A17 | ⑥ Recovery lane («non-authoritative» recovery) | retry는 recalculation이 아님 |
 | UC-A18 | ⑦ Audit lane («append-only») | replay는 payout mutation이 아님 |
 | UC-A19 | ⑧ OPS lane «non-authoritative» | hint layer; canonical state authority 없음 |
+| UC-A21 | ⑨ Communication lane «non-authoritative» | crew notice/comment/reaction은 communication surface이며 rule/state authority 없음 |
 
 Diagram에서 노드로 승격되지 않은 UC도 본 inventory에서는 normative semantic으로 보존된다. Diagram은 가독성을 위한 표현 layer이고, 본 inventory가 canonical behavioral semantic source다.
 
@@ -669,6 +686,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 | upload object vs mission-log authority | Upload object is evidence. MissionLog/server validation is certification event boundary. |
 | moderation vs settlement authority | Host review can affect input before freeze; host cannot decide money. |
 | notification/inbox/read vs canonical API state | Notification hints and inbox/read UX history are non-authoritative. Canonical API/state records decide current truth after deep-link/refetch. |
+| crew notice/comment/reaction vs canonical rule/state | Crew communication surfaces explain and coordinate, but canonical rule/state remains in crew, mission_rule, mission_log, settlement, and point_history records. |
 | append-only history vs visible latest state | Latest state may be summarized, but history must remain auditable. |
 | competitive mechanics vs competitive framing | Contribution/progress visibility is allowed; adversarial “winner/profit from failure” framing is not. |
 | all-fail refund vs punishment | All-fail equal principal refund prevents monetizing everyone’s failure; zero-refund/punitive wording is brownfield drift only. |

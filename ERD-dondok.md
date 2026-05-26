@@ -71,6 +71,9 @@
 | `point_history`        | 포인트 증감과 보증금 잠금/환급 원장 | `member 1:N point_history`, `settlement_item 0..1:1 point_history`        |
 | `crew`                 | 크루 모집, 진행, 종료 단위          | `member 1:N crew(host)`, `crew 1:N crew_participant`                      |
 | `crew_participant`     | 방 참여 단위이자 보증금 잠금 단위   | `crew 1:N crew_participant`, `crew_participant 1:N mission_log`           |
+| `crew_notice`          | 크루 공지 communication metadata    | `crew 1:N crew_notice`, `member 1:N crew_notice(author)`                  |
+| `crew_notice_comment`  | 크루 공지 댓글 social metadata      | `crew_notice 1:N crew_notice_comment`, `member 1:N crew_notice_comment`   |
+| `crew_notice_reaction` | 크루 공지 리액션 social metadata    | `crew_notice 1:N crew_notice_reaction`, `member 1:N crew_notice_reaction` |
 | `mission_rule`         | 인증 주기 규칙                      | `crew 1:1 mission_rule`                                                   |
 | `mission_schedule_day` | `SPECIFIC_DAYS` 요일 규칙           | `mission_rule 1:N mission_schedule_day`                                   |
 | `mission_log`          | 미션 인증 원본 로그                 | `crew_participant 1:N mission_log`                                        |
@@ -83,16 +86,16 @@
 | 테이블명                                       | 역할                                              | 포함 판단                                                                                                                                   |
 | ---------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `notification_device` / `push_token` 후보      | Android-first FCM token/device lifecycle 지원     | MVP notification transport 후보. 토큰 등록/갱신/비활성화 상태만 다루며 crew lifecycle, 인증, 검수, 정산, 포인트 원장 상태를 변경하지 않는다 |
-| `notification_event` / `notification_log` 후보 | 알림 inbox/read UX hint history 지원              | MVP notification list/read 후보. canonical history/audit truth가 아니며 payload/list item은 refetch target metadata만 가진다      |
+| `notification_event` / `notification_log` 후보 | 알림 inbox/read UX hint history 지원              | Thin notification 전략에서 필요한 경우만 검토하는 후보. Frontend local/browser state로 충분하면 backend persistence로 승격하지 않으며, canonical history/audit truth가 아니다 |
 | `notification_delivery_attempt` 후보           | FCM delivery attempt 관측 및 transport retry 지원 | MVP 운영 관측 후보. delivery success/failure/read 여부는 도메인 성공/실패나 settlement retry/replay/correction의 근거가 아니다              |
 | `notification_preference` 후보                 | 채널/이벤트별 수신 설정                           | Phase 2 deferred. MVP에서는 세부 preference matrix를 schema로 freeze하지 않는다                                                             |
 | `notification_template` 후보                   | 알림 문구/template 관리                           | Phase 2 deferred. MVP에서는 template CMS/table을 schema로 freeze하지 않는다                                                                 |
 
 ### 2.3 Notification / FCM candidate boundary
 
-- ERD의 notification 후보 엔티티는 Android-first FCM delivery와 inbox/read UX를 지원하기 위한 보조 persistence 후보이며, 결제/정산/포인트/인증/검수의 새 authority가 아니다.
+- ERD의 notification 후보 엔티티는 Android-first FCM delivery와 inbox/read UX가 backend 저장을 실제로 필요로 할 때만 검토하는 보조 persistence 후보이며, thin notification의 기본값은 hint/deep-link/transport다. 결제/정산/포인트/인증/검수의 새 authority가 아니다.
 - `notification_device` 또는 `push_token`은 authenticated member의 FCM token/device lifecycle만 표현한다. invalid token, refresh, deactivate는 token/device 상태에만 영향을 주며 참여/인증/정산/원장 상태를 변경하지 않는다.
-- `notification_event` 또는 `notification_log`는 사용자가 놓친 알림을 다시 볼 수 있게 하는 UX hint history 후보일 뿐, audit-grade canonical domain history가 아니다. 읽음/미읽음은 사용자 UX 상태이며 미해결 정산·인증·검수 task를 뜻하지 않는다.
+- `notification_event` 또는 `notification_log`는 사용자가 놓친 알림을 다시 볼 수 있게 하는 UX hint history가 꼭 필요할 때의 후보일 뿐, MVP Core persistence default나 audit-grade canonical domain history가 아니다. 읽음/미읽음은 사용자 UX 상태이며 미해결 정산·인증·검수 task를 뜻하지 않는다.
 - `notification_delivery_attempt`는 FCM send attempt, provider response, bounded transport retry 관측 후보로만 둔다. 실패/재시도는 settlement retry, replay, correction, payout mutation과 분리한다.
 - 알림 payload/list item에 필요한 canonical refetch metadata 후보는 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 수준으로 제한한다. authoritative payout/certification/ledger snapshot은 포함하지 않는다.
 - Notification 후보 엔티티는 non-authoritative hint/deep-link/refetch/transport surface이므로 Core Mermaid에서 의도적으로 제외한다. Core Mermaid에 포함하면 canonical domain history/source of truth로 오해될 수 있다.
@@ -326,6 +329,7 @@ Unique / Index:
 | `host_member_id`          | `BIGINT`       | N        | 방 생성자 FK                                                    |
 | `title`                   | `VARCHAR(100)` | N        | 크루 제목 / 미션 제목. 크루 생성 필수 입력값                    |
 | `description`             | `TEXT`         | N        | 크루 소개. 크루 생성 필수 입력값                                |
+| `image_s3_key`            | `VARCHAR(255)` | Y        | 크루 카드/상세 표시용 대표 이미지 object key                    |
 | `category`                | `VARCHAR(30)`  | N        | 크루 카테고리. 값 catalog/shape는 deferred decision             |
 | `host_agreement_snapshot` | `JSON`         | N        | 호스트 책임 동의 snapshot. payload shape는 deferred decision    |
 | `host_agreement_version`  | `VARCHAR(20)`  | N        | 호스트 책임 동의 version label                                  |
@@ -375,7 +379,137 @@ Unique / Index:
 - `category`는 생성 시 필수이며 catalog/enum 형태(고정 enum / managed catalog / free string)는 deferred decision이다. 현재 ERD는 컬럼 존재만 freeze하고 값 catalog는 freeze하지 않는다.
 - `host_agreement_snapshot`은 호스트 책임 동의서의 당시 표현을 audit-grade로 저장한다. payload shape는 deferred decision이고, 이 컬럼은 호스트 권한 확장 근거나 settlement authority가 아니다. `host_agreement_version`은 시점별 약관 표현 추적용 label, `host_agreed_at`은 동의 시각이다.
 - `title`과 `description`은 크루 생성 필수 입력값이다. 크루 탐색 목록, 크루 상세, 참여/검수/정산 알림 노출 텍스트에서 사용한다. 둘 다 표시용 텍스트이며 lifecycle/moderation/settlement authority가 아니다.
+- `image_s3_key`는 크루 카드/상세 화면의 대표 이미지 표시용 metadata다. `NULL`이면 기본/카테고리 fallback 이미지를 사용한다. `image_url`은 저장 컬럼이 아니라 object key에서 파생되는 응답 값으로 우선 처리한다. 대표 이미지는 lifecycle, moderation, certification, settlement, ranking authority가 아니다.
 - MVP는 공개 크루만 지원한다.
+
+### `crew_notice`
+
+역할:
+
+- 채팅을 MVP에 포함하지 않는 대신, 크루 내 방장 공지 communication surface를 제공한다.
+- 공지는 설명/안내/운영 커뮤니케이션 metadata이며 `mission_rule`, `crew`, `mission_log`, `settlement`, `point_history`의 canonical rule/state를 변경하지 않는다.
+
+주요 컬럼:
+
+| 컬럼               | 타입 제안      | nullable | 설명                                                  |
+| ------------------ | -------------- | -------- | ----------------------------------------------------- |
+| `id`               | `BIGINT`       | N        | 공지 PK                                               |
+| `crew_id`          | `BIGINT`       | N        | 크루 FK                                               |
+| `author_member_id` | `BIGINT`       | N        | 작성 회원 FK. host 중심 작성 권한은 application layer에서 검증 |
+| `title`            | `VARCHAR(100)` | Y        | 선택 공지 제목                                        |
+| `content`          | `TEXT`         | N        | 공지 본문                                             |
+| `status`           | `VARCHAR(20)`  | N        | 표시 상태                                             |
+| `created_at`       | `DATETIME(6)`  | N        | 생성 시각                                             |
+| `updated_at`       | `DATETIME(6)`  | N        | 수정 시각                                             |
+
+PK:
+
+- `id`
+
+FK:
+
+- `crew_id -> crew.id`
+- `author_member_id -> member.id`
+
+Unique / Index:
+
+- `index(crew_id, status, created_at)`
+- `index(author_member_id, created_at)`
+
+상태값 / Enum:
+
+- `status`: `VISIBLE`, `HIDDEN`, `DELETED`
+
+주의사항:
+
+- 공지 작성 권한은 host 중심으로 검증하되, 이 권한은 lifecycle/settlement/ledger/moderation authority가 아니다.
+- 공지 본문은 인증 기준 안내나 운영 설명으로 사용될 수 있지만 DB rule 값을 override하지 않는다. canonical rule/state는 `crew`, `mission_rule`, `mission_log`, `settlement`, `point_history`가 소유한다.
+- `HIDDEN`/`DELETED`는 표시 상태이며 audit-grade moderation/dispute/correction workflow가 아니다.
+
+### `crew_notice_comment`
+
+역할:
+
+- 크루 공지에 대한 참여자/회원 댓글 social interaction을 저장한다.
+- 댓글은 communication metadata이며 정산, 원장, 인증 성공/실패, lifecycle 전이의 입력값이 아니다.
+
+주요 컬럼:
+
+| 컬럼             | 타입 제안      | nullable | 설명                       |
+| ---------------- | -------------- | -------- | -------------------------- |
+| `id`             | `BIGINT`       | N        | 댓글 PK                    |
+| `crew_notice_id` | `BIGINT`       | N        | 공지 FK                    |
+| `member_id`      | `BIGINT`       | N        | 댓글 작성 회원 FK          |
+| `content`        | `VARCHAR(500)` | N        | 댓글 본문                  |
+| `status`         | `VARCHAR(20)`  | N        | 표시 상태                  |
+| `created_at`     | `DATETIME(6)`  | N        | 생성 시각                  |
+| `updated_at`     | `DATETIME(6)`  | N        | 수정 시각                  |
+
+PK:
+
+- `id`
+
+FK:
+
+- `crew_notice_id -> crew_notice.id`
+- `member_id -> member.id`
+
+Unique / Index:
+
+- `index(crew_notice_id, status, created_at)`
+- `index(member_id, created_at)`
+
+상태값 / Enum:
+
+- `status`: `VISIBLE`, `HIDDEN`, `DELETED`
+
+주의사항:
+
+- 댓글 생성/수정/숨김/삭제는 `crew.status`, `crew_participant.status`, `mission_log.certification_status`, `settlement`, `settlement_item`, `point_account`, `point_history`를 생성하거나 수정하거나 롤백하지 않는다.
+- MVP에서는 nested comment, 신고/제재, correction workflow를 이 테이블이 발명하지 않는다.
+
+### `crew_notice_reaction`
+
+역할:
+
+- 크루 공지에 대한 회원별 리액션 social metadata를 저장한다.
+- 리액션은 응원/가벼운 반응 전용이며 정산, 인증, 포인트, lifecycle, moderation authority가 아니다.
+
+주요 컬럼:
+
+| 컬럼             | 타입 제안     | nullable | 설명                                      |
+| ---------------- | ------------- | -------- | ----------------------------------------- |
+| `id`             | `BIGINT`      | N        | 리액션 PK                                 |
+| `crew_notice_id` | `BIGINT`      | N        | 공지 FK                                   |
+| `member_id`      | `BIGINT`      | N        | 리액션 작성 회원 FK                       |
+| `reaction_type`  | `VARCHAR(20)` | N        | FE-selected emoji grapheme/token string   |
+| `created_at`     | `DATETIME(6)` | N        | 생성 시각                                 |
+| `updated_at`     | `DATETIME(6)` | N        | 수정 시각                                 |
+
+PK:
+
+- `id`
+
+FK:
+
+- `crew_notice_id -> crew_notice.id`
+- `member_id -> member.id`
+
+Unique / Index:
+
+- `unique(crew_notice_id, member_id, reaction_type)`
+- `index(crew_notice_id)`
+- `index(member_id, created_at)`
+
+상태값 / Token:
+
+- `reaction_type`: `mission_log_reaction`과 동일하게 고정 enum이 아니라 FE-selected emoji grapheme/token string을 저장한다. MVP는 trim/blank validation과 `VARCHAR(20)` 길이 검증만 적용한다.
+
+주의사항:
+
+- 동일 `(crew_notice_id, member_id, reaction_type)`은 한 번만 허용한다. 토글/idempotency/delete 기준은 같은 저장 문자열 단위다.
+- 리액션 수는 이 테이블에서 파생 계산한다. `crew_notice`에 저장 카운터를 추가하지 않는다.
+- 리액션 생성/삭제는 공지 본문, 크루 규칙, 인증 상태, 정산, 포인트 원장을 변경하지 않는다.
 
 ### `crew_participant`
 
@@ -823,8 +957,14 @@ Unique / Index:
 - `member 1:1 point_account`
 - `member 1:N point_history`
 - `member 1:N crew` (`host_member_id`)
+- `member 1:N crew_notice` (`author_member_id`)
+- `member 1:N crew_notice_comment`
+- `member 1:N crew_notice_reaction`
 - `member 1:N mission_log_reaction`
 - `crew 1:N crew_participant`
+- `crew 1:N crew_notice`
+- `crew_notice 1:N crew_notice_comment`
+- `crew_notice 1:N crew_notice_reaction`
 - `crew 1:1 mission_rule`
 - `mission_rule 1:N mission_schedule_day`
 - `crew_participant 1:N mission_log`
@@ -957,6 +1097,7 @@ erDiagram
         BIGINT host_member_id FK
         VARCHAR title
         TEXT description
+        VARCHAR image_s3_key
         VARCHAR category
         JSON host_agreement_snapshot
         VARCHAR host_agreement_version
@@ -973,9 +1114,9 @@ erDiagram
         DATETIME created_at
         DATETIME updated_at
     }
-    %% CREW: nullable=activated_at, settlement_status; enum status=RECRUITING|ACTIVE|CLOSED|CANCELLED; settlement_status=NONE|PENDING|RUNNING|SUCCEEDED|FAILED|RETRY_WAIT.
+    %% CREW: nullable=image_s3_key, activated_at, settlement_status; enum status=RECRUITING|ACTIVE|CLOSED|CANCELLED; settlement_status=NONE|PENDING|RUNNING|SUCCEEDED|FAILED|RETRY_WAIT.
     %% CREW constraints: IDX(host_member_id, created_at), IDX(status, recruitment_deadline), IDX(status, start_at, end_at), IDX(status, activated_at), CHECK(2 <= min_participants <= max_participants <= 15).
-    %% CREW note: MVP has public crews only; start_at is the system activation anchor and activated_at is actual ACTIVE transition time. Host is not activation/settlement authority.
+    %% CREW note: MVP has public crews only; image_s3_key is display metadata only and image_url is response-derived; start_at is the system activation anchor and activated_at is actual ACTIVE transition time. Host is not activation/settlement authority.
 
     CREW_PARTICIPANT {
         BIGINT id PK
@@ -993,6 +1134,41 @@ erDiagram
     %% CREW_PARTICIPANT: nullable=deposit_amount, locked_at, released_point_history_id, withdrawn_at; UK(crew_id, member_id); nullable UK(released_point_history_id); IDX(crew_id, status), IDX(member_id, status).
     %% CREW_PARTICIPANT enum: MVP active status=PENDING|LOCKED|REJECTED|CANCELLED|EXPIRED; WITHDRAWN is deferred/brownfield only.
     %% CREW_PARTICIPANT note: PENDING reserves capacity/balance but is excluded from activation baseline and settlement; LOCKED is the frozen baseline/settlement candidate.
+
+
+    CREW_NOTICE {
+        BIGINT id PK
+        BIGINT crew_id FK
+        BIGINT author_member_id FK
+        VARCHAR title
+        TEXT content
+        VARCHAR status
+        DATETIME created_at
+        DATETIME updated_at
+    }
+    %% CREW_NOTICE: nullable=title; IDX(crew_id, status, created_at), IDX(author_member_id, created_at); status=VISIBLE|HIDDEN|DELETED.
+    %% CREW_NOTICE note: communication metadata only; host-centered write authorization does not create lifecycle, certification, moderation, settlement, or ledger authority; content does not override canonical crew/mission rules.
+
+    CREW_NOTICE_COMMENT {
+        BIGINT id PK
+        BIGINT crew_notice_id FK
+        BIGINT member_id FK
+        VARCHAR content
+        VARCHAR status
+        DATETIME created_at
+        DATETIME updated_at
+    }
+    %% CREW_NOTICE_COMMENT: IDX(crew_notice_id, status, created_at), IDX(member_id, created_at); status=VISIBLE|HIDDEN|DELETED; social metadata only.
+
+    CREW_NOTICE_REACTION {
+        BIGINT id PK
+        BIGINT crew_notice_id FK
+        BIGINT member_id FK
+        VARCHAR reaction_type
+        DATETIME created_at
+        DATETIME updated_at
+    }
+    %% CREW_NOTICE_REACTION: UK(crew_notice_id, member_id, reaction_type); IDX(crew_notice_id), IDX(member_id, created_at); reaction_type is FE-selected token string; counts are derived and do not affect certification or payout state.
 
     MISSION_RULE {
         BIGINT id PK
@@ -1119,14 +1295,21 @@ erDiagram
     MEMBER ||--o{ POINT_HISTORY : owns
     MEMBER ||--o{ CREW : hosts
     MEMBER ||--o{ CREW_PARTICIPANT : participates
+    MEMBER ||--o{ CREW_NOTICE : writes_notice
+    MEMBER ||--o{ CREW_NOTICE_COMMENT : comments
+    MEMBER ||--o{ CREW_NOTICE_REACTION : reacts_notice
     MEMBER o|--o{ MISSION_LOG : moderates
     MEMBER ||--o{ MODERATION_HISTORY : moderates
     MEMBER ||--o{ MISSION_LOG_REACTION : reacts
     MEMBER ||--o{ SETTLEMENT_ITEM : receives
 
     CREW ||--o{ CREW_PARTICIPANT : contains
+    CREW ||--o{ CREW_NOTICE : announces
     CREW ||--|| MISSION_RULE : configures
     CREW ||--o| SETTLEMENT : finalizes
+
+    CREW_NOTICE ||--o{ CREW_NOTICE_COMMENT : has
+    CREW_NOTICE ||--o{ CREW_NOTICE_REACTION : receives
 
     MISSION_RULE ||--o{ MISSION_SCHEDULE_DAY : allows
     CREW_PARTICIPANT ||--o{ MISSION_LOG : uploads
@@ -1146,6 +1329,8 @@ erDiagram
 - 단, 아래 항목들은 ERD에서 물리 테이블/컬럼/enum으로 freeze하지 않는 deferred / Phase 2 / API-level 결정 사항이다.
 - Phase 2 hardening registry: audit-grade notification durability, notification preference matrix, notification template CMS/table, campaign/broadcast system, SSE/Web realtime reliability persistence, full AI replay reproducibility, AI report append-regeneration/invalidation lifecycle, immutable event sourcing migration, provider-level AI determinism, distributed replay engine, full provenance governance.
 - `mission_log_reaction` 외 feed-status 테이블/컬럼은 만들지 않는다. 성공/실패/미제출/검토중 일자 상태는 API projection으로 계산한다.
+- `crew_notice` / `crew_notice_comment` / `crew_notice_reaction`은 채팅 없는 MVP의 크루 communication surface다. 이 테이블들은 settlement, ledger, certification, lifecycle, moderation authority를 갖지 않는다.
+- 인증 방식 enum/컬럼, OCR/AI vision persistence, 도딘 출금/payout/bank account schema는 MVP active schema로 freeze하지 않는다.
 - `point_history.reference_type`의 MVP 저장값은 `POINT_CHARGE`, `CREW_PARTICIPANT`, `SETTLEMENT_ITEM`로 제한한다. API-spec은 이 저장값을 그대로 노출하거나 필요한 소비자 계약으로 매핑하되, ERD와 충돌하는 새 enum을 만들지 않는다.
 
 ## 9. Deferred / Candidate Modeling Notes
