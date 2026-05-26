@@ -383,6 +383,7 @@ Unique / Index:
 - `title`과 `description`은 크루 생성 필수 입력값이다. 크루 탐색 목록, 크루 상세, 참여/검수/정산 알림 노출 텍스트에서 사용한다. 둘 다 표시용 텍스트이며 lifecycle/moderation/settlement authority가 아니다.
 - `image_s3_key`는 크루 카드/상세 화면의 대표 이미지 표시용 metadata다. `NULL`이면 기본/카테고리 fallback 이미지를 사용한다. `image_url`은 저장 컬럼이 아니라 object key에서 파생되는 응답 값으로 우선 처리한다. 대표 이미지는 lifecycle, moderation, certification, settlement, ranking authority가 아니다.
 - MVP는 공개 크루만 지원한다.
+- `host_member_id`는 운영/검수 role anchor이자 host auto-created `crew_participant` row 식별의 reference key로 사용되며, settlement privilege / remainder winner / ledger authority가 아니다. 같은 사용자는 크루 생성 시 `host_member_id`로 기록되는 동시에 일반 참여자와 동일한 `crew_participant` row를 `unique(crew_id, member_id)` 제약 안에서 단 한 번만 보유한다. 두 reference는 별도 host participant 테이블 없이 같은 row를 가리킨다.
 
 ### `crew_notice`
 
@@ -575,6 +576,8 @@ Unique / Index:
 - `deposit_amount`는 participant 단위 예치금 snapshot의 source of truth다. `PENDING` 생성 시 `crew.deposit_amount`를 snapshot으로 복사 저장하고, `LOCKED` 전이 후에도 같은 값을 유지한다.
 - 신청 생성 트랜잭션은 capacity 확인(`PENDING + LOCKED < max_participants`) → `point_account.available_balance >= crew.deposit_amount` 조건부 차감 및 `reserved_balance` 증가 → `CREW_DEPOSIT_RESERVE point_history` insert → `crew_participant.deposit_amount` snapshot → `status = PENDING` 기록을 하나의 트랜잭션으로 함께 성공 또는 함께 롤백한다.
 - 방장 승인 트랜잭션은 기존 `PENDING` row를 `LOCKED`로 전이하고 `locked_at`을 기록한다. 추가 잔액 차감, host settlement authority, 중간 상태는 만들지 않는다.
+- 크루 생성 트랜잭션은 같은 transaction에서 호스트 본인의 `crew_participant` row를 `status=LOCKED`로 자동 생성하고 `crew.deposit_amount`를 `crew_participant.deposit_amount` snapshot으로 복사한다. 같은 transaction에서 `point_account.available_balance -= crew.deposit_amount` / `reserved_balance += crew.deposit_amount` bucket transition과 `CREW_DEPOSIT_RESERVE point_history` insert를 함께 수행한다. 호스트 잔액이 부족하면 reserve 실패로 크루 생성 자체가 롤백된다. host auto-created row는 `unique(crew_id, member_id)` 제약을 일반 참여자와 동일하게 따르며, 호스트의 추가 신청은 같은 제약으로 차단된다.
+- host auto-created `LOCKED` row는 일반 `LOCKED` 참여자와 동일하게 capacity, `min_participants` baseline, activation eligibility, frozen participant baseline, settlement eligibility에 포함되고 최종 정산 대상이다. 호스트라는 사실은 moderation/operation role anchor일 뿐 settlement privilege / remainder winner / ledger authority가 아니다. 별도 `HOST_LOCKED` / `HOST_PARTICIPANT` 상태나 host 전용 테이블을 만들지 않는다.
 
 ### `mission_rule`
 

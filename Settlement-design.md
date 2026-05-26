@@ -81,6 +81,7 @@
 - `ACTIVE` 이후 신규 참여와 baseline 변경은 허용하지 않는다.
 - ACTIVE 이후 탈퇴/재참여 및 중도 탈퇴 정산은 MVP active semantics가 아니라 brownfield/deferred 영역으로 남긴다. 기존 문서/구현 흔적이 있더라도 `LOCKED` frozen baseline을 바꾸는 권한으로 해석하지 않는다.
 - frozen participant baseline은 `start_at` 자동 activation 시점에 `LOCKED`인 participant 집합이다. 이 baseline은 final settlement input으로 사용되며 post-freeze에 host/admin이 소급 변경하지 않는다.
+- 크루 생성 시점에 호스트 본인도 같은 transaction에서 `crew_participant` row를 `LOCKED`로 자동 생성하고 `crew.deposit_amount`만큼 reserve/lock한다. 호스트 auto-created `LOCKED` row는 일반 `LOCKED` 참여자와 동일하게 frozen participant baseline에 포함되며 `deposit_amount` snapshot과 `settlement_item` 대상이 된다. 호스트라는 사실은 moderation/operation role anchor일 뿐 settlement amount privilege / remainder winner / ledger authority가 아니며, 호스트도 일반 참여자와 동일한 정산 규칙으로 환급/소실을 산정한다.
 
 ### 3.3 `min_participants` 정책
 

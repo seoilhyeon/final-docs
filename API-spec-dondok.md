@@ -132,7 +132,7 @@
 ### 3.6 PointTransactionType
 
 - `POINT_CHARGE`
-- `CREW_DEPOSIT_RESERVE`: `PENDING` 신청 reserve 생성 시 발행되는 lock 이벤트다. 자산 이동이 아니라 `available_balance -= deposit_amount` + `reserved_balance += deposit_amount` bucket transition을 기록한다.
+- `CREW_DEPOSIT_RESERVE`: 크루 참여 보증금 reserve 시 발행되는 lock 이벤트다. 일반 참여자의 `PENDING` 신청 reserve와 `POST /api/crews` 시점 호스트 auto-participation `LOCKED` reserve가 모두 같은 transaction type을 사용한다. 자산 이동이 아니라 `available_balance -= deposit_amount` + `reserved_balance += deposit_amount` bucket transition을 기록한다. 별도 `CREW_OWNER_DEPOSIT`/`HOST_*` transaction type을 만들지 않는다.
 - `CREW_RESERVE_RELEASE`: `PENDING -> REJECTED/CANCELLED/EXPIRED` terminal 전이와 같은 transaction에서 reserve를 사용자 `available_balance`로 반환하는 이벤트다.
 - `CREW_SETTLEMENT_REFUND`: 일반 정산 환급 이벤트. `locked_balance -= deposit_amount` + 환급 결과만큼 `available_balance` 증가를 동일 transaction에서 처리한다.
 - 승인 시점 `PENDING -> LOCKED` 전이는 `reserved_balance -> locked_balance` bucket transition만 수행하며, 새 `point_history` row를 만들지 않는다. `CREW_DEPOSIT_LOCK`과 같은 별도 lock-event ledger type은 사용하지 않는다.
@@ -578,6 +578,7 @@ Response `200 OK`:
 역할:
 
 - 크루 방과 인증 규칙을 생성한다.
+- 같은 트랜잭션에서 호스트(생성자) 본인의 `crew_participant` row를 `LOCKED` 상태로 자동 확정하고, 호스트 보증금을 `crew.deposit_amount`만큼 reserve/lock한다. 호스트는 별도 `POST /api/crews/{crewId}/participants` 신청 + 방장 승인 흐름을 거치지 않는다. host auto-participation은 UX 단축일 뿐이며 host에게 lifecycle/settlement/ledger authority를 부여하지 않는다.
 
 Request:
 
@@ -622,7 +623,13 @@ Response `201 Created`:
   "start_at": "2026-05-10T00:00:00+09:00",
   "activated_at": null,
   "end_at": "2026-05-31T23:59:59+09:00",
-  "created_at": "2026-05-07T09:00:00+09:00"
+  "created_at": "2026-05-07T09:00:00+09:00",
+  "my_participation": {
+    "crew_participant_id": 100,
+    "status": "LOCKED",
+    "deposit_locked_amount": 100000,
+    "locked_at": "2026-05-07T09:00:00+09:00"
+  }
 }
 ```
 
@@ -634,6 +641,7 @@ Error:
 - `INVALID_CATEGORY`
 - `INVALID_DAILY_SETTLEMENT_TYPE`
 - `HOST_AGREEMENT_REQUIRED`
+- `INSUFFICIENT_BALANCE`
 
 정책:
 
@@ -647,6 +655,11 @@ Error:
 - `daily_settlement_type`은 필수다. cadence anchor는 `Settlement-design.md`가 소유한다.
 - `host_agreement`는 방 생성 시점 약관/규칙 동의의 스냅샷이다. 서버는 `host_agreement_snapshot`(JSON), `host_agreement_version`, `host_agreed_at`을 함께 저장한다. 이후 약관 본문이 바뀌어도 이 방의 동의 컨텍스트는 변하지 않는다.
 - `image_s3_key`는 크루 대표 이미지 표시용 metadata다. 서버는 object key 검증/업로드 흐름이 준비된 경우에만 저장하고, 조회 응답의 `image_url`은 해당 key에서 파생한다. 이 값은 정산, lifecycle, moderation authority가 아니다.
+- 크루 생성 트랜잭션은 `crew` + `mission_rule` (+ `mission_schedule_day`) insert와 함께 호스트용 `crew_participant` row를 `status=LOCKED`로 자동 생성하고, `point_account.available_balance -= crew.deposit_amount` / `reserved_balance += crew.deposit_amount` bucket transition을 수행한 뒤 `CREW_DEPOSIT_RESERVE point_history` row를 함께 insert한다. 위 단계 중 하나라도 실패하면 크루 생성 자체가 실패하며 일부만 commit되지 않는다.
+- 호스트 잔액이 `crew.deposit_amount` 미만이면 reserve가 실패하므로 크루 생성 자체를 `INSUFFICIENT_BALANCE`로 거절한다. host에게는 별도 보증금 면제/예외가 없다.
+- 호스트 auto-created `LOCKED` participant는 일반 `LOCKED` 참여자와 동일하게 capacity, `min_participants` baseline, activation eligibility, frozen participant baseline, settlement eligibility에 포함되며 최종 정산 대상이다. 호스트라는 사실은 moderation/operation role anchor일 뿐 settlement privilege / remainder winner / ledger authority가 아니다.
+- 호스트의 `CREW_DEPOSIT_RESERVE` 원장은 일반 신청 reserve와 동일한 `transaction_type`을 사용하며 별도 `HOST_*` enum/type을 만들지 않는다. host auto-created row는 방장 승인 endpoint(`/applications/{crewParticipantId}/approve`)의 대상이 아니다.
+- 응답의 `my_participation`은 호스트 본인의 auto-created `LOCKED` participant snapshot이다. 동일 사용자가 같은 크루에 다시 `POST /api/crews/{crewId}/participants`를 호출하면 `unique(crew_id, member_id)` 제약으로 `ALREADY_PARTICIPATING`로 거절된다.
 
 ### `GET /api/crews/{crewId}`
 
@@ -747,6 +760,7 @@ Error:
 - terminal 상태(`REJECTED`, `CANCELLED`, `EXPIRED`)에서 동일 사용자가 같은 방에 재신청 시도하면 `APPLICATION_NOT_ALLOWED`로 거절한다. MVP에서는 재참여/row 재사용/status 되돌리기를 허용하지 않는다.
 - `PENDING` 상태는 capacity reservation에 포함한다. 신청 생성 시 capacity 확인은 `PENDING + LOCKED < crew.max_participants` 기준이다.
 - `PENDING`은 `deposit_reserved_amount`를 갖지만 activation/minimum/frozen baseline과 settlement eligibility에는 포함하지 않는다. `LOCKED` 전이는 방장 승인 endpoint가 reserve를 확정하는 단일 상태 전이다.
+- 호스트는 자신이 생성한 크루에 대해 이 endpoint로 다시 신청하지 않는다. `POST /api/crews` 시점에 host용 `crew_participant` row가 이미 `LOCKED`로 auto-created되어 있으므로 호스트의 추가 신청 시도는 `unique(crew_id, member_id)` 제약으로 `ALREADY_PARTICIPATING`로 거절된다.
 
 ### `DELETE /api/crews/{crewId}/participants/me`
 
@@ -825,6 +839,7 @@ Error:
 - 위 단계 중 하나라도 실패하면 `LOCKED`로 전이하지 않는다. 별도 중간 상태를 만들지 않고, 신청자 `crew_participant.status`는 `PENDING`로 유지하거나 승인 실패 응답으로 처리한다.
 - `INSUFFICIENT_BALANCE`는 신청 생성 시 reserve에 실패할 때 발생한다. 승인 endpoint는 추가 잔액 차감을 수행하지 않는다.
 - 신청 생성 시점의 reserve 성공 원장은 `CREW_DEPOSIT_RESERVE point_history`로 이미 기록되어 있다. 승인은 `reserved_balance -> locked_balance` bucket transition만 수행하며 새 `point_history`를 만들지 않는다. 사용자 측 별도 deposit-lock endpoint는 제공하지 않는다.
+- 이 endpoint는 일반 참여자의 `PENDING` row에만 사용한다. `POST /api/crews` 시점에 auto-created된 호스트 본인의 `LOCKED` row는 이미 확정 상태이므로 승인 대상이 아니며, 호출 시 `APPLICATION_NOT_APPROVABLE`로 거절한다.
 
 ### `POST /api/crews/{crewId}/applications/{crewParticipantId}/reject`
 
@@ -860,6 +875,7 @@ Error:
 - 거절은 `PENDING` 상태에서만 가능하다. 다른 상태는 `APPLICATION_NOT_REJECTABLE`로 거절한다.
 - 기존 reserve는 `CREW_RESERVE_RELEASE` point_history로 반환하고, `point_account.available_balance`를 같은 금액만큼 복구한다. terminal 전이와 reserve release는 같은 transaction에서 처리하며, release는 `crew_participant.id`당 한 번만 허용한다. 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
 - `REJECTED`는 terminal pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다. 동일 crew 재신청은 MVP에서 허용하지 않는다.
+- 이 endpoint는 일반 참여자의 `PENDING` row에만 사용한다. `POST /api/crews` 시점에 auto-created된 호스트 본인의 `LOCKED` row는 거절 대상이 아니며, 호출 시 `APPLICATION_NOT_REJECTABLE`로 거절한다.
 
 ### `GET /api/crews/{crewId}/applications`
 
@@ -2466,7 +2482,7 @@ Error:
 - `has_next`, `total_count`, `total_pages` 같은 page total 필드는 MVP 필수 contract가 아니다.
 - `limit`이 `1` 미만이거나 `100`을 초과하면 `INVALID_LIMIT`를 반환한다.
 - `cursor` 형식이 잘못되었거나 해석할 수 없으면 `INVALID_CURSOR`를 반환한다.
-- `CREW_DEPOSIT_RESERVE`는 자산 이동이 아니라 reserve lock 이벤트다.
+- `CREW_DEPOSIT_RESERVE`는 자산 이동이 아니라 reserve lock 이벤트다. 일반 참여자의 `PENDING` 신청과 `POST /api/crews` 시점 호스트 auto-participation reserve가 모두 같은 transaction type으로 기록된다.
 - `CREW_SETTLEMENT_REFUND`와 `CREW_RESERVE_RELEASE`는 실제 사용 가능 잔액 증가 이벤트다.
 - `reference_type`은 `POINT_CHARGE`, `CREW_PARTICIPANT`, `SETTLEMENT_ITEM`만 사용한다.
 - `reference_type` / `reference_id` 매핑은 아래와 같다.
