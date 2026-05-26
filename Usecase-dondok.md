@@ -172,7 +172,8 @@ Hardening은 engagement mechanics 제거가 아니다. 실시간 지분율, 상�
 - 실시간 지분율/기여도: 현재 입력 기준 projection visibility이며 final settlement input mutation 권한이 아니다.
 - 상대적 순위/위치: cooperative persistence를 돕는 상대 위치 표시이며 adversarial leaderboard가 아니다.
 - 예상 환급금: 불안 완화와 정산 설명을 위한 current-basis estimate이며 payout promise가 아니다.
-- 인증 피드/리액션: social richness와 응원을 위한 engagement surface이며 certification result authority가 아니다. 리액션은 OS emoji/free token 기반 social metadata이고, FE가 선택한 token 문자열 그대로 같은 reaction_type으로 취급한다. 동일 token 단위로만 toggle/delete/idempotency를 판단하며 여러 token은 공존할 수 있다.
+- 인증 피드/리액션: social richness와 응원을 위한 engagement surface이며 certification result authority가 아니다. 일반 feed timeline은 `PENDING_REVIEW`/`SUCCESS`/`FAILED` 로그를 보여주는 append-only visible activity stream이고, `NOT_SUBMITTED`는 row 없는 synthetic day/member slot projection이다. 리액션은 OS emoji/free token 기반 social metadata이고, FE가 선택한 token 문자열 그대로 같은 reaction_type으로 취급한다. 동일 token 단위로만 toggle/delete/idempotency를 판단하며 여러 token은 공존할 수 있다.
+- Day/member slot과 dashboard/projection은 latest/effective 상태 하나를 사용하는 current-focused summary다. Feed item count와 reaction count는 recognized success count가 아니다.
 - 크루 공지/댓글/공지 리액션: 채팅 없는 MVP에서 방장 안내와 참여자 반응을 지원하는 communication surface이며, mission rule override나 settlement/ledger/certification/lifecycle authority가 아니다.
 - 결과 카드/공유 욕구: final settlement 이후 completion ritual과 virality intent이며 projection 공유 카드나 금전적 우위 자랑 카드가 아니다.
 - 알림 richness: 사용자를 canonical 화면으로 다시 데려오는 hint/deep-link이며 state authority가 아니다.
@@ -314,12 +315,12 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Participant, system
 - **Classification**: shared input rule (cadence cap; projection·settlement에 동일 적용; diagram에서는 floating «shared input rule» 노드로 표현될 수 있음)
 - **Preconditions**: Multiple successful raw logs exist in the same cadence period.
-- **Main Flow**: Raw logs remain append-only; projection/settlement recognizes only allowed count according to cadence.
-- **Failure Flow**: Feed success count inflates final settlement recognized count.
+- **Main Flow**: Raw logs remain append-only; general feed preserves visible activity history, while slot/dashboard projection and settlement recognize only allowed current/effective input according to cadence.
+- **Failure Flow**: Feed item count or visible success badge inflates final settlement recognized count.
 - **Authority Boundary**: Settlement recognition does not come from feed visibility or reaction activity. Reactions are social metadata only and do not affect certification, payout calculation, point ledger, crew status, or participant status.
-- **Projection Impact**: Projection must apply current-basis recognition rules consistent with settlement inputs, but remains a non-final estimate until Settlement.status = SUCCEEDED and point_history is committed.
+- **Projection Impact**: Projection must apply current-basis recognition rules to latest/effective slot state, but remains a non-final estimate until Settlement.status = SUCCEEDED and point_history is committed.
 - **Settlement Impact**: Excluded logs need calculation reasons.
-- **UX Risk**: User thinks every successful feed post increases payout.
+- **UX Risk**: User thinks every visible feed post or reaction increases payout.
 - **Related Domain Objects**: `mission_log`, `settlement_item`, `calculation_reason`.
 
 ### UC-A10 — Host Moderation of Certification Input
@@ -327,10 +328,10 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Host, participant, system
 - **Classification**: actor-performed usecase (Host moderation of certification input; append-only, pre-freeze only)
 - **Preconditions**: Certification log exists and is eligible for review.
-- **Main Flow**: Host records contextual certification input review decision with actor, reason category, and time; `mission_log` latest-effective moderation columns update and `moderation_history` receives an append-only row.
+- **Main Flow**: Host records contextual certification input review decision with actor, reason category, and time; `mission_log` latest-effective moderation columns update and `moderation_history` receives an append-only row. If the participant reuploads, the feed may keep prior attempts visible as `이전 시도` while slot/projection uses the latest/effective state.
 - **Failure Flow**: Host decision overwrites prior history, deletes audit rows, or directly mutates settlement/ledger.
 - **Authority Boundary**: Host can affect certification input before freeze; host cannot determine settlement amount, ledger output, final settlement, participant baseline, replay, retry, or correction. Participants receive reason-code-level rejection explanation only; raw `reject_memo` text stays hidden in MVP.
-- **Projection Impact**: Current-basis projection may update when effective moderation input changes, with explanation of the changed input state.
+- **Projection Impact**: Current-basis projection may update when effective moderation input changes, with explanation of the changed input state. Feed timeline visibility itself is not a settlement input mutation.
 - **Settlement Impact**: Settlement consumes the resolved moderation state at freeze.
 - **UX Risk**: Participant interprets rejection as host confiscating money or personally judging the participant.
 - **Related Domain Objects**: `mission_log`, moderation history.
@@ -755,6 +756,9 @@ Avoid:
 | Live estimate | “현재 기준 예상 환급입니다. 최종 정산 전 변동될 수 있어요.” | “받을 환급금” |
 | Post-end estimate | “현재 기준 예상입니다. 최종 정산 전까지 변동될 수 있어요.” | “확정 금액 / 받을 환급금” |
 | Projection update | “현재 인증 결과가 반영되었습니다. 크루 전체 진행 상황이 업데이트되었습니다.” | “누군가 실패해서 상승 / 더 벌었습니다” |
+| Feed pending | “검토중입니다.” / “재업로드가 접수되었습니다.” | “곧 성공 처리됩니다 / 정산 반영 확정” |
+| Feed failed | “인정되지 않음” / “이전 시도” | “사람을 낙인찍는 표현 / 처벌 확정처럼 보이는 표현” |
+| Not submitted slot | “아직 인증 전” | “미제출 feed 게시물 / 금전 처벌 대상처럼 보이는 표현” |
 | Host moderation accepted | “방장이 인증 내용을 검토했어요. 정산 입력에 반영될 수 있습니다.” | “환급 승인 완료” |
 | Host moderation rejected | “인증 검토 결과 정산 입력에서 제외될 수 있어요. 사유와 이력을 확인할 수 있습니다.” | “몰수 / 실패 확정 / 문제 사용자” |
 | Upload success | “이미지가 업로드되었습니다. 인증 제출 처리를 완료해야 합니다.” | “인증 성공” |

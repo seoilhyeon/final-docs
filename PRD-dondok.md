@@ -214,6 +214,8 @@ P1 이후 프로토타입 후보:
   `모집 마감까지 최소 인원이 모이고 예치가 완료되면 미션 시작일에 자동으로 시작됩니다. 모집 마감 전 방장이 크루를 해체하거나 최소 인원이 충족되지 않으면 미션은 시작되지 않고 예치 도딘이 환급됩니다.`
 - 예상 환급금 영역에는 아래 문구를 노출한다.
   `예상 환급금 projection은 현재까지의 인증 결과를 기반으로 계산된 현재 기준 예상입니다. 최종 정산 전까지 변동될 수 있으며, 최종 정산은 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 실행되는 final settlement batch 결과로 확정됩니다.`
+- 인증 피드와 현황 영역에는 아래 의미를 유지한다.
+  `인증 피드는 검토중/인정됨/인정되지 않음 상태의 활동 기록을 투명하게 보여주는 공간입니다. 아직 인증 전 상태는 실제 인증 기록이 아니라 현재 현황 요약이며, 피드 표시나 반응 수가 최종 정산 인정 횟수를 뜻하지 않습니다.`
 - 정산 결과 화면에서 전체 성공 횟수가 `0`인 경우 아래 문구를 노출한다.
   `이번 미션에서는 인정된 성공 기록이 없어, 누군가의 실패가 다른 참여자의 추가 환급으로 이어지지 않도록 원금을 기준으로 정산되었습니다.`
 - 알림 UX에는 아래 문구를 적용한다.
@@ -254,8 +256,8 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 | ---------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | AI 크루 생성 도우미          | 사용자가 미션명/인증 규칙/문구를 쉽게 작성하도록 돕는다.         | Manual fallback 필수. AI 결과는 policy/settlement authority가 아니다.                    |
 | 크루 대표 이미지             | 크루 목록/상세/생성 흐름에서 방의 정체성과 탐색성을 돕는다.       | Display metadata다. lifecycle, settlement, moderation authority가 아니다.                |
-| 인증 피드                    | 인증 로그를 참여자에게 보여준다.                                 | Feed ordering/display는 settlement input을 직접 바꾸지 않는다.                           |
-| 리액션                       | 참여자 간 응원/가벼운 반응을 제공한다.                           | Reaction은 인증 성공/실패나 지분율에 영향 없음.                                          |
+| 인증 피드                    | 검토중/인정됨/인정되지 않음 인증 로그를 append-only activity stream으로 보여준다. | Feed visibility와 feed item count는 settlement recognition이 아니다. 아직 인증 전 상태는 row 없는 current/effective summary다. |
+| 리액션                       | 참여자 간 응원/가벼운 반응을 제공한다.                           | Reaction count는 인정 횟수나 지분율에 영향 없음.                                          |
 | 크루 공지/댓글/공지 리액션   | 채팅 없는 MVP에서 방장 안내와 참여자 반응을 제공한다.             | Communication surface다. mission rule override, certification, settlement, ledger, lifecycle authority가 아니다. |
 | 실시간 현황 / 기여 visibility | 현재 기준 지분율, 상대적 위치, 예상 환급 흐름, 기여도를 보여준다. | Projection/current-basis UX다. final settlement, ledger, payout certainty가 아니다.       |
 | 운영 탭                      | 검토 대기/거절/누락 등 상태를 설명한다.                          | Contextual visibility, not ledger control.                                               |
@@ -514,6 +516,8 @@ Phase 2 후보는 아래와 같다.
 | 예치 / lock                              | 미션 종료 전까지 사용할 수 없게 묶인 상태      | spendable balance에서 분리된 locked amount                                                                           | 결제 취소와 동일 개념 아님                                         | point lock/history                                 | deposit policy           |
 | 환급 / refund                            | 정산 후 돌려받는 포인트/도딘                   | final settlement 결과로 발생하는 point movement                                                                      | 예상 환급금 projection과 다름                                      | final batch, point ledger/history                  | settlement               |
 | 인증 제출 / upload                       | 미션 수행 사진을 올리는 행동                   | server_time과 file signal을 남기는 event                                                                             | 최종 인정과 동일하지 않음                                          | certification record                               | layered trust            |
+| 인증 피드 / feed timeline                | 크루 인증 활동을 보여주는 타임라인              | 실제 mission log가 있는 검토중/인정됨/인정되지 않음 활동 기록                                                        | 정산 인정 횟수, 지분율, 환급 확정 근거 아님                         | feed API                                           | visibility boundary      |
+| 현재 슬롯 / current slot summary         | day/member별 현재 상태 요약                     | latest/effective 상태 하나와 아직 인증 전 synthetic 상태                                                             | append-only feed item이나 persisted mission log와 동일하지 않음      | dashboard/feed projection                          | projection boundary      |
 | 인정 인증 / final certification state    | 최종 정산에 반영되는 인증 상태                 | signal + rule + moderation이 반영된 resolved state                                                                   | raw EXIF/hash 결과와 동일하지 않음                                 | final certification state                          | layered trust            |
 | 예상 환급금 / expected refund projection | 현재까지 기준으로 예상되는 환급 금액           | anxiety reduction과 settlement explanation을 위한 projection 계산 결과                                                | 최종 settlement/refund, 수익, 손익, 실시간 payout certainty와 동일 개념 아님 | dashboard projection                               | projection != settlement |
 | 대시보드 / projection polling            | 현재 상황을 확인하는 화면                      | 주기적 또는 요청 시 계산된 projection                                                                                | final settlement 또는 perfect realtime 아님                        | dashboard response                                 | projection boundary      |
@@ -546,6 +550,8 @@ Phase 2 후보는 아래와 같다.
 
 - realtime projection을 최종 정산금처럼 표현하지 않는다. 현재 기준 값은 “예상 환급금 projection”으로 표기한다.
 - projection을 수익/손익/실시간 상승/타인 실패 기반 상승처럼 표현하지 않는다. “현재 기준 예상”, “최종 정산 전 변동 가능”, “현재 인증 결과 반영”으로 설명한다.
+- feed timeline을 정산 인정 성공 목록처럼 표현하지 않는다. “검토중”, “인정됨”, “인정되지 않음”, “재업로드”, “이전 시도”, “아직 인증 전”처럼 중립적 상태/흐름 표현을 사용한다.
+- `아직 인증 전`은 실제 feed 게시물이 아니라 현재 슬롯 요약이다. 인증 기록 row가 있는 것처럼 표현하지 않는다.
 - 상대 비교를 “1위 수익자”, “실패자”, “누가 돈을 가장 많이 벌었는가”처럼 표현하지 않는다. 필요하면 “기여 구간”, “크루 평균 이상”, “함께 달성한 인증 수”처럼 협력적 진행 표현을 사용한다.
 - EXIF/hash signal 이상을 최종 불인정으로 단정하지 않는다. “review/유예기간 대상이 될 수 있다”로 설명한다.
 - host가 돈을 나누거나 정산한다는 표현을 쓰지 않는다. “방장은 인증 상태를 moderation하고, final batch가 정산한다”로 설명한다.

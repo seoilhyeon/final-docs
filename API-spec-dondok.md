@@ -1159,21 +1159,23 @@ Error:
 
 ## 5.4 인증 피드 / 리액션
 
-이 섹션은 성공 인증을 보여주는 소셜 projection 계약이다. `feed_items[]`와 `day_statuses[]` / `participant_day_slots[]`는 같은 화면에서 함께 쓰일 수 있지만 의미가 다르다.
+이 섹션은 인증 활동 timeline과 현재 상태 projection을 함께 제공하는 계약이다. `feed_items[]`와 `day_statuses[]` / `participant_day_slots[]`는 같은 화면에서 함께 쓰일 수 있지만 의미가 다르다.
 
-- `feed_items[]`는 feed-eligible `MissionLog` 게시물 목록이다. feed-eligible은 `mission_log.certification_status = 'SUCCESS'` 인증 성공 로그만 뜻한다.
-- `day_statuses[]`와 `participant_day_slots[]`는 참여자/일자 표시용 파생 상태다. 값은 `SUCCESS`, `FAILED`, `NOT_SUBMITTED`만 사용한다.
-- 파생 상태는 DB 상태가 아니고 피드 게시물이 아니며 정산 입력도 아니다.
-- feed eligibility는 정산 인정, 환급, 포인트 적립, AI 리포트 입력, `Settlement.status` 또는 크루/참여 생명주기 전이를 의미하지 않는다.
-- Canonical rule: Feed success does NOT guarantee settlement inclusion. `feed_items[].certification_status = 'SUCCESS'`는 UX/social layer 표시 기준이며, 정산 포함 여부는 `MissionLog`, frozen `LOCKED` baseline, resolved certification state 기준의 settlement calculation과 `settlement_item.calculation_reason`이 결정한다.
-- 정산 인정 여부와 최종 성공 횟수는 정산 API와 `settlement_item.calculation_reason`을 기준으로 판단한다.
+- `feed_items[]`는 실제 `MissionLog` row가 존재하는 append-only visible activity stream이다.
+- 기본 반환 상태 집합은 `PENDING_REVIEW`, `SUCCESS`, `FAILED`다.
+- 재업로드나 재검토로 같은 참여자/날짜/cadence slot에 여러 로그가 생겨도 일반 feed timeline에서는 이전 시도까지 visible item으로 남을 수 있다.
+- `day_statuses[]`와 `participant_day_slots[]`는 참여자/일자 표시용 latest/effective summary다. `NOT_SUBMITTED`는 `mission_log` row가 없는 synthetic slot projection이며 feed item이 아니다.
+- Feed visibility는 정산 인정, 환급, 포인트 적립, AI 리포트 입력, `Settlement.status` 또는 크루/참여 생명주기 전이를 의미하지 않는다.
+- Canonical rule: visible feed badge does not guarantee settlement inclusion. 정산 포함 여부는 `MissionLog`, frozen `LOCKED` baseline, resolved certification state 기준의 settlement calculation과 `settlement_item.calculation_reason`, 그리고 `point_history` linkage가 결정한다.
+- Feed item count와 reaction count는 정산 인정 성공 수가 아니다. 최종 인정 여부와 최종 성공 횟수는 정산 API와 `settlement_item.calculation_reason`을 기준으로 판단한다.
 
 ### `GET /api/crews/{crewId}/feed`
 
 역할:
 
-- 방의 인증 성공 피드와 참여자/일자 파생 상태를 함께 조회한다.
-- 성공 인증 원본 게시물과 실패/미제출 표시 상태를 명확히 분리한다.
+- 방의 append-only 인증 활동 feed timeline과 참여자/일자 latest/effective 상태를 함께 조회한다.
+- visible mission-log item, synthetic slot projection, final settlement recognition을 명확히 분리한다.
+- Moderation history API가 audit/detail surface인 반면, 이 API의 feed timeline은 social transparency surface다.
 
 Query:
 
@@ -1181,6 +1183,7 @@ Query:
 | -------- | --------- | ---- | ----------------------------------- |
 | `limit`  | `integer` | N    | feed_items 페이지 크기. 기본 20     |
 | `cursor` | `string`  | N    | feed_items 페이지 커서              |
+| `status` | `string`  | N    | visible mission-log status filter. 생략 시 모든 visible status 반환. `NOT_SUBMITTED`는 feed status가 아니므로 허용하지 않는다 |
 | `from`   | `string`  | N    | 파생 상태 조회 시작일. `YYYY-MM-DD` |
 | `to`     | `string`  | N    | 파생 상태 조회 종료일. `YYYY-MM-DD` |
 
@@ -1191,6 +1194,34 @@ Response `200 OK`:
   "crew_id": 42,
   "feed_items": [
     {
+      "mission_log_id": 9003,
+      "crew_participant_id": 101,
+      "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
+      "nickname": "돈독러",
+      "image_url": "https://cdn.example.com/mission/9003.jpg",
+      "caption": "재업로드 후 다시 검토를 기다리고 있습니다",
+      "server_time": "2026-05-11T07:10:02+09:00",
+      "created_at": "2026-05-11T07:10:02+09:00",
+      "certification_status": "PENDING_REVIEW",
+      "reject_reason_code": null,
+      "reaction_counts": {},
+      "my_reactions": []
+    },
+    {
+      "mission_log_id": 9002,
+      "crew_participant_id": 101,
+      "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
+      "nickname": "돈독러",
+      "image_url": "https://cdn.example.com/mission/9002.jpg",
+      "caption": "이전 시도 기록입니다",
+      "server_time": "2026-05-11T06:30:00+09:00",
+      "created_at": "2026-05-11T06:30:00+09:00",
+      "certification_status": "FAILED",
+      "reject_reason_code": "MISSION_MISMATCH",
+      "reaction_counts": {},
+      "my_reactions": []
+    },
+    {
       "mission_log_id": 9001,
       "crew_participant_id": 101,
       "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
@@ -1200,6 +1231,7 @@ Response `200 OK`:
       "server_time": "2026-05-11T05:58:10+09:00",
       "created_at": "2026-05-11T05:58:10+09:00",
       "certification_status": "SUCCESS",
+      "reject_reason_code": null,
       "reaction_counts": {
         "👏": 2,
         "🔥": 1
@@ -1211,8 +1243,8 @@ Response `200 OK`:
   "day_statuses": [
     {
       "date": "2026-05-11",
-      "status": "SUCCESS",
-      "representative_mission_log_id": 9001
+      "status": "PENDING_REVIEW",
+      "representative_mission_log_id": 9003
     },
     {
       "date": "2026-05-12",
@@ -1225,14 +1257,14 @@ Response `200 OK`:
       "crew_participant_id": 101,
       "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
       "date": "2026-05-11",
-      "status": "SUCCESS",
-      "representative_mission_log_id": 9001
+      "status": "PENDING_REVIEW",
+      "representative_mission_log_id": 9003
     },
     {
       "crew_participant_id": 102,
       "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c908",
       "date": "2026-05-11",
-      "status": "FAILED",
+      "status": "NOT_SUBMITTED",
       "representative_mission_log_id": null
     }
   ]
@@ -1243,19 +1275,18 @@ Error:
 
 - `CREW_NOT_FOUND`
 - `CREW_ACCESS_DENIED`
+- `INVALID_FEED_STATUS_FILTER`
 
 정책:
 
-- `feed_items[]`에는 `mission_log.certification_status = 'SUCCESS'`인 인증 성공 로그만 포함한다.
-- `certification_status = 'FAILED'` 실패 로그와 `certification_status = 'PENDING_REVIEW'` 검수 대기 로그, 미제출일은 `feed_items[]`에 포함하지 않는다.
-- 같은 참여자/같은 날짜에 성공 인증 로그가 여러 개 있으면 endpoint pagination/filtering에서 별도 제한하지 않는 한 raw successful feed post로 모두 남을 수 있다.
-- 참여자/일자 파생 상태 대표 규칙:
-  - 성공 로그가 하나 이상 있으면 `SUCCESS`다.
-  - 대표 성공 로그는 가장 이른 successful `created_at`, 동률이면 가장 낮은 `mission_log.id`다.
-  - 성공 로그가 없고 실패 시도가 하나 이상 있으면 `FAILED`다.
-  - 성공/실패 로그가 모두 없으면 `NOT_SUBMITTED`다.
-- 대표 규칙은 표시/API payload용이다. 원본 성공 피드 게시물을 삭제, 병합, 수정, 숨김 처리하지 않는다.
+- Feed timeline은 실제 `mission_log` row가 있는 인증 활동을 history-preserving append-only stream으로 노출한다.
+- 기본 feed status set은 `PENDING_REVIEW`, `SUCCESS`, `FAILED`다. `status` query가 있으면 이 집합 안에서만 필터링한다.
+- `NOT_SUBMITTED`는 미제출 상태를 설명하는 synthetic day/member slot projection이며 `mission_log` row를 만들거나 feed item으로 반환하지 않는다.
+- 같은 참여자/같은 날짜/cadence slot에 재업로드나 상태 변화로 여러 로그가 생기면, 이전 `FAILED`/`PENDING_REVIEW` item도 일반 feed에서 visible item으로 유지할 수 있다. 삭제/숨김/overwrite로 정산 입력을 바꾸지 않는다.
+- 참여자/일자 summary 대표 규칙은 latest/effective 상태 하나를 선택한다. 정확한 tie-break는 구현 단계에서 deterministic하게 고정하되, feed item count나 reaction count를 정산 인정 횟수처럼 사용하면 안 된다.
+- Slot/dashboard/projection은 current-focused summary이고, feed timeline은 history-preserving activity stream이다.
 - `caption`은 feed item의 display/replay evidence로 포함될 수 있으며 단독 인증/정산 기준이 아니다.
+- `reject_reason_code`는 정책에 따라 participant-facing reason category로 노출할 수 있지만, internal memo text는 feed 응답에 포함하지 않는다.
 - reaction counts는 `mission_log_reaction`에서 파생한다. `mission_log`에 저장 카운터를 두거나 갱신하지 않는다. `reaction_counts`는 emoji token을 key로 하는 동적 map이다.
 - 이 API의 상태 projection은 정산 인정 횟수, 환급액, 포인트 잔액, AI 리포트 상태, lifecycle status의 source of truth가 아니다.
 
@@ -1263,7 +1294,7 @@ Error:
 
 역할:
 
-- 현재 로그인한 회원의 해당 인증 성공 게시물 리액션을 emoji token 단위로 멱등 toggle/create한다.
+- 현재 로그인한 회원의 MVP 리액션 허용 대상 게시물 리액션을 emoji token 단위로 멱등 toggle/create한다.
 
 Request:
 
@@ -1298,7 +1329,7 @@ Error:
 
 정책:
 
-- 리액션 대상은 `mission_log.certification_status = 'SUCCESS'`인 feed-eligible `MissionLog`로 제한한다.
+- MVP 리액션 대상은 `mission_log.certification_status = 'SUCCESS'`인 `MissionLog`로 제한한다. Feed timeline에는 다른 visible 상태도 포함될 수 있지만, 리액션 허용 범위 확장은 별도 제품 결정이다.
 - `POST`는 `(mission_log_id, member_id, reaction_type)` 기준 멱등 create/toggle이다. 같은 emoji token이 이미 있으면 동일 token 단위로 idempotent하게 처리하고, 다른 emoji token은 별도 row로 공존할 수 있다.
 - 구현은 `(mission_log_id, member_id, reaction_type)` unique constraint 기반의 DB-level idempotency를 MUST로 한다. SQL 문법은 실제 MySQL 8.0 stack에 맞춘다.
 - 동일 `(mission_log_id, member_id, reaction_type)`에 대한 동시 중복 요청은 DB unique conflict 때문에 API 에러가 되어서는 안 되며, 최종 상태는 해당 token 1개 존재로 수렴해야 한다.
@@ -1311,7 +1342,7 @@ Error:
 
 역할:
 
-- 현재 로그인한 회원의 해당 인증 성공 게시물에서 지정한 emoji token 리액션을 멱등 삭제한다.
+- 현재 로그인한 회원의 MVP 리액션 허용 대상 게시물에서 지정한 emoji token 리액션을 멱등 삭제한다.
 
 Query:
 
@@ -1442,14 +1473,14 @@ Error:
 #### 계산 규칙
 
 - Dashboard는 deterministic estimated projection이다. 같은 source 입력과 입력 상한을 사용하면 BE/FE/QA가 같은 projection 결과를 기대할 수 있어야 한다.
-- `my_success_count`는 raw `mission_log.certification_status = 'SUCCESS'` 성공 로그 수다. 정산 인정 성공 수가 아니다.
+- `my_success_count`는 latest/effective slot summary 기준의 현재 성공 표시 수다. 일반 feed item 수나 정산 인정 성공 수가 아니다.
 - `my_recognized_success_count_estimated`는 현재 시점에서 정산 규칙을 가능한 범위로 반영한 추정 인정 성공 수다.
 - 추정 인정 성공 수는 `MissionLog.server_time`을 `Asia/Seoul` 기준 날짜/요일/주차로 해석해 계산한다.
-- projection 후보 로그는 `mission_log.certification_status = 'SUCCESS'`이고, `crew.activated_at <= MissionLog.server_time <= projection_input_until_at`을 만족해야 한다. `activated_at`이 `null`이면 post-activation projection을 계산하지 않는다.
+- projection 후보는 latest/effective slot summary에서 인정 가능한 성공 상태를 가진 로그이고, `crew.activated_at <= MissionLog.server_time <= projection_input_until_at`을 만족해야 한다. `activated_at`이 `null`이면 post-activation projection을 계산하지 않는다.
   - `LIVE`에서는 `projection_input_until_at = min(응답 생성 시각, crew.end_at)`이다.
   - `CLOSED_ESTIMATE`에서는 `projection_input_until_at = crew.end_at`이며, 이는 query-time current-basis estimate의 입력 상한일 뿐 최종 정산 snapshot이 아니다.
   - `withdrawn_at` 기준은 brownfield/deferred reference이며 MVP Dashboard projection에서 `LOCKED` frozen baseline을 소급 변경하지 않는다.
-- 대표 success 선택은 모든 frequency projection에서 동일하게 `MissionLog.server_time ASC`, 동률이면 `MissionLog.id ASC` 순서를 사용한다.
+- 대표 success 선택은 latest/effective slot summary 안에서 모든 frequency projection에 동일하게 적용한다. 후보가 여러 개면 `MissionLog.server_time ASC`, 동률이면 `MissionLog.id ASC` 순서를 사용한다.
 - `DAILY`는 같은 KST date의 첫 success만 인정하고 나머지 success는 duplicate로 제외한다.
 - `SPECIFIC_DAYS`는 `mission_schedule_day`에 포함된 KST weekday의 success만 후보로 삼고, valid KST date별 첫 success만 인정한다.
 - `WEEKLY_N`은 Phase 2/deferred cadence다. MVP Dashboard projection active contract에서는 계산하지 않는다.
@@ -2253,12 +2284,12 @@ RUNNING
 - `reserved_balance`, `locked_balance`, `total_balance`는 UX 표시용이며, 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단 기준으로 사용하면 안 된다.
 - 탈퇴 버튼/withdrawal UX는 MVP active contract가 아니라 brownfield-deferred로 취급한다. 노출하더라도 frozen baseline, final settlement, point ledger를 직접 변경한다고 안내하면 안 된다.
 - FE는 `certification_status`를 인증 요청의 resolved certification state로만 사용해야 하고, 최종 정산 인정 여부 판단 기준으로 사용하면 안 된다.
-- 피드 화면에서 `feed_items[]`는 성공 인증 게시물이고, `day_statuses[]` / `participant_day_slots[]`는 `SUCCESS`, `FAILED`, `NOT_SUBMITTED` 표시용 projection이다. 둘을 정산 결과나 포인트 원장으로 해석하면 안 된다.
+- 피드 화면에서 `feed_items[]`는 실제 `mission_log` row가 있는 append-only 인증 활동 timeline이고, `day_statuses[]` / `participant_day_slots[]`는 latest/effective slot projection이다. `NOT_SUBMITTED`는 row 없는 synthetic slot이고 feed item이 아니다. 둘을 정산 결과나 포인트 원장으로 해석하면 안 된다.
 - 리액션은 `mission_log_reaction` 기반 social metadata이며, `reaction_counts`는 파생값이다. FE는 리액션이 인증 성공 여부, 정산 인정, 환급, 포인트, AI 리포트 상태를 바꾼다고 표시하면 안 된다.
 - 인증 제출 직후에는 `certification_status`와 `failure_reason`만 신뢰한다. 최종 인정 횟수는 정산 전까지 확정되지 않는다.
 - 인증 직후에는 성공으로 표시할 수 있지만, 최종 결과 화면의 인정/미인정 표시는 정산 결과 기준으로 별도 표시해야 한다.
 - 인증 기록 화면과 정산 결과 화면은 서로 다른 기준을 사용해야 한다.
-- 인증 기록 화면은 `certification_status` 기준으로 `검수 대기/인증 성공/인증 실패`만 표시한다.
+- 인증 기록 화면은 `certification_status` 기준으로 `검토중/인정됨/인정되지 않음`처럼 중립적으로 표시한다.
 - 정산 결과 화면은 `settlement_item.calculation_reason` 기준으로 `최종 인정/미인정`을 표시한다.
 - 두 기준을 혼용하면 잘못된 UX가 발생하므로 반드시 분리해서 사용해야 한다.
 - 최종 정산 인정 시각 판단은 `server_time` 기준이며, `exif_taken_at`은 촬영 시각 검증용 보조 정보로만 사용해야 한다.

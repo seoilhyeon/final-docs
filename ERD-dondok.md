@@ -77,7 +77,7 @@
 | `mission_rule`         | 인증 주기 규칙                      | `crew 1:1 mission_rule`                                                   |
 | `mission_schedule_day` | `SPECIFIC_DAYS` 요일 규칙           | `mission_rule 1:N mission_schedule_day`                                   |
 | `mission_log`          | 미션 인증 원본 로그                 | `crew_participant 1:N mission_log`                                        |
-| `mission_log_reaction` | 인증 성공 피드 리액션               | `mission_log 1:N mission_log_reaction`, `member 1:N mission_log_reaction` |
+| `mission_log_reaction` | 인증 인정 상태 게시물 리액션       | `mission_log 1:N mission_log_reaction`, `member 1:N mission_log_reaction` |
 | `settlement`           | 방 종료 후 정산 헤더                | `crew 1:N settlement`                                                     |
 | `settlement_item`      | 참여자별 정산 스냅샷과 결과         | `settlement 1:N settlement_item`, `crew_participant 1:N settlement_item`  |
 
@@ -660,6 +660,8 @@ Unique / Index:
 
 - 인증 업로드의 원본 로그를 저장한다.
 - `SUCCEEDED` 전 최종 정산 계산과 `SUCCEEDED` 후 replay/audit 검증의 직접 입력값이다.
+- `PENDING_REVIEW`, `SUCCESS`, `FAILED` row는 feed timeline에서 visible activity item이 될 수 있다.
+- Feed visibility는 social transparency surface이며 settlement recognition authority가 아니다.
 
 주요 컬럼:
 
@@ -717,6 +719,9 @@ Unique / Index:
 - `DAILY` 중복, `SPECIFIC_DAYS` 제외, `WEEKLY_N` 상한 제외 같은 최종 인정 제외 근거는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`에 남긴다.
 - 조회 시점 성공 표시와 최종 인정 횟수는 다를 수 있으므로, 최종 결과는 `settlement_item`에서 설명한다.
 - `certification_status`는 인증 피드 badge, projection/dashboard, 알림 입력에서 사용하는 resolved certification state다. (`PENDING_REVIEW`: 업로드 직후 검수/판정 대기, `SUCCESS`: 인증 인정, `FAILED`: 인정 불가.) EXIF/hash raw signal이나 host moderation `decision_type`/`reject_reason_code`와 같은 의미 axis로 사용하지 않으며, settlement 인정 횟수 계산은 `calculation_reason`을 통해 별도 표현한다.
+- 일반 feed timeline은 history-preserving append-only activity stream이다. 같은 참여자/날짜/cadence slot에서 재업로드나 상태 변화로 여러 `mission_log` row가 생기면 이전 시도도 visible item으로 유지할 수 있으며, 기존 row를 overwrite하거나 synthetic row로 대체하지 않는다.
+- `NOT_SUBMITTED`는 `mission_log` row가 없는 day/member slot projection이다. 미제출을 표현하기 위해 persisted `mission_log` row, feed status 컬럼, 별도 feed table을 만들지 않는다.
+- Day/member slot, dashboard, projection은 latest/effective 상태 하나를 사용하는 current-focused summary다. Feed item count와 reaction count는 recognized success count가 아니며, 최종 정산 인정 여부는 `settlement_item.calculation_reason`과 연결된 `point_history`로 설명한다.
 - `failure_reason`(system/timing axis)과 `reject_reason_code`(host moderation rejection axis)는 서로 다른 의미 axis다. 한쪽 enum을 다른 쪽에 재사용하지 않는다.
 - `moderator_id`, `moderator_decided_at`, `decision_type`, `reject_reason_code`, `reject_memo`는 host moderation input authority의 흔적이며 settlement/lifecycle/ledger authority를 가지지 않는다. 후속 moderation 변경은 기존 `mission_log` row의 latest-effective moderation 컬럼을 UPDATE하고, 별도 `moderation_history` row를 INSERT해 append-only audit trail을 보존한다.
 - `AUTO_APPROVE`/`AUTO_REJECT`는 certification-axis system moderation outcome일 뿐 client input, AI authority, admin/support/dispute/override state, settlement authority, ledger authority가 아니다.
@@ -726,7 +731,7 @@ Unique / Index:
 
 역할:
 
-- 인증 성공 피드 게시물에 대한 회원별 리액션을 저장한다.
+- MVP에서 인증 인정 상태 게시물에 대한 회원별 리액션을 저장한다.
 - 소셜 메타데이터 전용 테이블이며 정산, 포인트, 환급, AI, 상태 생명주기의 입력값이 아니다.
 
 주요 컬럼:
@@ -761,7 +766,7 @@ Unique / Index:
 
 주의사항:
 
-- 리액션은 `mission_log.certification_status = 'SUCCESS'`인 feed-eligible 로그에만 허용한다. 이 제약은 API/애플리케이션 계층에서 검증한다.
+- 리액션은 MVP에서 `mission_log.certification_status = 'SUCCESS'`인 로그에만 허용한다. Feed timeline은 다른 visible 상태도 노출할 수 있지만, 리액션 허용 범위 확장은 별도 제품 결정이다. 이 제약은 API/애플리케이션 계층에서 검증한다.
 - 한 회원은 한 `mission_log`에 여러 `reaction_type`을 남길 수 있지만, 동일 `(mission_log_id, member_id, reaction_type)`은 한 번만 허용한다. 토글/idempotency/delete 기준은 같은 저장 문자열 단위다.
 - 리액션 수는 이 테이블에서 파생 계산한다. `mission_log`에 `reaction_count` 같은 저장 카운터를 추가하지 않는다.
 - 리액션 생성, 수정, 삭제는 `mission_log.certification_status`, `failure_reason`, 이미지, 서버 시간 등 원본 로그를 변경하지 않는다.
@@ -1017,7 +1022,7 @@ projection 예시(이름은 logical view label이며 실제 DB 오브젝트가 �
 | projection (logical)     | 파생 필드 예시                                                                                             | 입력 (source of truth)                                                   | 비고                                                                                                                 |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
 | `member_profile_view`    | `is_host_ever`, `hosted_crew_count`                                                                        | `crew.host_member_id` 이력                                               | 호스트 권한/뱃지/카운터 source-of-truth 아님                                                                         |
-| `crew_daily_status_view` | `success_member_count`, `failed_member_count`, `pending_member_count`, `success_members`, `failed_members` | `mission_log.certification_status`, `crew_participant`                   | 일자별 인증 피드/대시보드 표시용. 정산 인정 횟수와 동일 의미 axis 아님                                               |
+| `crew_daily_status_view` | `success_member_count`, `failed_member_count`, `pending_member_count`, `not_submitted_member_count`, `success_members`, `failed_members` | latest/effective `mission_log.certification_status`, `crew_participant`  | 일자별 slot/dashboard 표시용. `NOT_SUBMITTED`는 row 없는 synthetic projection이며 정산 인정 횟수와 동일 의미 axis 아님 |
 | `crew_projection_view`   | `current_success_count`, `current_share_ratio`, `expected_refund_amount`, `current_rank`                   | `mission_log`, `crew_participant.deposit_amount`, `crew`, `mission_rule` | 정산 전 UX 표시용 estimate. 현재 환급 가능 금액/분쟁 처리 기준 아님                                                  |
 | `settlement_result_view` | `final_rank`                                                                                               | `settlement_item`                                                        | non-payout 표시/설명 순위. `tie_break_rank`/`draw_key_snapshot` 기반 logical projection이며 지급 금액 authority 아님 |
 
@@ -1030,6 +1035,7 @@ projection 운영 원칙:
   - projection 전용 snapshot 테이블
   - 이유: MVP에서는 조회 projection으로 처리하고, lifecycle/replay/recovery 정합성 부담을 늘리지 않기 위함이다.
 - projection이 보여주는 값과 정산/원장 결과가 다를 수 있다. 최종 결과는 항상 `settlement`/`settlement_item`/`point_history`에서 설명한다.
+- Feed timeline은 visible activity stream이고, `crew_daily_status_view` 같은 logical projection은 latest/effective summary다. Projection은 feed item 수를 성공 수로 재해석하지 않는다.
 
 ## 7. Mermaid ERD
 
