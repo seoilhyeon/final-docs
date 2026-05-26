@@ -330,11 +330,13 @@ Response `201 Created`:
 Error:
 
 - `EMAIL_ALREADY_EXISTS`
+- `NICKNAME_ALREADY_EXISTS`
 - `VALIDATION_ERROR`
 
 정책:
 
 - `email`은 unique다.
+- `nickname`은 `member.nickname` unique 제약을 따른다.
 - 가입 직후 자동 로그인 여부는 본 명세에서 고정하지 않는다. MVP 기본 흐름은 가입 후 로그인이다.
 
 ### `POST /api/auth/login`
@@ -492,11 +494,13 @@ Response `200 OK`:
 Error:
 
 - `VALIDATION_ERROR`
+- `NICKNAME_ALREADY_EXISTS`
 - `PROFILE_IMAGE_NOT_FOUND`
 
 정책:
 
 - 요청에는 `nickname`, `profile_image_s3_key`, `status_message` 중 하나 이상이 있어야 한다.
+- `nickname` 변경 시 회원 전체에서 중복되면 `NICKNAME_ALREADY_EXISTS`로 거절한다.
 - 프로필 이미지는 별도 presigned upload 흐름으로 먼저 업로드된 S3 key만 참조한다.
 - 수정 범위는 닉네임, 프로필 이미지, 상태 메시지로 한정한다.
 - `is_host_ever`, `hosted_crew_count`는 `member` 저장 컬럼이 아닌 profile projection이라 이 API로 수정할 수 없다. 응답에는 호스트 이력에서 파생한 현재 값을 노출한다.
@@ -2446,30 +2450,32 @@ Error:
 
 ## 5.9 알림 / Android FCM / Inbox / SSE drift
 
-알림 API의 MVP 기준은 Android-first FCM이다. FCM은 delivery transport이고, notification은 best-effort re-entry hint다. 알림 payload, inbox list item, read/unread state, delivery attempt success/failure는 crew lifecycle, certification, moderation, settlement, point ledger/history의 canonical state authority가 아니다.
+알림 API의 MVP 기준은 Android-first FCM re-entry semantics다. FCM은 delivery transport이고, notification은 best-effort re-entry hint다. 알림 payload, inbox list item, read/unread state, delivery attempt success/failure는 crew lifecycle, certification, moderation, settlement, point ledger/history의 canonical state authority가 아니다.
+
+이 절의 path/DTO/table-like 표현은 notification 구현을 시작하기 전 의미 경계를 맞추기 위한 후보 surface다. Active MVP API commitment, migration-ready schema, FCM provider implementation detail, DB enum freeze로 해석하지 않는다.
 
 ### MVP boundary
 
 | 범위 | MVP 판단 | 권한 경계 |
 | ---- | -------- | --------- |
-| FCM token/device lifecycle | 포함 후보 | token/device transport state만 변경한다 |
+| FCM token/device lifecycle | 구현 후보 / semantic freeze 제외 | token/device transport state만 다룰 수 있는 후속 구현 후보이며, 이 freeze에서 token refresh·invalid-token·provider retry 정책을 정하지 않는다 |
 | notification inbox/list/read | 얇은 후보 | UX hint/read affordance 후보일 뿐 backend persistence 기본값이 아니다. Frontend local state/browser permission으로 충분한 상태는 서버 저장으로 승격하지 않는다 |
 | unread count | 얇은 후보 | badge 표시용 UX count 후보이며 unresolved settlement/certification task가 아니다. 필요 시 클라이언트 상태로 처리할 수 있다 |
-| delivery attempt observability | 포함 후보 | FCM send attempt 관측/transport retry용이며 settlement evidence가 아니다 |
+| delivery attempt observability | deferred operational hardening 후보 | FCM send attempt 관측/transport retry용 후속 후보이며 MVP semantic freeze 요구사항이나 settlement evidence가 아니다 |
 | SSE realtime stream | Phase 2/deferred drift 후보 | Android-first FCM MVP의 source가 아니며 realtime reliability 보장은 deferred다 |
 | notification preference matrix | Phase 2 | 채널/이벤트별 수신 설정 freeze 대상 아님 |
 | notification template CMS/table | Phase 2 | 문구 CMS/table freeze 대상 아님 |
 | campaign/broadcast/advanced analytics | Phase 2 | 운영/마케팅 자동화는 MVP 밖 |
 
-### FCM token/device lifecycle 후보
+### FCM token/device lifecycle 구현 후보 / semantic freeze 제외
 
-> Path naming은 후보이며, ERD/API propagation 단계에서 세부 스키마와 identifier 이름을 premature freeze하지 않는다.
+> Path naming은 후속 구현 후보이며, 이 semantic propagation pass에서 세부 스키마, identifier 이름, token refresh, invalid-token handling, provider retry 정책을 freeze하지 않는다.
 
 | Method | Candidate path | 역할 |
 | ------ | -------------- | ---- |
-| `POST` | `/api/notification-devices` | 현재 인증 사용자의 Android FCM token/device 등록 |
-| `PATCH` | `/api/notification-devices/{deviceId}` | token refresh, app version/platform metadata, enabled/disabled 상태 갱신 |
-| `DELETE` | `/api/notification-devices/{deviceId}` | logout, uninstall signal, invalid token 처리에 따른 token/device 비활성화 |
+| `POST` | `/api/notification-devices` | 현재 인증 사용자의 Android push 재진입 credential 등록 후보 |
+| `PATCH` | `/api/notification-devices/{deviceId}` | 후속 구현에서 필요한 credential metadata/enabled 상태 갱신 후보 |
+| `DELETE` | `/api/notification-devices/{deviceId}` | 현재 사용자 credential 비활성화 후보 |
 
 Request 후보:
 
@@ -2485,12 +2491,12 @@ Request 후보:
 Policy:
 
 - 서버는 현재 인증 사용자(JWT `sub = member.uuid`)의 token/device만 등록하거나 갱신한다. `email`이나 DB 내부 Long `member.id`를 routing identity로 사용하지 않는다.
-- invalid token, token refresh, deactivate는 notification device/token 상태만 변경한다. crew lifecycle, certification, moderation, settlement, point ledger/history를 변경하지 않는다.
+- Credential 등록/갱신/비활성화가 구현되더라도 notification transport 상태만 변경한다. crew lifecycle, certification, moderation, settlement, point ledger/history를 변경하지 않는다.
 - FCM token은 delivery credential에 가까운 민감 데이터로 취급하고, public response에서 불필요하게 재노출하지 않는다.
 
 ### Notification inbox/list/read 후보
 
-> Thin notification 전략에서는 이 surface가 backend persistence 기본값이 아니다. Frontend local state/browser permission과 deep-link refetch로 충분하면 서버 저장 계약으로 승격하지 않는다.
+> Thin notification 전략에서는 이 surface가 backend persistence 기본값이 아니다. 아래 path/response shape는 candidate surface이며 active MVP API commitment가 아니다. Frontend local state/browser permission과 deep-link refetch로 충분하면 서버 저장 계약으로 승격하지 않는다.
 
 | Method | Candidate path | 역할 |
 | ------ | -------------- | ---- |
@@ -2504,7 +2510,7 @@ Response item 후보:
 ```json
 {
   "notification_id": "uuid-or-id",
-  "event_type": "MISSION_LOG_VERIFICATION_RESULT",
+  "event_type": "MISSION_LOG_APPROVED",
   "resource_type": "mission_log",
   "resource_id": "1201",
   "deep_link": "dondok://crews/42/mission-logs/1201",
@@ -2520,14 +2526,14 @@ Field policy:
 | 필드 | 설명 |
 | ---- | ---- |
 | `notification_id` | inbox/read UX 상태 처리를 위한 알림 식별자. 도메인 aggregate id가 아니다 |
-| `event_type` | 클라이언트 반응을 결정하는 notification event catalog 후보. DB strict enum freeze가 아니다 |
+| `event_type` | 클라이언트 라우팅을 돕는 notification event catalog 후보. App routing vocabulary 후보일 뿐 DB strict enum, audit event catalog, API freeze가 아니다 |
 | `resource_type` | refetch 대상 canonical resource 종류 |
 | `resource_id` | refetch/deep-link route에 사용할 resource 식별자 |
 | `deep_link` | 클릭 후 이동할 client route. 이동 직후 canonical API refetch가 필요하다 |
 | `occurred_at` | 알림 대상 product event 발생 시각 후보. 정산/원장 발생 시각 source of truth가 아니다 |
 | `display_text` | 사용자 표시 문구. 클라이언트 분기 조건이나 payout/certification proof로 사용하지 않는다 |
 | `requires_refetch` | MVP에서는 항상 `true`로 취급한다 |
-| `read_at` | UX read state. audit history나 미해결 domain task 상태가 아니다 |
+| `read_at` | UX read state. persisted read state를 둔다면 nullable `read_at`만 사용하며 status enum을 두지 않는다. audit history나 미해결 domain task 상태가 아니다 |
 
 Click/refetch contract:
 
@@ -2538,40 +2544,47 @@ Click/refetch contract:
 
 ### Daily mission result notification projection
 
-`MISSION_LOG_VERIFICATION_RESULT`, `DASHBOARD_PROJECTION_UPDATED` 등 일일 결과 알림 문구 후보:
+`MISSION_LOG_APPROVED`, `MISSION_LOG_REJECTED`, `DASHBOARD_PROJECTION_UPDATED` 등 일일 결과/진행 알림 문구 후보:
 
-> `[크루명][날짜] 현재 인증 결과가 반영되었습니다. 현재 기준 예상 환급금은 [금액]도딘이며 최종 정산 전까지 변동될 수 있습니다.`
+> `[크루명][날짜] 현재 기준 진행 상황이 업데이트되었습니다. 앱에서 최신 상태를 확인하세요.`
 
-- 문구에 인터폴레이트되는 `crewTitle`, `missionDate`, `certificationStatus`, `successMemberCount`, `failedMemberCount`, `pendingMemberCount`, `expectedRefundAmount`, `expectedRefundDelta`는 모두 알림 생성 시점 projection이며 저장 컬럼이 아니다.
-- `crewTitle`은 `crew.title` 현재 값이고, `missionDate`는 `Asia/Seoul` 기준 KST date다.
-- `certificationStatus`는 알림 대상 `MissionLog`의 resolved `certification_status`(`PENDING_REVIEW`/`SUCCESS`/`FAILED`)다.
-- `successMemberCount`, `failedMemberCount`, `pendingMemberCount`는 해당 `missionDate`에 대한 `mission_log` × `crew_participant` projection이며 dashboard projection과 동일 source/current-basis 규칙을 따른다.
-- `expectedRefundAmount`는 알림 대상 참여자의 `dashboard.my_expected_refund_amount`와 동일한 current-basis projection이다. `expectedRefundDelta`는 직전 알림 발송 시점 대비 변화 hint이며 ledger/settlement authority가 아니다.
+- 알림 문구와 payload/list item에는 최종 환급금, 확정 수익/손익, 타인의 실패로 인한 증가, authoritative certification/settlement/ledger truth를 직접 싣지 않는다.
+- `crewTitle`은 표시 보조값이고, `missionDate`는 `Asia/Seoul` 기준 KST date 후보다. 이 값들은 route/refetch context일 뿐 저장 컬럼이나 canonical truth가 아니다.
+- 인증 결과 알림은 canonical resolved certification state가 이미 반영된 뒤 보내는 re-entry hint다. EXIF/hash/risk signal만으로 “자동 실패”나 “부정행위 확정”처럼 표현하지 않는다.
+- 예상 환급/projection 변화는 current-basis dashboard refetch 후 앱 화면에서 설명한다. Push/list text는 금액·delta·상승·추가 수익 framing을 기본값으로 삼지 않는다.
 - 알림은 hint/deep-link이고 canonical state가 아니다. 알림 payload는 stale일 수 있고, 알림 클릭/진입 시 클라이언트는 `deep_link`로 이동한 뒤 dashboard / settlement / mission-log canonical API를 refetch해야 한다.
 - 알림 발송 성공/실패는 `certification_status`, `Settlement.status`, `point_history` 상태를 변경하지 않는다.
 
-### Delivery attempt observability 후보
+### Delivery attempt observability deferred operational hardening 후보
 
-- `notification_delivery_attempt` 또는 동등한 내부 log는 FCM send attempt, provider response, invalid token, bounded transport retry 관측용 후보다.
-- delivery attempt failure는 notification transport failure일 뿐 domain failure가 아니다. settlement retry, replay, correction, payout mutation trigger로 사용하지 않는다.
+- `notification_delivery_attempt` 또는 동등한 내부 log는 MVP semantic freeze 요구사항이 아니라 후속 operational hardening 후보로만 둔다.
+- Delivery attempt failure는 notification transport failure일 뿐 domain failure가 아니다. settlement retry, replay, correction, payout mutation trigger로 사용하지 않는다.
 - 동일 event에 대한 중복 알림은 클라이언트와 서버 모두 idempotent하게 처리한다. 중복 알림이 중복 정산/중복 ledger entry를 만들면 안 된다.
 
 ### Event taxonomy 후보
 
 | `event_type` 후보 | 설명 | Refetch target 예시 |
 | ----------------- | ---- | ------------------ |
-| `CREW_APPLICATION_CREATED` | 가입 신청 발생 | crew applications / host review API |
-| `CREW_APPLICATION_DECIDED` | 가입 승인/거절 결과 | crew participant/application API |
-| `CREW_NOTICE_CREATED` | 새 공지/댓글 등 engagement re-entry | crew notice API |
+| `CREW_APPLICATION_SUBMITTED` | 가입 신청 발생 | crew applications / host review API |
+| `CREW_APPLICATION_CANCELLED` | 가입 신청 철회 | crew application + points/reserve API |
+| `CREW_APPLICATION_APPROVED` | 가입 승인 결과 | crew participant/application API |
+| `CREW_APPLICATION_REJECTED` | 가입 거절 결과 | crew participant/application + points/reserve API |
+| `CREW_NOTICE_CREATED` | 새 공지 engagement re-entry | crew notice API |
+| `CREW_NOTICE_COMMENT_CREATED` | 공지 댓글 engagement re-entry | notice/comment API |
+| `CREW_ENDED_SOON` | 크루 종료 예정 reminder | crew dashboard API |
+| `CREW_CANCELLED` | 크루 해체 hint | crew / participant / points API |
 | `MISSION_CERTIFICATION_DUE_SOON` | 인증 마감 reminder | crew dashboard / mission logs API |
-| `MISSION_LOG_UPLOADED` | 방장 검수 대상 인증 업로드 | mission log review API |
-| `MISSION_LOG_VERIFICATION_RESULT` | 인증 결과 반영 hint | mission log detail / dashboard API |
+| `MISSION_LOG_SUBMITTED` | 인증 업로드/제출 hint | mission log API |
+| `MISSION_LOG_REVIEW_REQUESTED` | 방장 검수 대상 인증 업로드 | mission log review API |
+| `MISSION_LOG_REVIEW_PENDING` | 미검토 인증 reminder | host review surface |
+| `MISSION_LOG_APPROVED` | 인증 인정 결과 hint | mission log detail / dashboard API |
+| `MISSION_LOG_REJECTED` | 인증 반려 결과 hint | mission log detail / dashboard API |
 | `DASHBOARD_PROJECTION_UPDATED` | 현재 기준 projection 요약 변화 | crew dashboard API |
-| `SETTLEMENT_RESULT_READY` | 정산 결과 조회 가능 | crew settlement / settlement detail API |
-| `POINT_HISTORY_UPDATED` | 포인트 내역 반영 hint | points/history API |
-| `REACTION_CREATED` | 리액션 engagement hint | feed / mission log API |
+| `SETTLEMENT_COMPLETED` | 정산 결과 조회 가능 | crew settlement / settlement detail API |
+| `POINT_REFUND_COMPLETED` | 포인트 환급 반영 hint | points/history API |
+| `MISSION_LOG_REACTION_CREATED` | 리액션 engagement hint | feed / mission log API |
 
-이 taxonomy는 notification routing 후보이며 DB enum이나 authoritative audit event catalog가 아니다. 새 event는 canonical REST API로 refetch 가능한 product event에만 추가한다.
+이 taxonomy는 notification app routing vocabulary 후보이며 DB enum, authoritative audit event catalog, active API freeze가 아니다. 새 event는 canonical REST API로 refetch 가능한 product event에만 추가한다.
 
 ### `GET /api/notifications/stream` — Phase 2/deferred SSE drift 후보
 

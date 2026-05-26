@@ -85,19 +85,19 @@
 
 | 테이블명                                       | 역할                                              | 포함 판단                                                                                                                                   |
 | ---------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `notification_device` / `push_token` 후보      | Android-first FCM token/device lifecycle 지원     | MVP notification transport 후보. 토큰 등록/갱신/비활성화 상태만 다루며 crew lifecycle, 인증, 검수, 정산, 포인트 원장 상태를 변경하지 않는다 |
+| `notification_device` / `push_token` 후보      | Android-first FCM credential lifecycle 지원 후보  | 후속 구현 후보. 이 semantic freeze에서 token refresh, invalid-token handling, provider retry 정책을 정하지 않으며 crew lifecycle, 인증, 검수, 정산, 포인트 원장 상태를 변경하지 않는다 |
 | `notification_event` / `notification_log` 후보 | 알림 inbox/read UX hint history 지원              | Thin notification 전략에서 필요한 경우만 검토하는 후보. Frontend local/browser state로 충분하면 backend persistence로 승격하지 않으며, canonical history/audit truth가 아니다 |
-| `notification_delivery_attempt` 후보           | FCM delivery attempt 관측 및 transport retry 지원 | MVP 운영 관측 후보. delivery success/failure/read 여부는 도메인 성공/실패나 settlement retry/replay/correction의 근거가 아니다              |
+| `notification_delivery_attempt` 후보           | FCM delivery attempt 관측 및 transport retry 지원 | Deferred operational hardening 후보. MVP semantic freeze 요구사항이 아니며 delivery success/failure/read 여부는 도메인 성공/실패나 settlement retry/replay/correction의 근거가 아니다              |
 | `notification_preference` 후보                 | 채널/이벤트별 수신 설정                           | Phase 2 deferred. MVP에서는 세부 preference matrix를 schema로 freeze하지 않는다                                                             |
 | `notification_template` 후보                   | 알림 문구/template 관리                           | Phase 2 deferred. MVP에서는 template CMS/table을 schema로 freeze하지 않는다                                                                 |
 
 ### 2.3 Notification / FCM candidate boundary
 
 - ERD의 notification 후보 엔티티는 Android-first FCM delivery와 inbox/read UX가 backend 저장을 실제로 필요로 할 때만 검토하는 보조 persistence 후보이며, thin notification의 기본값은 hint/deep-link/transport다. 결제/정산/포인트/인증/검수의 새 authority가 아니다.
-- `notification_device` 또는 `push_token`은 authenticated member의 FCM token/device lifecycle만 표현한다. invalid token, refresh, deactivate는 token/device 상태에만 영향을 주며 참여/인증/정산/원장 상태를 변경하지 않는다.
-- `notification_event` 또는 `notification_log`는 사용자가 놓친 알림을 다시 볼 수 있게 하는 UX hint history가 꼭 필요할 때의 후보일 뿐, MVP Core persistence default나 audit-grade canonical domain history가 아니다. 읽음/미읽음은 사용자 UX 상태이며 미해결 정산·인증·검수 task를 뜻하지 않는다.
-- `notification_delivery_attempt`는 FCM send attempt, provider response, bounded transport retry 관측 후보로만 둔다. 실패/재시도는 settlement retry, replay, correction, payout mutation과 분리한다.
-- 알림 payload/list item에 필요한 canonical refetch metadata 후보는 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 수준으로 제한한다. authoritative payout/certification/ledger snapshot은 포함하지 않는다.
+- `notification_device` 또는 `push_token`은 후속 구현에서 authenticated member의 FCM credential lifecycle 저장이 필요할 때만 검토한다. 이 semantic freeze에서 token refresh, invalid-token handling, provider retry 정책을 정하지 않으며 참여/인증/정산/원장 상태를 변경하지 않는다.
+- `notification_event` 또는 `notification_log`는 사용자가 놓친 알림을 다시 볼 수 있게 하는 UX hint history가 꼭 필요할 때의 후보일 뿐, MVP Core persistence default나 audit-grade canonical domain history가 아니다. 읽음/미읽음은 사용자 UX 상태이며 미해결 정산·인증·검수 task를 뜻하지 않는다. Persisted read state를 둔다면 nullable `read_at`만 사용하고 status enum/workflow로 확장하지 않는다.
+- `notification_delivery_attempt`는 MVP semantic freeze 요구사항이 아니라 후속 operational hardening 후보로만 둔다. 실패/재시도는 settlement retry, replay, correction, payout mutation과 분리한다.
+- 알림 payload/list item에 필요한 canonical refetch metadata 후보는 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 수준으로 제한한다. `event_type`은 앱 라우팅 vocabulary 후보이며 DB enum이나 audit event catalog freeze가 아니다. authoritative payout/certification/ledger snapshot은 포함하지 않는다.
 - Notification 후보 엔티티는 non-authoritative hint/deep-link/refetch/transport surface이므로 Core Mermaid에서 의도적으로 제외한다. Core Mermaid에 포함하면 canonical domain history/source of truth로 오해될 수 있다.
 - Preference matrix, template CMS/table, campaign/broadcast, advanced analytics, SSE/Web realtime reliability persistence는 Phase 2/deferred로 유지한다.
 
@@ -138,6 +138,7 @@ Unique / Index:
 
 - `unique(uuid)`
 - `unique(email)`
+- `unique(nickname)`
 - `index(status)`
 
 상태값 / Enum:
@@ -153,6 +154,7 @@ Unique / Index:
 - `member`는 계정의 기준 키고, 정산 계산 단위는 아니다.
 - `member`는 사용자 식별·인증·프로필 상태를 담당하며, 포인트 현재 잔액처럼 빈번히 변하는 금액 상태는 직접 보관하지 않는다.
 - 프로필은 닉네임 + 프로필 이미지 + 상태 메시지로 제한된다.
+- 닉네임은 회원 전체에서 고유해야 하며 `unique(nickname)`으로 중복을 DB에서 차단한다.
 - 별도의 social profile 테이블은 도입하지 않는다.
 - `is_host_ever`, `hosted_crew_count`는 별도 column으로 저장하지 않는다. `crew.host_member_id` 이력에서 derived projection으로 계산하며 authoritative counter source-of-truth가 아니다. 호스트 권한/뱃지/카운터는 settlement/lifecycle authority가 아니다.
 - 프로필 수정은 인증/JWT, 크루 참여, 포인트 원장, 정산, 환급, 상태 생명주기에 side effect를 만들지 않는다.
@@ -1066,14 +1068,14 @@ erDiagram
         UUID uuid UK
         VARCHAR email UK
         VARCHAR password_hash
-        VARCHAR nickname
+        VARCHAR nickname UK
         VARCHAR profile_image_s3_key
         VARCHAR status_message
         VARCHAR status
         DATETIME created_at
         DATETIME updated_at
     }
-    %% MEMBER: nullable=password_hash, profile_image_s3_key, status_message; enum status=ACTIVE|DEACTIVATED; IDX(status).
+    %% MEMBER: nullable=password_hash, profile_image_s3_key, status_message; UK(uuid), UK(email), UK(nickname); enum status=ACTIVE|DEACTIVATED; IDX(status).
     %% MEMBER projection only: is_host_ever and hosted_crew_count are derived from CREW.host_member_id, not stored columns.
 
     MEMBER_REFRESH_TOKEN {

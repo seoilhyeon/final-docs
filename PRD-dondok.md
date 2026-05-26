@@ -285,15 +285,15 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 | --- | --- | --- |
 | Android FCM push | 포함 | Background/off-app 재진입 transport. Delivery success/failure는 domain success/failure가 아니다. |
 | 인앱 토스트 | 포함 | Foreground 즉시 피드백. Durable history나 canonical state가 아니다. |
-| 알림 목록/읽음 | 얇은 후보 | UX hint/read affordance 후보일 뿐 backend persistence 기본값이 아니다. Frontend local state/browser permission으로 충분한 상태는 서버 저장으로 승격하지 않는다. Audit history, certification history, settlement history, ledger history가 아니다. |
+| 알림 목록/읽음 | 얇은 후보 | UX hint/read affordance 후보일 뿐 backend persistence 기본값이 아니다. Persisted read state를 둔다면 nullable `read_at`만 사용하고 status/task workflow로 확장하지 않는다. Frontend local state/browser permission으로 충분한 상태는 서버 저장으로 승격하지 않는다. Audit history, certification history, settlement history, ledger history가 아니다. |
 | notification event/log | 얇은 후보 | 알림 목록과 운영 추적이 꼭 필요할 때만 검토하는 non-authoritative 기록 후보이며 Core persistence default가 아니다. |
-| delivery attempt observability | 후보 포함 | FCM 발송/실패/transport retry 관측 후보. Settlement retry/replay/correction과 분리한다. |
+| delivery attempt observability | deferred operational hardening 후보 | FCM 발송/실패/transport retry 관측은 후속 운영 hardening 후보일 뿐 MVP semantic freeze 요구사항이 아니다. Settlement retry/replay/correction과 분리한다. |
 | notification preference matrix | Phase 2 | OS permission 또는 최소 설정 이상은 후속 결정으로 둔다. |
 | notification template CMS/table | Phase 2 | MVP는 문서/코드 상수로 시작할 수 있으며 문구 안정화 전 table을 freeze하지 않는다. |
 | SSE/Web realtime reliability | Phase 2/drift candidate | Android-first FCM MVP를 역으로 결정하지 않는다. 기존 SSE 문구는 재사용 가능한 non-authority semantics만 흡수한다. |
 | campaign/broadcast/advanced analytics | Phase 2 | Trust-loop MVP 이후 확장 후보. |
 
-Notification payload/list item을 도입하더라도 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 같은 refetch hint 중심으로 제한한다. 최종 환급금, 인증 truth, ledger truth, settlement retry/replay 상태를 notification-owned truth로 싣지 않는다.
+Notification payload/list item을 도입하더라도 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 같은 refetch hint 중심으로 제한한다. `event_type`은 앱 라우팅 vocabulary 후보일 뿐 DB enum이나 audit event catalog freeze가 아니다. 최종 환급금, 인증 truth, ledger truth, settlement retry/replay 상태를 notification-owned truth로 싣지 않는다.
 
 
 #### Phase 2 Defer

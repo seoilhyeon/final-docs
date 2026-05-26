@@ -464,7 +464,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Projection Impact**: UI may refresh estimates or final state after canonical refetch; notification payload/list text is not a projection or final settlement snapshot.
 - **Settlement Impact**: None; notification failure cannot rollback settlement and notification retry is transport retry, not settlement retry/replay/correction.
 - **UX Risk**: User thinks no notification means no payout, stale success means final state, unread means unresolved certification/settlement work, or inbox history is an audit ledger.
-- **Related Domain Objects**: notification event/log candidate, notification delivery attempt candidate, canonical API response.
+- **Related Domain Objects**: notification event/log candidate only if thin inbox persistence is later chosen (`read_at` nullable UX state only), deferred notification delivery attempt candidate, canonical API response. Event catalog names are app routing vocabulary candidates, not DB enum or audit authority.
 
 ### UC-A20 — Support Explanation by Lifecycle State
 
