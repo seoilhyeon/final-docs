@@ -40,7 +40,9 @@
 ### 2.2 인증
 
 - 로그인 이후 API는 `Authorization: Bearer {accessToken}` 헤더를 사용한다.
-- refresh token은 별도 API로 재발급한다.
+- access token은 로그인/재발급 응답 body로 내려주며, FE는 메모리 기반으로 다룬다.
+- refresh token은 `HttpOnly`, `Secure`, `SameSite` 속성이 적용된 쿠키로만 전달한다. response body, `localStorage`, `sessionStorage`, JS 접근 대상으로 노출하지 않는다.
+- refresh token은 별도 API(`POST /api/auth/refresh`)로 재발급하며, 클라이언트는 refresh cookie를 자동 전송하기만 한다.
 
 ### 2.3 식별자 경계
 
@@ -358,7 +360,6 @@ Response `200 OK`:
 ```json
 {
   "access_token": "jwt-access-token",
-  "refresh_token": "jwt-refresh-token",
   "member": {
     "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
     "email": "user@example.com",
@@ -367,6 +368,8 @@ Response `200 OK`:
   }
 }
 ```
+
+추가로 `Set-Cookie` 헤더로 `HttpOnly`, `Secure`, `SameSite` 속성이 적용된 refresh token cookie를 함께 내려준다.
 
 Error:
 
@@ -377,27 +380,28 @@ Error:
 
 - access token JWT subject(`sub`)는 `member.uuid`다. `email`이나 Long `member.id`를 subject로 사용하지 않는다.
 - refresh token은 서버에 raw value가 아니라 hash로 저장한다.
+- refresh token은 `HttpOnly` + `Secure` + `SameSite` cookie로만 전달한다. response body, `localStorage`, `sessionStorage`, JS 접근 대상으로 노출하지 않는다.
 
 ### `POST /api/auth/refresh`
 
 역할:
 
-- refresh token으로 access token을 재발급한다.
+- refresh cookie를 사용해 access token을 재발급한다.
 
 Request:
 
-| 필드            | 타입     | 필수 | 설명             |
-| --------------- | -------- | ---- | ---------------- |
-| `refresh_token` | `string` | Y    | 재발급 요청 토큰 |
+- request body 없음.
+- 브라우저/클라이언트가 자동 전송하는 refresh token cookie(`HttpOnly`, `Secure`, `SameSite`)가 필수다.
 
 Response `200 OK`:
 
 ```json
 {
-  "access_token": "new-access-token",
-  "refresh_token": "new-refresh-token"
+  "access_token": "new-access-token"
 }
 ```
+
+rotation 정책에 따라 새 refresh token이 발급되는 경우 `Set-Cookie` 헤더로 갱신한다. 이때도 token 값을 response body에 포함하지 않는다.
 
 Error:
 
@@ -407,25 +411,34 @@ Error:
 
 정책:
 
-- refresh token rotate 여부는 구현 선택이지만, 본 명세 예시는 rotate를 전제로 한다.
+- 재발급은 refresh cookie 기반이며, request body로 refresh token을 받지 않는다.
+- refresh token rotate 여부는 구현 선택이지만, 본 명세는 rotate를 전제로 한다. rotation 시 새 refresh token은 `Set-Cookie`로만 전달하고 response body에 노출하지 않는다.
+- access token만 response body로 반환한다.
 
 ### `POST /api/auth/logout`
 
 역할:
 
-- refresh token을 revoke한다.
+- refresh token을 revoke하고 refresh cookie를 무효화한다.
 
 Request:
 
-| 필드            | 타입     | 필수 | 설명        |
-| --------------- | -------- | ---- | ----------- |
-| `refresh_token` | `string` | Y    | 폐기할 토큰 |
+- request body 없음.
+- 클라이언트가 자동 전송하는 refresh token cookie를 식별/revoke 대상 토큰으로 사용한다.
 
 Response `204 No Content`
+
+추가로 `Set-Cookie` 헤더로 refresh token cookie를 즉시 만료(`Max-Age=0` 또는 과거 `Expires`)시켜 클라이언트 측에서 무효화한다.
 
 Error:
 
 - `REFRESH_TOKEN_INVALID`
+
+정책:
+
+- 서버 측에서 refresh token hash를 revoke 처리한다.
+- 동시에 refresh cookie를 expire/invalidate semantics로 정리한다.
+- request body로 refresh token을 받지 않는다.
 
 ### `GET /api/me`
 
