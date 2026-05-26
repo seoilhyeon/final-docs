@@ -727,6 +727,23 @@ Unique / Index:
 - `AUTO_APPROVE`/`AUTO_REJECT`는 certification-axis system moderation outcome일 뿐 client input, AI authority, admin/support/dispute/override state, settlement authority, ledger authority가 아니다.
 - `reject_memo`는 일반적으로 nullable이지만 `reject_reason_code = OTHER`인 경우 필수이며 50자 이내로 제한한다. internal/private non-authoritative context이고 settlement truth, participant-facing canonical state, appeal/dispute workflow, ledger correction authority가 아니다.
 
+### `verification-history` derived summary surface
+
+역할:
+
+- `GET /api/me/verification-history`는 저장 테이블이 아니라 `mission_log` latest/effective certification state, latest-effective moderation projection, `moderation_history` chain reference, crew/member metadata, 접근 권한에서 파생되는 account-level read surface다.
+- 전역/크루별 “내 검증 결과 요약”을 위한 current/effective summary이며, `moderation_history` append-only audit ledger나 settlement source-of-truth가 아니다.
+
+영속성 경계:
+
+- 별도 `verification_history` 테이블을 추가하지 않는다.
+- Core Mermaid에 `verification_history` node나 관계를 추가하지 않는다.
+- summary 표시를 위해 `mission_log`를 overwrite하거나 hidden mutation하지 않는다.
+- `NOT_SUBMITTED`는 row 없는 day/member slot projection이다. 미제출을 표현하기 위한 persisted `mission_log` row, feed status row, verification-history row를 만들지 않는다.
+- `before_state` / `after_state` / append-only transition chain은 `moderation_history` audit/detail surface에 남기며, verification-history summary storage로 복제하지 않는다.
+- `reject_memo`는 internal/private non-authoritative context이고 participant-facing summary에 포함하지 않는다.
+- final settlement recognition은 `settlement_item.calculation_reason`과 연결된 `point_history`로 설명한다. verification-history summary count, feed item count, reaction count는 recognized success count가 아니다.
+
 ### `mission_log_reaction`
 
 역할:

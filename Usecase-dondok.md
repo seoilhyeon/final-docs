@@ -336,6 +336,19 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **UX Risk**: Participant interprets rejection as host confiscating money or personally judging the participant.
 - **Related Domain Objects**: `mission_log`, moderation history.
 
+### UC-A10A — Account-Level Verification History Summary
+
+- **Actors**: Participant, Host, system
+- **Classification**: derived read-model usecase (current/effective verification summary; not audit ledger; not settlement authority)
+- **Preconditions**: User is authenticated. Submitted `mission_log` rows or host moderation actions may exist in crews the user can access.
+- **Main Flow**: User opens the global “검증 이력” surface. Without `role`, the system returns only the current user's participant-submitted verification summaries across crews. `crew_id` narrows the same summary to one crew. `role=host` explicitly returns summary rows for moderation actions in MVP crews hosted by the user.
+- **Failure Flow**: The summary exposes raw moderation transition chain, `before_state`, `after_state`, `reject_memo`, internal actor identifiers, or final settlement counts; `role=host&crew_id` silently falls back to participant visibility for a non-host; a detail endpoint or mini timeline becomes a second audit surface.
+- **Authority Boundary**: Verification history is a user-facing current/effective summary. `moderation-logs` remains the history-preserving append-only audit/detail surface. Settlement recognition remains in `settlement_item.calculation_reason` and linked `point_history`; feed visibility and reaction count do not decide recognized success count.
+- **Projection Impact**: No projection authority. The summary may link to feed or settlement surfaces but must not present estimated/final payout as its own result.
+- **Settlement Impact**: None. `SUCCESS` in this summary can still differ from recognized settlement success.
+- **UX Risk**: Users can confuse “검증 이력” summary counts with final recognized success counts unless copy stays neutral: 검토중, 인정됨, 인정되지 않음, 아직 인증 전, 이전 시도, 재업로드.
+- **Related Domain Objects**: `mission_log`, `moderation_history`, `crew`, `member`; no dedicated `verification_history` table.
+
 ### UC-A11 — Moderation Correction Before Freeze
 
 - **Actors**: Host, participant, system

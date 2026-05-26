@@ -249,8 +249,10 @@
 | 크루/참여   | `GET`    | `/api/crews/{crewId}`                           | 크루 상세 조회                           |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/participants`              | 크루 가입 신청                           |
 | 크루/참여   | `DELETE` | `/api/crews/{crewId}/participants/me`           | 가입 신청 취소 (승인 전 `PENDING`만)     |
+| 크루/참여   | `GET`    | `/api/crews/{crewId}/applications`              | 가입 신청 목록 조회 (방장)               |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/applications/{crewParticipantId}/approve` | 방장 승인 → 기존 reserve 확정 → `LOCKED` |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/applications/{crewParticipantId}/reject`  | 방장 거절 → `REJECTED`               |
+| 크루/참여   | `GET`    | `/api/crews/{crewId}/members`                   | 크루 멤버 lookup projection 조회         |
 | 크루 공지   | `GET`    | `/api/crews/{crewId}/notices`                  | 크루 공지 목록 후보. communication surface |
 | 크루 공지   | `POST`   | `/api/crews/{crewId}/notices`                  | 방장 공지 작성 후보                  |
 | 크루 공지   | `PATCH`  | `/api/crews/{crewId}/notices/{noticeId}`       | 방장 공지 수정 후보                  |
@@ -263,9 +265,14 @@
 | 크루 공지   | `DELETE` | `/api/crews/{crewId}/notices/{noticeId}/reactions/me?reaction_type={reaction_type}` | 내 공지 리액션 멱등 삭제 후보 |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/withdraw`                  | Brownfield/deferred withdrawal           |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/start`                     | Brownfield/removed manual start          |
+| 미션 인증   | `POST`   | `/api/uploads/presigned-url`                    | 인증/프로필/크루 이미지 업로드용 presigned URL 발급 |
 | 미션 인증   | `POST`   | `/api/mission-logs`                             | 인증 제출                                |
 | 미션 인증   | `GET`    | `/api/crews/{crewId}/mission-logs/me`           | 내 인증 기록 조회                        |
+| 미션 인증   | `GET`    | `/api/me/verification-history`                  | 전역/크루별 내 검증 결과 current/effective summary 조회 |
+| 미션 인증   | `GET`    | `/api/me/mission-feed`                          | 전역 cross-crew append-only 인증 활동 timeline 조회 |
 | 미션 인증   | `GET`    | `/api/crews/{crewId}/moderation-logs`           | 방장 검수 audit 조회                     |
+| 미션 인증   | `POST`   | `/api/mission-logs/{missionLogId}/moderation/approve` | 방장 검수 승인 (PENDING_REVIEW → SUCCESS) |
+| 미션 인증   | `POST`   | `/api/mission-logs/{missionLogId}/moderation/reject`  | 방장 검수 거절 (PENDING_REVIEW → FAILED)  |
 | 피드/리액션 | `GET`    | `/api/crews/{crewId}/feed`                      | 방 인증 피드와 파생 일자 상태 조회       |
 | 대시보드    | `GET`    | `/api/crews/{crewId}/dashboard`                 | 진행 상황/환급 설명용 current-basis projection 조회 |
 | 피드/리액션 | `POST`   | `/api/mission-logs/{missionLogId}/reactions`    | 내 리액션 멱등 upsert                    |
@@ -284,6 +291,7 @@
 | 알림        | `GET`    | `/api/notifications`                           | 알림 inbox UX hint 목록 조회 후보          |
 | 알림        | `GET`    | `/api/notifications/unread-count`              | 미읽음 UX badge count 조회 후보            |
 | 알림        | `PATCH`  | `/api/notifications/{notificationId}/read`     | 알림 읽음 UX 상태 처리 후보                |
+| 알림        | `PATCH`  | `/api/notifications/read-all`                  | 전체 읽음 UX 상태 처리 후보                |
 | 알림        | `GET`    | `/api/notifications/stream`                    | Phase 2/deferred SSE realtime drift 후보   |
 | 포인트      | `POST`   | `/api/points/charges`                           | 포인트 충전 반영                         |
 | 포인트      | `GET`    | `/api/points`                                   | 사용 가능 잔액 조회                      |
@@ -830,6 +838,101 @@ Error:
 - 기존 reserve는 `CREW_CANCELLED_REFUND` 계열 point_history로 반환하고, `point_account.balance`를 같은 금액만큼 복구한다. terminal 전이와 reserve release는 같은 transaction에서 처리하며, release는 `crew_participant.id`당 한 번만 허용한다. 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
 - `REJECTED`는 terminal pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다. 동일 crew 재신청은 MVP에서 허용하지 않는다.
 
+### `GET /api/crews/{crewId}/applications`
+
+역할:
+
+- 방장이 자신이 호스트인 크루의 가입 신청 후보 목록을 lookup한다.
+- approve/reject endpoint 호출 전에 처리 대상 `crew_participant_id`를 식별하는 read-only surface다.
+
+Query:
+
+| 필드     | 타입      | 필수 | 설명 |
+| -------- | --------- | ---- | ---- |
+| `status` | `string`  | N    | `PENDING`, `LOCKED`, `REJECTED`, `CANCELLED`, `EXPIRED` 중 하나. 생략 시 `PENDING`. |
+| `cursor` | `string`  | N    | 이전 응답의 `next_cursor`로 다음 slice를 조회한다. exact encoding은 implementation detail이다. |
+| `limit`  | `integer` | N    | 기본 50, 최대 200. |
+
+Response `200 OK`:
+
+```json
+{
+  "items": [
+    {
+      "crew_participant_id": 101,
+      "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
+      "nickname": "돈독러",
+      "profile_image_url": null,
+      "status": "PENDING",
+      "applied_at": "2026-05-08T13:00:00+09:00",
+      "decided_at": null
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+Error:
+
+- `CREW_NOT_FOUND`
+- `FORBIDDEN_NOT_HOST`
+
+정책:
+
+- 호출자는 해당 `crew.host_member_id`와 일치해야 한다. 아니면 `FORBIDDEN_NOT_HOST`.
+- 기본 정렬은 `applied_at DESC`. 동일 시각 tie-break는 deterministic ordering으로 처리하며 cursor encoding은 implementation detail이다.
+- 응답 필드는 신청 처리에 필요한 최소 lookup projection이다. 신청자의 다른 크루 활동 이력, 도딘 잔액, point/settlement context는 포함하지 않는다(cross-context leakage 금지).
+- 본 API는 신청 lookup용 read-only다. 신청 생성, 승인, 거절, 취소를 수행하지 않으며 lifecycle/settlement/ledger authority를 가지지 않는다.
+- `PENDING`은 capacity reservation에 포함되지만, 이 응답의 row 수가 frozen baseline이나 settlement eligibility 입력은 아니다.
+
+### `GET /api/crews/{crewId}/members`
+
+역할:
+
+- 크루 멤버십을 lookup projection으로 조회한다.
+- 멤버 탭/공지 작성 대상 식별 등 membership identity surface다.
+
+Query:
+
+| 필드     | 타입      | 필수 | 설명 |
+| -------- | --------- | ---- | ---- |
+| `state`  | `string`  | N    | `ACTIVE` (lifecycle 활성 멤버: `LOCKED`/`ACTIVE` 등 active membership), `LOCKED`, `WITHDRAWN`(brownfield-deferred) 중 하나. 생략 시 `ACTIVE`. |
+| `cursor` | `string`  | N    | 이전 응답의 `next_cursor`로 다음 slice를 조회한다. |
+| `limit`  | `integer` | N    | 기본 50, 최대 200. |
+
+Response `200 OK`:
+
+```json
+{
+  "items": [
+    {
+      "crew_participant_id": 101,
+      "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
+      "nickname": "돈독러",
+      "profile_image_url": null,
+      "role": "HOST",
+      "status": "LOCKED",
+      "joined_at": "2026-05-08T13:00:00+09:00"
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+Error:
+
+- `CREW_NOT_FOUND`
+- `FORBIDDEN`
+
+정책:
+
+- 호출자는 해당 크루의 active 참여자 또는 호스트여야 한다. 아니면 `FORBIDDEN`.
+- `role`은 `HOST` 또는 `MEMBER` projection이며 `crew.host_member_id` 매칭에서 파생한다. authority/permission grant 컬럼이 아니다.
+- 응답은 membership lookup projection이다. `recognized_success_count`, `net_dodin`, `expected_refund_amount`, settlement_item 결과 같은 settlement-authoritative 필드는 포함하지 않는다.
+- 정산 결과는 `GET /api/crews/{crewId}/settlement` 및 연결된 `GET /api/settlements/{settlementId}`에서만 조회한다.
+- `WITHDRAWN`은 brownfield-deferred semantics이며 MVP active baseline authority가 아니다. 노출 시에도 frozen `LOCKED` baseline을 소급 변경하는 근거로 사용하지 않는다.
+- `joined_at`은 `crew_participant.locked_at` 또는 동등 projection이며, 별도 join history truth가 아니다.
+
 ### Crew notice/comment/reaction endpoint candidates
 
 역할:
@@ -916,14 +1019,14 @@ Error:
 
 역할:
 
-- 인증 이미지와 프로필 이미지 업로드를 위한 private S3 presigned URL을 발급한다.
+- 인증 이미지, 프로필 이미지, 크루 대표 이미지 업로드를 위한 private S3 presigned URL을 발급한다.
 - S3 object key는 클라이언트가 정하지 않고 서버가 생성한다.
 
 Request:
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| `purpose` | `string` | Y | `MISSION_IMAGE` 또는 `PROFILE_IMAGE` |
+| `purpose` | `string` | Y | `MISSION_IMAGE`, `PROFILE_IMAGE`, 또는 `CREW_IMAGE` |
 | `crew_id` | `integer` | N | mission image 업로드 시 대상 방 |
 | `crew_participant_id` | `integer` | N | mission image 업로드 시 대상 참여자 |
 | `content_type` | `string` | Y | 허용된 이미지 content type |
@@ -943,6 +1046,8 @@ Response `200 OK`:
 - object key는 서버가 생성한다.
 - 사용자는 임의 S3 path/key를 지정할 수 없다.
 - mission 인증 이미지의 권장 key 형식은 `mission/{crewId}/{crewParticipantId}/{uuid}`다. `{crewParticipantId}`는 `crew_participant.id`를 의미한다.
+- 프로필 이미지의 권장 key 형식은 `profile/{memberUuid}/{uuid}`다. 크루 대표 이미지의 권장 key 형식은 `crew/{memberUuid}/{uuid}`이며 `memberUuid`는 발급 요청자(미래의 호스트)다.
+- `purpose = CREW_IMAGE`는 크루 생성/수정 흐름에서 사용되며 `crew_id`/`crew_participant_id`를 요구하지 않는다. 발급 시점에 호스트 자격이 확정되지 않을 수 있으므로 서버는 발급자 인증만 검증하고, 실제 사용은 `POST /api/crews`의 `image_s3_key` 본문에서 일어난다. 발급 자체는 settlement/lifecycle authority가 아니다.
 - presigned URL은 upload delegation 수단이지 validation delegation 수단이 아니다.
 - 서버는 발급 시점에 사용자, crew, participant 권한을 검증한다.
 - 클라이언트는 발급받은 URL로 S3에 직접 업로드한다.
@@ -1105,12 +1210,171 @@ Error:
 - FE는 이 값을 `최종 성공 횟수` 또는 `정산 인정 횟수`로 사용하면 안 된다.
 - 최종 인정 여부와 인정 횟수는 반드시 정산 결과 API `GET /api/settlements/{settlementId}`를 기준으로 판단해야 한다.
 
+### `GET /api/me/verification-history`
+
+역할:
+
+- 현재 로그인한 회원의 전역/크루별 검증 결과를 user-facing current/effective summary로 조회한다.
+- 와이어프레임의 “검증 이력 (전역)” 화면을 위한 derived summary surface이며, raw moderation audit ledger가 아니다.
+- 기본 조회는 `role = participant`로 해석하며, 내가 제출한 인증 이력만 반환한다.
+
+Query:
+
+| 필드      | 타입      | 필수 | 설명 |
+| --------- | --------- | ---- | ---- |
+| `crew_id` | `integer` | N    | 특정 크루로 summary 범위를 좁힌다. |
+| `role`    | `string`  | N    | `participant` 또는 `host`. 생략 시 `participant`. |
+| `status`  | `string`  | N    | summary status filter. `PENDING_REVIEW`, `SUCCESS`, `FAILED` 기반 current/effective verification status만 대상으로 하며 settlement status나 feed status를 invent하지 않는다. |
+| `cursor`  | `string`  | N    | 이전 응답의 `next_cursor`로 다음 slice를 조회한다. exact cursor encoding은 implementation detail이다. |
+
+Response `200 OK`:
+
+```json
+{
+  "items": [
+    {
+      "verification_history_item_id": "participant:9001",
+      "perspective": "participant",
+      "crew_id": 42,
+      "crew_title": "아침 6시 기상",
+      "mission_log_id": 9001,
+      "occurred_at": "2026-05-11T05:58:10+09:00",
+      "verification_status": "SUCCESS",
+      "reject_reason_code": null,
+      "signal_summary": {
+        "exif": "NORMAL",
+        "reviewer": "HOST"
+      },
+      "links": {
+        "feed": "/api/crews/42/feed",
+        "settlement": null
+      }
+    }
+  ]
+}
+```
+
+Pagination:
+
+- 이 endpoint는 cursor-based, slice-friendly pagination을 사용한다.
+- 기본 정렬은 `occurred_at DESC` 기반이며, 동일 `occurred_at`에 대해서는 stable tie-break ordering을 사용한다. Tie-break key와 cursor encoding의 exact shape는 implementation detail로 둔다.
+- `next_cursor`는 다음 slice가 존재할 때만 응답에 포함할 수 있다. 없거나 `null`이면 더 조회할 slice가 없다는 뜻이다.
+- `total_count`, `total_pages`, page total semantics는 MVP contract requirement가 아니다.
+- Spring `Pageable`/`Page`, offset 방식, DB index 전략, cursor payload schema는 이 API 문서에서 freeze하지 않는다.
+
+Response field category:
+
+- 응답 예시는 full DTO freeze가 아니라 visible summary field category를 보여준다. Pagination metadata도 optional category이며 exact DTO schema를 고정하지 않는다.
+- 허용 범위는 summary item id/link token, `perspective`, crew display identity, mission/log reference, 제출 또는 검토 시각, current/effective verification status, reason-code-level explanation, lightweight signal summary, safe feed/detail/settlement reference, optional `next_cursor`다.
+- `SUCCESS` summary는 인증 상태 요약이지 final settlement recognition을 보장하지 않는다.
+
+Error:
+
+- `CREW_NOT_FOUND`
+- `PARTICIPANT_NOT_FOUND`
+- `FORBIDDEN`
+
+권한 / scope:
+
+- 모든 호출은 인증된 회원만 가능하다.
+- `role` 생략 또는 `role = participant`, `crew_id` 없음: 요청자가 제출한 `mission_log` summary만 반환한다. 결과가 없으면 `200 OK`와 빈 `items`를 반환한다.
+- `role = participant&crew_id={id}`: 크루가 없으면 `CREW_NOT_FOUND`, 요청자가 해당 크루 참여자가 아니면 기존 `GET /api/crews/{crewId}/mission-logs/me`와 같이 `PARTICIPANT_NOT_FOUND`, 참여자지만 제출 로그가 없으면 빈 `items`를 반환한다.
+- `role = host`, `crew_id` 없음: MVP에서는 `crew.host_member_id == requester.member_id`인 크루에서 내가 방장으로 검수한 활동의 summary만 반환한다. 해당 row가 없으면 빈 `items`를 반환하며, 권한 없는 크루의 id/name/count/denial row를 포함하지 않는다.
+- `role = host&crew_id={id}`: 크루가 없으면 `CREW_NOT_FOUND`, 요청자가 해당 크루 host가 아니면 `FORBIDDEN`, host지만 검수한 로그가 없으면 빈 `items`를 반환한다. 이 경우 participant scope로 silent fallback하지 않는다.
+- co-host/admin/support 등 host-equivalent role 확장은 deferred decision이며 MVP contract가 암시하지 않는다.
+
+정책:
+
+- 이 API는 `mission_log` latest/effective certification state, latest-effective moderation projection, crew/member metadata, 접근 권한에서 파생되는 read model이다. 별도 `verification_history` 저장 테이블의 source-of-truth를 의미하지 않는다.
+- 기본 summary는 `PENDING_REVIEW`, `SUCCESS`, `FAILED`처럼 실제 제출된 `mission_log` 기반 상태를 다룬다. `SUCCESS` only 조회가 아니다.
+- `NOT_SUBMITTED`는 persisted `mission_log`가 아니라 row 없는 synthetic slot/summary projection이다. 이 API가 미제출 요약을 표시하더라도 synthetic summary로만 다루며 feed item이나 audit row로 반환하지 않는다.
+- 이 API는 moderation audit detail endpoint가 아니다. `before_state`, `after_state`, append-only transition chain, raw audit row, internal actor FK를 응답하지 않는다.
+- `reject_reason_code`는 participant-facing reason category로 노출할 수 있지만 `reject_memo`는 internal/private context이므로 이 API 응답에 포함하지 않는다.
+- 이 API에는 MVP 단건 상세 endpoint를 두지 않는다. verification-history 전용 detail API와 mini timeline/detail DTO는 MVP 범위 밖이다.
+- Feed visibility, feed item count, reaction count는 recognized settlement success count가 아니다. 최종 인정 여부와 인정 횟수는 `settlement_item.calculation_reason` 및 연결된 `point_history`를 포함한 Settlement API를 기준으로 판단한다.
+- `GET /api/crews/{crewId}/moderation-logs`는 아래의 crew-scoped append-only audit/detail surface로 유지한다.
+- 본 API는 current/effective verification summary surface다. cross-crew append-only mission activity timeline은 별도 `GET /api/me/mission-feed`이며, 두 surface의 semantics를 혼합하지 않는다.
+
+### `GET /api/me/mission-feed`
+
+역할:
+
+- 현재 로그인한 회원의 cross-crew append-only mission activity timeline을 조회한다.
+- 와이어프레임의 전역 인증 피드 surface를 위한 read model이며, `mission_log` aggregation 기반이다.
+- `GET /api/me/verification-history`가 current/effective verification summary인 것과 달리, 본 API는 append-only activity stream으로서 같은 일자에 여러 시도가 있으면 각각의 시도를 visible item으로 유지한다.
+
+Query:
+
+| 필드      | 타입      | 필수 | 설명 |
+| --------- | --------- | ---- | ---- |
+| `crew_id` | `integer` | N    | 특정 크루로 timeline 범위를 좁힌다. 호출자가 참여자인 크루여야 한다. |
+| `status`  | `string`  | N    | visible mission-log status filter. `PENDING_REVIEW`, `SUCCESS`, `FAILED`만 허용. `NOT_SUBMITTED`는 feed status가 아니므로 허용하지 않는다. |
+| `cursor`  | `string`  | N    | 이전 응답의 `next_cursor`로 다음 slice를 조회한다. exact encoding은 implementation detail이다. |
+| `limit`   | `integer` | N    | 기본 20, 최대 100. |
+
+Response `200 OK`:
+
+```json
+{
+  "items": [
+    {
+      "mission_log_id": 9003,
+      "crew_id": 42,
+      "crew_title": "아침 6시 기상",
+      "crew_participant_id": 101,
+      "image_url": "https://cdn.example.com/mission/9003.jpg",
+      "caption": "재업로드 후 다시 검토를 기다리고 있습니다",
+      "server_time": "2026-05-11T07:10:02+09:00",
+      "certification_status": "PENDING_REVIEW",
+      "reject_reason_code": null,
+      "links": {
+        "crew_feed": "/api/crews/42/feed"
+      }
+    },
+    {
+      "mission_log_id": 9002,
+      "crew_id": 42,
+      "crew_title": "아침 6시 기상",
+      "crew_participant_id": 101,
+      "image_url": "https://cdn.example.com/mission/9002.jpg",
+      "caption": "이전 시도 기록입니다",
+      "server_time": "2026-05-11T06:30:00+09:00",
+      "certification_status": "FAILED",
+      "reject_reason_code": "MISSION_MISMATCH",
+      "links": {
+        "crew_feed": "/api/crews/42/feed"
+      }
+    }
+  ],
+  "next_cursor": "2026-05-11T06:30:00+09:00_9002"
+}
+```
+
+Error:
+
+- `CREW_NOT_FOUND`
+- `PARTICIPANT_NOT_FOUND`
+- `INVALID_FEED_STATUS_FILTER`
+
+정책:
+
+- 본 API는 호출자가 참여자(또는 호스트)인 모든 크루에 걸친 `mission_log` row의 append-only timeline이다. 호출자가 제출한 mission_log만 반환한다.
+- `crew_id`가 주어지면 크루가 없으면 `CREW_NOT_FOUND`, 호출자가 해당 크루 참여자가 아니면 `PARTICIPANT_NOT_FOUND`.
+- 기본 정렬은 `server_time DESC`이며 동일 시각 tie-break는 deterministic ordering으로 처리한다.
+- 같은 참여자/같은 날짜/cadence slot에 재업로드나 상태 변화로 여러 로그가 생기면, 이전 `FAILED`/`PENDING_REVIEW` item도 visible item으로 유지한다. 삭제/숨김/overwrite로 정산 입력을 바꾸지 않는다.
+- `NOT_SUBMITTED`는 synthetic slot projection이며 `mission_log` row가 없으므로 본 API에 포함하지 않는다.
+- `certification_status`는 visible mission-log state(`PENDING_REVIEW`/`SUCCESS`/`FAILED`)다. `SUCCESS` item이라도 settlement recognition을 보장하지 않는다.
+- `reject_reason_code`는 participant-facing reason category로 노출할 수 있지만 `reject_memo`는 internal/private context이므로 응답에 포함하지 않는다.
+- 본 API에는 `recognized_success_count`, `net_dodin`, `expected_refund_amount`, dashboard projection 같은 settlement/projection authority 필드를 포함하지 않는다. Feed item count, reaction count는 recognized success count가 아니다.
+- 본 API는 read-only append-only timeline aggregation이며 lifecycle/settlement/ledger/moderation authority가 아니다. `GET /api/me/verification-history`(current/effective summary)와 역할이 분리되어 있으며, 두 surface의 semantics를 혼합하지 않는다.
+
 ### `GET /api/crews/{crewId}/moderation-logs`
 
 역할:
 
 - 방장 검수 audit trail을 read-only로 조회한다.
 - `moderation_history` append-only 레코드를 기반으로 한다.
+- 이 API는 crew-scoped moderation audit/detail surface이며, `GET /api/me/verification-history` 전역 summary UX가 아니다.
 
 Query:
 
@@ -1149,13 +1413,112 @@ Error:
 
 - 본 API는 read-only audit 조회 전용이다. 검수 결정을 새로 만들거나 수정하지 않는다.
 - `moderation_history`는 append-only다. 본 API는 기존 레코드를 변경/삭제하지 않는다.
-- 조회 권한 매트릭스(누가 어디까지 볼 수 있는지)는 deferred decision이다. MVP 1차 구현 범위는 호스트 본인 + 본인 인증 로그에 대한 본인 참여자로 한정한다.
+- 조회 권한 매트릭스(누가 어디까지 볼 수 있는지)는 deferred decision이다. MVP 1차 구현 범위는 호스트 본인 + 본인 인증 로그에 대한 본인 참여자로 한정한다. participant raw audit visibility는 reason-code-level redaction을 우선하며, 상세 공개 범위는 여기서 과다 freeze하지 않는다.
 - `decision_type`은 `MANUAL_APPROVE`, `MANUAL_REJECT`, `AUTO_APPROVE`, `AUTO_REJECT`만 사용한다.
 - `reject_reason_code`는 `TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER`만 사용한다.
 - `reject_memo`는 일반적으로 nullable이지만 `OTHER`일 때 필수이며 최대 50자다. internal/private context이므로 participant-facing 응답에는 포함하지 않는다. `OTHER`여도 참여자는 raw memo text가 아니라 `reject_reason_code`만 받는다.
 - `before_state`, `after_state`는 검수 결정 시점의 latest-effective snapshot JSON이다. 정산 결과를 재계산하는 입력으로 사용하지 않는다.
 - 검수자 식별은 `moderator_member_uuid`로만 노출한다. internal FK `moderator_id`는 응답에 포함하지 않는다.
 - 이 API는 운영 admin 권한 endpoint가 아니다. MVP에서는 admin/correction workflow를 발명하지 않는다.
+
+### `POST /api/mission-logs/{missionLogId}/moderation/approve`
+
+역할:
+
+- 방장이 `PENDING_REVIEW` 상태의 `mission_log`를 contextual review로 승인한다.
+- `mission_log.certification_status`를 `SUCCESS`로 전이하고 `moderation_history`에 append-only 레코드를 남긴다.
+- host moderation input authority만 행사하며 settlement/ledger/lifecycle authority를 가지지 않는다.
+
+Request:
+
+- body 없음
+
+Response `200 OK`:
+
+```json
+{
+  "mission_log_id": 9001,
+  "crew_id": 42,
+  "crew_participant_id": 101,
+  "certification_status": "SUCCESS",
+  "decision_type": "MANUAL_APPROVE",
+  "reject_reason_code": null,
+  "decided_at": "2026-05-12T11:00:00+09:00",
+  "moderation_history_id": 7001
+}
+```
+
+Error:
+
+- `MISSION_LOG_NOT_FOUND`
+- `FORBIDDEN_NOT_HOST`
+- `MISSION_LOG_NOT_REVIEWABLE`
+- `SETTLEMENT_INPUT_FROZEN`
+
+정책:
+
+- 호출자는 해당 `mission_log`의 크루 `crew.host_member_id`와 일치해야 한다. 아니면 `FORBIDDEN_NOT_HOST`.
+- 승인은 `certification_status = PENDING_REVIEW`일 때만 가능하다. 이미 `SUCCESS`/`FAILED`인 경우 `MISSION_LOG_NOT_REVIEWABLE`로 거절한다 (overwrite/replace semantics 금지).
+- settlement input freeze 이후에는 `SETTLEMENT_INPUT_FROZEN`로 거절한다. host moderation은 pre-freeze contextual review authority만 가진다.
+- 트랜잭션 단계:
+  1. 대상 `mission_log`가 `PENDING_REVIEW`이고 settlement input freeze 이전인지 확인한다.
+  2. `mission_log.certification_status = SUCCESS`, `decision_type = MANUAL_APPROVE`, `decided_by = moderator_member_id`, `decided_at = now`로 갱신한다.
+  3. `moderation_history`에 append-only 레코드를 삽입한다. `before_state`/`after_state`는 latest-effective snapshot JSON이다.
+- 본 API는 settlement 재계산을 trigger하지 않는다. 최종 인정 횟수와 환급액은 종료 시점 단일 settlement 트랜잭션에서 결정한다.
+- `point_history`, `crew_participant`, `settlement_item`을 직접 변경하지 않는다.
+- 본 응답은 단건 mission_log projection이다. cross-crew aggregation, settlement_item, point ledger truth를 포함하지 않는다.
+
+### `POST /api/mission-logs/{missionLogId}/moderation/reject`
+
+역할:
+
+- 방장이 `PENDING_REVIEW` 상태의 `mission_log`를 contextual review로 거절한다.
+- `mission_log.certification_status`를 `FAILED`로 전이하고 `moderation_history`에 append-only 레코드를 남긴다.
+- host moderation input authority만 행사하며 settlement/ledger/lifecycle authority를 가지지 않는다.
+
+Request:
+
+| 필드 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `reject_reason_code` | `string` | Y | `TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER` 중 하나 |
+| `reject_memo` | `string` | C | `reject_reason_code = OTHER`일 때 필수. 최대 50자. internal/private context. |
+
+Response `200 OK`:
+
+```json
+{
+  "mission_log_id": 9001,
+  "crew_id": 42,
+  "crew_participant_id": 101,
+  "certification_status": "FAILED",
+  "decision_type": "MANUAL_REJECT",
+  "reject_reason_code": "MISSION_MISMATCH",
+  "decided_at": "2026-05-12T11:00:00+09:00",
+  "moderation_history_id": 7002
+}
+```
+
+Error:
+
+- `MISSION_LOG_NOT_FOUND`
+- `FORBIDDEN_NOT_HOST`
+- `MISSION_LOG_NOT_REVIEWABLE`
+- `SETTLEMENT_INPUT_FROZEN`
+- `INVALID_REJECT_REASON_CODE`
+- `REJECT_MEMO_REQUIRED`
+- `REJECT_MEMO_TOO_LONG`
+
+정책:
+
+- 호출자는 해당 `mission_log`의 크루 `crew.host_member_id`와 일치해야 한다. 아니면 `FORBIDDEN_NOT_HOST`.
+- 거절은 `certification_status = PENDING_REVIEW`일 때만 가능하다. 이미 `SUCCESS`/`FAILED`인 경우 `MISSION_LOG_NOT_REVIEWABLE`로 거절한다 (overwrite/replace semantics 금지).
+- settlement input freeze 이후에는 `SETTLEMENT_INPUT_FROZEN`로 거절한다.
+- `reject_reason_code`는 §3.10 enum만 허용한다. 그 외 값은 `INVALID_REJECT_REASON_CODE`.
+- `reject_memo`는 일반적으로 nullable이지만 `reject_reason_code = OTHER`일 때 필수이며 최대 50자다. internal/private context이고 **본 API 응답 및 모든 participant-facing 응답에 포함하지 않는다**.
+- 트랜잭션 단계는 approve와 동일하지만 `certification_status = FAILED`, `decision_type = MANUAL_REJECT`, `reject_reason_code = {요청 값}`, `reject_memo = {요청 값 또는 null}`로 갱신한다.
+- 본 API는 settlement 재계산을 trigger하지 않는다. settlement input은 freeze 시점에 resolved certification state를 일괄 소비한다.
+- `point_history`, `crew_participant.deposit_*`, `settlement_item`을 직접 변경하지 않는다. 거절은 인증 입력 결정이며 즉시 환급/몰수/ledger entry가 아니다.
+- 본 응답은 단건 mission_log projection이다. participant-facing 응답에서는 `reject_reason_code`만 노출하고 `reject_memo`는 제외한다(`GET /api/me/verification-history`, `GET /api/crews/{crewId}/feed`, `GET /api/crews/{crewId}/mission-logs/me`, `GET /api/me/mission-feed`에서도 동일하게 노출하지 않는다).
 
 ## 5.4 인증 피드 / 리액션
 

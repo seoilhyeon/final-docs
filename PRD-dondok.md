@@ -216,6 +216,7 @@ P1 이후 프로토타입 후보:
   `예상 환급금 projection은 현재까지의 인증 결과를 기반으로 계산된 현재 기준 예상입니다. 최종 정산 전까지 변동될 수 있으며, 최종 정산은 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 실행되는 final settlement batch 결과로 확정됩니다.`
 - 인증 피드와 현황 영역에는 아래 의미를 유지한다.
   `인증 피드는 검토중/인정됨/인정되지 않음 상태의 활동 기록을 투명하게 보여주는 공간입니다. 아직 인증 전 상태는 실제 인증 기록이 아니라 현재 현황 요약이며, 피드 표시나 반응 수가 최종 정산 인정 횟수를 뜻하지 않습니다.`
+- 와이어프레임의 “검증 이력 전역”은 계정 단위 current/effective verification summary다. 참여자 기본 조회는 내가 제출한 인증의 검토중/인정됨/인정되지 않음 요약이며, 명시적 host summary는 내가 방장인 크루의 검수 활동 요약이다. 이 화면은 raw moderation audit, final settlement result, recognized success count가 아니며 detail endpoint는 MVP에서 제외한다.
 - 정산 결과 화면에서 전체 성공 횟수가 `0`인 경우 아래 문구를 노출한다.
   `이번 미션에서는 인정된 성공 기록이 없어, 누군가의 실패가 다른 참여자의 추가 환급으로 이어지지 않도록 원금을 기준으로 정산되었습니다.`
 - 알림 UX에는 아래 문구를 적용한다.
@@ -239,6 +240,7 @@ P1 이후 프로토타입 후보:
 | EXIF/hash risk signal               | 이미지 metadata/hash를 fraud/risk signal로 수집                                                                                                                                                     | EXIF/hash는 단독 최종 판정 authority가 아니다.                                                      |
 | Host moderation                     | Host가 인증 로그를 contextual review하여 accepted/rejected 등 인증 입력 상태를 정한다.                                                                                                              | Moderation affects certification input only, not settlement/ledger authority.                       |
 | Moderation history / 운영 탭        | 인증 검토 이력, 처리 상태, 운영상 주의가 필요한 로그를 사용자에게 설명한다.                                                                                                                         | Visibility/audit UX이며 host ledger 권한이 아니다.                                                  |
+| 검증 이력 전역 summary              | 참여자 기본값으로 내가 제출한 인증의 current/effective 검증 결과를 전역/크루별로 요약한다. 명시적 host view는 내가 방장인 크루의 검수 활동 summary만 보여준다.                                           | Summary/read UX다. raw audit ledger, settlement recognition, point ledger authority가 아니며 detail endpoint는 MVP 제외다. |
 | 일일 정산 state                     | 인증 주기별 성공/실패 상태와 예상 지분율을 계산한다.                                                                                                                                                | Projection과 final settlement를 분리한다.                                                           |
 | Projection dashboard                | 현재 기준 예상 도딘/예상 환급금, 기여도/진행률, 성공률을 보여준다.                                                                                                                                  | 예상값은 authoritative settlement가 아니며 final batch 전 고정값처럼 표현하지 않는다. 수익/순위 dopamine loop로 표현하지 않는다. |
 | Final settlement batch              | 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 authoritative settlement snapshot을 생성한다.                                                                                                    | Deterministic / explainable / replayable.                                                           |
@@ -257,6 +259,7 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 | AI 크루 생성 도우미          | 사용자가 미션명/인증 규칙/문구를 쉽게 작성하도록 돕는다.         | Manual fallback 필수. AI 결과는 policy/settlement authority가 아니다.                    |
 | 크루 대표 이미지             | 크루 목록/상세/생성 흐름에서 방의 정체성과 탐색성을 돕는다.       | Display metadata다. lifecycle, settlement, moderation authority가 아니다.                |
 | 인증 피드                    | 검토중/인정됨/인정되지 않음 인증 로그를 append-only activity stream으로 보여준다. | Feed visibility와 feed item count는 settlement recognition이 아니다. 아직 인증 전 상태는 row 없는 current/effective summary다. |
+| 검증 이력 전역                | 전역/크루별 current/effective 검증 결과 summary와 lightweight signal summary를 보여준다. | Derived summary surface다. moderation audit ledger, final settlement, recognized success count, detail/mini timeline authority가 아니다. |
 | 리액션                       | 참여자 간 응원/가벼운 반응을 제공한다.                           | Reaction count는 인정 횟수나 지분율에 영향 없음.                                          |
 | 크루 공지/댓글/공지 리액션   | 채팅 없는 MVP에서 방장 안내와 참여자 반응을 제공한다.             | Communication surface다. mission rule override, certification, settlement, ledger, lifecycle authority가 아니다. |
 | 실시간 현황 / 기여 visibility | 현재 기준 지분율, 상대적 위치, 예상 환급 흐름, 기여도를 보여준다. | Projection/current-basis UX다. final settlement, ledger, payout certainty가 아니다.       |
@@ -357,6 +360,7 @@ Dashboard는 운영 중 사용자에게 예상 상태와 그 이유를 설명하
 - Host 승인/반려는 payout approval 또는 deposit confiscation이 아니다. Reject reason은 사람에 대한 판결이 아니라 정산 입력에서 제외될 수 있는 인증 상태와 사유를 설명해야 한다.
 - 운영자 개입은 audit-backed exceptional recovery boundary에 제한된다.
 - 모든 moderation 결정과 변경은 actor, action, reason, time을 추적할 수 있는 append-only history로 남아야 한다.
+- `verification-history`는 이 append-only history를 대체하지 않는 user-facing summary다. `before_state`, `after_state`, raw transition chain, `reject_memo`는 검증 이력 전역 summary에 노출하지 않는다.
 
 #### Finality / Replay / Retry / Correction Boundary
 
@@ -517,6 +521,7 @@ Phase 2 후보는 아래와 같다.
 | 환급 / refund                            | 정산 후 돌려받는 포인트/도딘                   | final settlement 결과로 발생하는 point movement                                                                      | 예상 환급금 projection과 다름                                      | final batch, point ledger/history                  | settlement               |
 | 인증 제출 / upload                       | 미션 수행 사진을 올리는 행동                   | server_time과 file signal을 남기는 event                                                                             | 최종 인정과 동일하지 않음                                          | certification record                               | layered trust            |
 | 인증 피드 / feed timeline                | 크루 인증 활동을 보여주는 타임라인              | 실제 mission log가 있는 검토중/인정됨/인정되지 않음 활동 기록                                                        | 정산 인정 횟수, 지분율, 환급 확정 근거 아님                         | feed API                                           | visibility boundary      |
+| 검증 이력 전역 / verification history summary | 계정 단위 검증 결과 요약 화면                  | 내가 제출한 인증의 current/effective summary와 명시적 host summary                                                     | raw moderation audit, detail endpoint, final settlement result, recognized success count 아님        | verification-history API                          | summary boundary         |
 | 현재 슬롯 / current slot summary         | day/member별 현재 상태 요약                     | latest/effective 상태 하나와 아직 인증 전 synthetic 상태                                                             | append-only feed item이나 persisted mission log와 동일하지 않음      | dashboard/feed projection                          | projection boundary      |
 | 인정 인증 / final certification state    | 최종 정산에 반영되는 인증 상태                 | signal + rule + moderation이 반영된 resolved state                                                                   | raw EXIF/hash 결과와 동일하지 않음                                 | final certification state                          | layered trust            |
 | 예상 환급금 / expected refund projection | 현재까지 기준으로 예상되는 환급 금액           | anxiety reduction과 settlement explanation을 위한 projection 계산 결과                                                | 최종 settlement/refund, 수익, 손익, 실시간 payout certainty와 동일 개념 아님 | dashboard projection                               | projection != settlement |
