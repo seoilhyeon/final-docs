@@ -520,9 +520,11 @@ Error:
 
 Query:
 
-| 필드         | 타입     | 필수 | 설명                |
-| ------------ | -------- | ---- | ------------------- |
-| `status`     | `string` | N    | 기본값 `RECRUITING` |
+| 필드         | 타입      | 필수 | 설명                |
+| ------------ | --------- | ---- | ------------------- |
+| `status`     | `string`  | N    | 기본값 `RECRUITING` |
+| `cursor`     | `string`  | N    | 이전 응답의 `next_cursor`로 다음 slice를 조회한다. exact encoding은 implementation detail이다. |
+| `limit`      | `integer` | N    | 기본 20, 최대 100. |
 
 Response `200 OK`:
 
@@ -545,15 +547,18 @@ Response `200 OK`:
       "activated_at": null,
       "end_at": "2026-05-31T23:59:59+09:00"
     }
-  ]
+  ],
+  "next_cursor": null
 }
 ```
 
 정책:
 
-- MVP는 공개 크루만 지원한다.
+- MVP는 공개 크루 discovery/list surface다. 참여 중인 크루 전용 surface는 발명하지 않는다.
 - 참여자 수 같은 집계 필드는 본 명세의 필수 응답에 포함하지 않는다.
 - `image_url`은 `crew.image_s3_key`에서 파생한 nullable display URL이다. DB 저장 URL이나 lifecycle/settlement/moderation authority가 아니다.
+- default ordering 후보는 `recruitment_deadline ASC, crew_id DESC` 또는 `created_at DESC, crew_id DESC` 수준에서 implementation detail로 둔다. exact ordering/cursor encoding은 이 문서에서 freeze하지 않는다.
+- `next_cursor`는 다음 slice가 존재할 때만 응답에 포함하며, 없거나 `null`이면 더 조회할 slice가 없다는 뜻이다. `has_next`, `total_count` 같은 page total 필드는 MVP 필수 contract가 아니다.
 
 ### `POST /api/crews`
 
@@ -927,11 +932,12 @@ Response `200 OK`:
 Error:
 
 - `CREW_NOT_FOUND`
-- `FORBIDDEN`
+- `CREW_ACCESS_DENIED`
 
 정책:
 
-- 호출자는 해당 크루의 active 참여자 또는 호스트여야 한다. 아니면 `FORBIDDEN`.
+- 호출자는 해당 크루의 active 참여자 또는 호스트여야 한다. 아니면 `CREW_ACCESS_DENIED`.
+- 신규 호출자는 ParticipantStatus enum 값을 직접 가리키는 `state=LOCKED`를 우선 사용하고, `state=ACTIVE`는 alias/deprecated-friendly label로만 다룬다. alias 의미를 확장하기 위해 새 ParticipantStatus enum 값을 발명하지 않는다.
 - `role`은 `HOST` 또는 `MEMBER` projection이며 `crew.host_member_id` 매칭에서 파생한다. authority/permission grant 컬럼이 아니다.
 - 응답은 membership lookup projection이다. `recognized_success_count`, `net_dodin`, `expected_refund_amount`, settlement_item 결과 같은 settlement-authoritative 필드는 포함하지 않는다.
 - 정산 결과는 `GET /api/crews/{crewId}/settlement` 및 연결된 `GET /api/settlements/{settlementId}`에서만 조회한다.
@@ -1175,7 +1181,15 @@ Error:
 
 역할:
 
-- 현재 로그인한 회원의 해당 방 인증 기록을 조회한다.
+- 현재 로그인한 회원의 해당 방 raw `mission_log` 기록을 조회한다.
+- current/effective verification summary가 아니며, append-only mission_log row를 그대로 보여주는 surface다.
+
+Query:
+
+| 필드     | 타입      | 필수 | 설명 |
+| -------- | --------- | ---- | ---- |
+| `cursor` | `string`  | N    | 이전 응답의 `next_cursor`로 다음 slice를 조회한다. exact encoding은 implementation detail이다. |
+| `limit`  | `integer` | N    | 기본 20, 최대 100. |
 
 Response `200 OK`:
 
@@ -1195,7 +1209,8 @@ Response `200 OK`:
       "decision_type": null,
       "reject_reason_code": null
     }
-  ]
+  ],
+  "next_cursor": null
 }
 ```
 
@@ -1207,6 +1222,8 @@ Error:
 정책:
 
 - 이 API는 원시 인증 기록 조회용이다.
+- 기본 정렬은 `server_time DESC`이며 동일 시각 tie-break는 `mission_log_id DESC`로 처리한다.
+- `next_cursor`는 다음 slice가 존재할 때만 응답에 포함하며, 없거나 `null`이면 더 조회할 slice가 없다는 뜻이다. `total_count` 같은 page total 필드는 MVP 필수 contract가 아니다.
 - 정산 인정 판단 기준 시간은 `MissionLog.server_time`이다.
 - `exif_taken_at`은 서버가 S3 object에서 추출/검증한 촬영 시각 보조 정보이며, 최종 정산 인정 시각 기준으로 사용하지 않는다.
 - `image_hash`는 서버 계산 SHA-256 결과의 read-only 노출이며, 동일 인증 사진 중복 의심 신호일 뿐 authority가 아니다.
@@ -1412,13 +1429,14 @@ Response `200 OK`:
 Error:
 
 - `CREW_NOT_FOUND`
-- `FORBIDDEN`
+- `FORBIDDEN_NOT_HOST`
 
 정책:
 
 - 본 API는 read-only audit 조회 전용이다. 검수 결정을 새로 만들거나 수정하지 않는다.
 - `moderation_history`는 append-only다. 본 API는 기존 레코드를 변경/삭제하지 않는다.
-- 조회 권한 매트릭스(누가 어디까지 볼 수 있는지)는 deferred decision이다. MVP 1차 구현 범위는 호스트 본인 + 본인 인증 로그에 대한 본인 참여자로 한정한다. participant raw audit visibility는 reason-code-level redaction을 우선하며, 상세 공개 범위는 여기서 과다 freeze하지 않는다.
+- 본 API는 host-only moderation audit surface다. 호출자가 해당 크루의 host가 아니면 `FORBIDDEN_NOT_HOST`로 거절하며, 일반 crew membership/resource 접근 실패인 `CREW_ACCESS_DENIED`와 구분한다.
+- 조회 권한 매트릭스(누가 어디까지 볼 수 있는지)는 deferred decision이다. MVP 1차 구현 범위에서 본 API 조회 권한은 해당 크루 host로 한정한다. participant-facing 검수 결과는 `GET /api/me/verification-history` / `GET /api/crews/{crewId}/feed`의 reason-code-level projection으로 다루며, raw audit visibility나 상세 공개 범위는 여기서 과다 freeze하지 않는다.
 - `decision_type`은 `MANUAL_APPROVE`, `MANUAL_REJECT`, `AUTO_APPROVE`, `AUTO_REJECT`만 사용한다.
 - `reject_reason_code`는 `TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER`만 사용한다.
 - `reject_memo`는 일반적으로 nullable이지만 `OTHER`일 때 필수이며 최대 50자다. internal/private context이므로 participant-facing 응답에는 포함하지 않는다. `OTHER`여도 참여자는 raw memo text가 아니라 `reject_reason_code`만 받는다.
@@ -1652,6 +1670,8 @@ Error:
 - `NOT_SUBMITTED`는 미제출 상태를 설명하는 synthetic day/member slot projection이며 `mission_log` row를 만들거나 feed item으로 반환하지 않는다.
 - 같은 참여자/같은 날짜/cadence slot에 재업로드나 상태 변화로 여러 로그가 생기면, 이전 `FAILED`/`PENDING_REVIEW` item도 일반 feed에서 visible item으로 유지할 수 있다. 삭제/숨김/overwrite로 정산 입력을 바꾸지 않는다.
 - 참여자/일자 summary 대표 규칙은 latest/effective 상태 하나를 선택한다. 정확한 tie-break는 구현 단계에서 deterministic하게 고정하되, feed item count나 reaction count를 정산 인정 횟수처럼 사용하면 안 된다.
+- feed item의 `server_time`과 `created_at`은 의미 axis가 다르다. `server_time`은 서버가 인증 요청을 수신한 시각으로 인증/정산 인정 timing anchor이고, `created_at`은 row 생성/feed 정렬/페이지네이션 보조 시각이다. MVP 예시에서는 동일 값으로 보일 수 있으나 두 값은 다른 목적의 컬럼이다.
+- `created_at`은 feed 정렬/슬라이스 cursor 보조 키로만 사용하며, settlement timing authority로 사용하지 않는다. 정산 인정 시각 기준은 항상 `MissionLog.server_time`이다.
 - Slot/dashboard/projection은 current-focused summary이고, feed timeline은 history-preserving activity stream이다.
 - `caption`은 feed item의 display/replay evidence로 포함될 수 있으며 단독 인증/정산 기준이 아니다.
 - `reject_reason_code`는 정책에 따라 participant-facing reason category로 노출할 수 있지만, internal memo text는 feed 응답에 포함하지 않는다.
@@ -2408,11 +2428,7 @@ Response `200 OK`:
       "created_at": "2026-05-07T09:30:00+09:00"
     }
   ],
-  "page": {
-    "limit": 20,
-    "next_cursor": "2026-05-07T09:30:00+09:00_3001",
-    "has_next": true
-  }
+  "next_cursor": "2026-05-07T09:30:00+09:00_3001"
 }
 ```
 
@@ -2432,8 +2448,9 @@ Error:
 
 - 포인트 내역은 최신순 `created_at DESC, point_history_id DESC`로 조회한다.
 - 동일 `created_at`이 있을 수 있으므로 `point_history_id`를 보조 정렬 키로 사용한다.
-- `cursor`는 마지막으로 조회한 항목의 `created_at + point_history_id`를 기반으로 생성한다.
-- `cursor`는 클라이언트가 직접 해석하지 않고 다음 요청에 그대로 전달하는 값으로 취급한다.
+- `cursor` encoding은 implementation detail이며, 클라이언트는 응답의 `next_cursor`를 그대로 다음 요청에 전달한다.
+- 다음 slice가 존재할 때만 응답에 `next_cursor`를 포함하며, 없거나 `null`이면 더 조회할 slice가 없다.
+- `has_next`, `total_count`, `total_pages` 같은 page total 필드는 MVP 필수 contract가 아니다.
 - `limit`이 `1` 미만이거나 `100`을 초과하면 `INVALID_LIMIT`를 반환한다.
 - `cursor` 형식이 잘못되었거나 해석할 수 없으면 `INVALID_CURSOR`를 반환한다.
 - `CREW_DEPOSIT_RESERVE`는 자산 이동이 아니라 reserve lock 이벤트다.
@@ -2491,11 +2508,23 @@ Request 후보:
 }
 ```
 
+Response `201 Created` 후보:
+
+```json
+{
+  "device_id": "client-generated-or-installation-id",
+  "platform": "ANDROID",
+  "enabled": true,
+  "created_at": "2026-05-07T09:00:00+09:00"
+}
+```
+
 Policy:
 
 - 서버는 현재 인증 사용자(JWT `sub = member.uuid`)의 token/device만 등록하거나 갱신한다. `email`이나 DB 내부 Long `member.id`를 routing identity로 사용하지 않는다.
 - Credential 등록/갱신/비활성화가 구현되더라도 notification transport 상태만 변경한다. crew lifecycle, certification, moderation, settlement, point ledger/history를 변경하지 않는다.
-- FCM token은 delivery credential에 가까운 민감 데이터로 취급하고, public response에서 불필요하게 재노출하지 않는다.
+- FCM token은 delivery credential에 가까운 민감 데이터로 취급하고, public response에서 재노출하지 않는다. `POST /api/notification-devices` 201 응답은 `PATCH`/`DELETE` 라우팅을 위한 최소 식별자(`device_id`)와 transport state(`platform`, `enabled`, `created_at`)만 포함하며 `fcm_token`을 echo back하지 않는다.
+- Notification device는 push transport state일 뿐 도메인 authority가 아니므로, 본 응답 필드는 settlement/certification/moderation/ledger truth를 변경하지 않는다.
 
 ### Notification inbox/list/read 후보
 
@@ -2508,21 +2537,36 @@ Policy:
 | `PATCH` | `/api/notifications/{notificationId}/read` | 단건 읽음 처리 |
 | `PATCH` | `/api/notifications/read-all` | 전체 읽음 처리 후보 |
 
-Response item 후보:
+`GET /api/notifications` query 후보:
+
+| 필드     | 타입      | 필수 | 설명 |
+| -------- | --------- | ---- | ---- |
+| `cursor` | `string`  | N    | 이전 응답의 `next_cursor`로 다음 slice를 조회한다. exact encoding은 implementation detail이다. |
+| `limit`  | `integer` | N    | 기본 20, 최대 100. |
+
+`GET /api/notifications` 응답 후보:
 
 ```json
 {
-  "notification_id": "uuid-or-id",
-  "event_type": "MISSION_LOG_APPROVED",
-  "resource_type": "mission_log",
-  "resource_id": "1201",
-  "deep_link": "dondok://crews/42/mission-logs/1201",
-  "occurred_at": "2026-05-13T07:31:08+09:00",
-  "display_text": "인증 결과가 반영되었습니다.",
-  "requires_refetch": true,
-  "read_at": null
+  "items": [
+    {
+      "notification_id": "uuid-or-id",
+      "event_type": "MISSION_LOG_APPROVED",
+      "resource_type": "mission_log",
+      "resource_id": "1201",
+      "deep_link": "dondok://crews/42/mission-logs/1201",
+      "occurred_at": "2026-05-13T07:31:08+09:00",
+      "display_text": "인증 결과가 반영되었습니다.",
+      "requires_refetch": true,
+      "read_at": null
+    }
+  ],
+  "next_cursor": null
 }
 ```
+
+- `next_cursor`는 다음 slice가 존재할 때만 응답에 포함하며, 없거나 `null`이면 더 조회할 slice가 없다. `has_next`, `total_count` 같은 page total 필드는 thin notification 전략에서 필수 contract가 아니다.
+- 이 응답 후보는 backend persistence 기본값이 아니며, frontend local/browser permission/deep-link refetch로 충분하면 서버 저장 계약으로 승격하지 않는다.
 
 Field policy:
 
