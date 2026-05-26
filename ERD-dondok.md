@@ -932,7 +932,13 @@ Unique / Index:
 | `period_start_at`               | `DATETIME(6)`   | N        | 계산 시작                                                                                        |
 | `period_end_at`                 | `DATETIME(6)`   | N        | 계산 종료                                                                                        |
 | `share_ratio`                   | `DECIMAL(18,8)` | N        | 지분율                                                                                           |
-| `refund_amount`                 | `BIGINT`        | N        | 최종 지급/환급 총액. 다른 per-item 금액 값은 MVP에서 저장 컬럼이 아닌 계산 중간값이다             |
+| `base_refund_amount`            | `BIGINT`        | N        | 절사 전 base refund 스냅샷. settlement 시점 설명용 컬럼이며 payout authority는 아니다             |
+| `remainder_bonus_amount`        | `BIGINT`        | N        | deterministic remainder allocation으로 분배된 잔액 스냅샷. payout authority는 `refund_amount`다   |
+| `reward_amount`                 | `BIGINT`        | N        | base + remainder bonus 합산 보상 스냅샷. 설명용 컬럼이며 payout authority가 아니다                 |
+| `refund_amount`                 | `BIGINT`        | N        | 최종 지급/환급 총액의 persisted source of truth. API 응답의 `final_amount`는 본 컬럼의 alias projection이며 별도 저장하지 않는다 |
+| `withdrawn_at_snapshot`         | `DATETIME(6)`   | Y        | 정산 시점 `crew_participant.withdrawn_at` snapshot. brownfield/deferred reference이며 MVP active settlement에서는 항상 `null`이다 |
+| `effective_moderation_snapshot` | `JSON`          | Y        | 정산 시점 latest-effective moderation state snapshot. read-only audit/replay context이며 payout/recalculation authority가 아니다 |
+| `moderation_chain_ref`          | `JSON`          | Y        | 정산 시점 `moderation_history` chain reference (예: `{"latest_id":..., "count":...}`). audit linkage이며 payout authority가 아니다 |
 | `draw_key_snapshot`             | `CHAR(64)`      | Y        | non-payout 표시/설명 ordering key                                                                |
 | `tie_break_rank`                | `INT`           | Y        | non-payout 표시/설명 순위                                                                        |
 | `calculation_reason`            | `JSON`          | N        | MVP 설명/검증에 필요한 최소 opaque 포함/제외 근거                                                 |
@@ -970,6 +976,9 @@ Unique / Index:
 - `calculation_reason` 값 공간은 정산 스냅샷의 설명/QA 검색성을 위한 vocabulary이며, DB 제약이나 API 응답 enum으로 승격하지 않는다.
 - `calculation_reason`은 reason-code mapping version과 함께 해석한다. 과거 정산 설명은 현재 UX wording이 아니라 당시 vocabulary 기준으로 reconstruction되어야 한다.
 - `settlement_item`은 참여자별 deterministic 계산 snapshot이고, `point_history`는 그 결과를 실제 잔액에 반영하는 authoritative append-only ledger다. `Settlement.status = SUCCEEDED` 이후에는 frozen snapshot과 연결된 `point_history`가 운영/분쟁/조회 기준이며 post-freeze mutation은 금지된다.
+- `refund_amount`는 per-item 최종 환급 총액의 persisted source of truth이고, `base_refund_amount` + `remainder_bonus_amount` + `reward_amount`는 동일 환급 결과를 deterministic하게 설명/감사하기 위한 snapshot columns다. 이 세 컬럼은 항상 `reward_amount = base_refund_amount + remainder_bonus_amount`, `refund_amount = reward_amount` invariant를 만족하도록 settlement 트랜잭션에서 함께 기록한다. payout mutation authority는 여전히 `refund_amount`와 연결된 `point_history`다. API 응답에서 `final_amount`를 노출하는 경우 본 `refund_amount`의 read-only alias로 해석한다.
+- `effective_moderation_snapshot`, `moderation_chain_ref`, `withdrawn_at_snapshot`은 정산 시점 컨텍스트를 설명하기 위한 read-only audit/replay context이며 현재 엔진으로의 reinterpretation, recalculation, payout rewrite authority가 아니다. settlement input freeze 이후에 `moderation_history`에 새 row가 append되어도 본 snapshot 컬럼을 mutate하지 않는다.
+- `withdrawn_at_snapshot`은 brownfield/deferred withdrawal reference로만 사용한다. MVP active settlement에서는 frozen `LOCKED` baseline을 사용하므로 항상 `null`이며, 이 값이 채워져 있어도 frozen baseline이나 `refund_amount`를 소급 변경하는 근거가 되지 않는다.
 - 정산 실행에서는 `settlement_item`을 먼저 생성해 계산 결과를 고정하고, 이후 `point_history`를 생성한 뒤 `point_history_id`를 연결한다.
 - 두 단계는 participant별 `idempotency_key`를 통해 느슨하게 연결되므로, partial 재시도 시 이미 반영된 환급은 재사용하고 누락된 환급만 안전하게 이어서 처리할 수 있어야 한다.
 - `point_history_id`는 중간 실패 복구를 위해 nullable이지만, `settlement.status = SUCCEEDED`인 결과에서는 모두 채워져 있어야 한다.
@@ -1303,7 +1312,13 @@ erDiagram
         DATETIME period_start_at
         DATETIME period_end_at
         DECIMAL share_ratio
+        BIGINT base_refund_amount
+        BIGINT remainder_bonus_amount
+        BIGINT reward_amount
         BIGINT refund_amount
+        DATETIME withdrawn_at_snapshot
+        JSON effective_moderation_snapshot
+        JSON moderation_chain_ref
         CHAR draw_key_snapshot
         INT tie_break_rank
         JSON calculation_reason
@@ -1311,8 +1326,8 @@ erDiagram
         DATETIME created_at
         DATETIME updated_at
     }
-    %% SETTLEMENT_ITEM: nullable=draw_key_snapshot, tie_break_rank, point_history_id; UK(settlement_id, crew_participant_id); nullable UK(point_history_id); IDX(member_id).
-    %% SETTLEMENT_ITEM note: participant snapshot; refund_amount is the persisted per-item payout amount, while calculation_reason is required opaque explanation data.
+    %% SETTLEMENT_ITEM: nullable=withdrawn_at_snapshot, effective_moderation_snapshot, moderation_chain_ref, draw_key_snapshot, tie_break_rank, point_history_id; UK(settlement_id, crew_participant_id); nullable UK(point_history_id); IDX(member_id).
+    %% SETTLEMENT_ITEM note: participant snapshot; refund_amount is the persisted per-item payout source of truth and API final_amount is its read-only alias; base_refund_amount + remainder_bonus_amount + reward_amount are deterministic explanation snapshots (reward_amount = base + bonus; refund_amount = reward_amount). effective_moderation_snapshot/moderation_chain_ref/withdrawn_at_snapshot are read-only audit/replay context, not payout/recalculation authority.
     %% SETTLEMENT_ITEM enum: participant_status_snapshot is frozen LOCKED for MVP active settlement; WITHDRAWN is deferred/brownfield reference.
 
     MEMBER ||--o{ MEMBER_REFRESH_TOKEN : has

@@ -130,9 +130,10 @@
 ### 3.6 PointTransactionType
 
 - `POINT_CHARGE`
-- `CREW_DEPOSIT_LOCK`
-- `CREW_SETTLEMENT_REFUND`
-- `CREW_CANCELLED_REFUND`
+- `CREW_DEPOSIT_RESERVE`: `PENDING` 신청 reserve 생성 시 발행되는 lock 이벤트다. 자산 이동이 아니라 `available_balance -= deposit_amount` + `reserved_balance += deposit_amount` bucket transition을 기록한다.
+- `CREW_RESERVE_RELEASE`: `PENDING -> REJECTED/CANCELLED/EXPIRED` terminal 전이와 같은 transaction에서 reserve를 사용자 `available_balance`로 반환하는 이벤트다.
+- `CREW_SETTLEMENT_REFUND`: 일반 정산 환급 이벤트. `locked_balance -= deposit_amount` + 환급 결과만큼 `available_balance` 증가를 동일 transaction에서 처리한다.
+- 승인 시점 `PENDING -> LOCKED` 전이는 `reserved_balance -> locked_balance` bucket transition만 수행하며, 새 `point_history` row를 만들지 않는다. `CREW_DEPOSIT_LOCK`과 같은 별도 lock-event ledger type은 사용하지 않는다.
 
 ### 3.7 MissionLogFailureReason
 
@@ -760,7 +761,7 @@ Error:
 정책:
 
 - 취소는 `PENDING` 상태일 때만 허용한다. `LOCKED`, `REJECTED`, `EXPIRED`, `CANCELLED`는 `APPLICATION_NOT_CANCELLABLE`로 거절한다.
-- 기존 reserve는 `CREW_CANCELLED_REFUND` 계열 point_history로 반환하고, `point_account.balance`를 같은 금액만큼 복구한다. terminal 전이와 reserve release는 같은 transaction에서 처리하며, release는 `crew_participant.id`당 한 번만 허용한다. 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
+- 기존 reserve는 `CREW_RESERVE_RELEASE` point_history로 반환하고, `point_account.available_balance`를 같은 금액만큼 복구한다. terminal 전이와 reserve release는 같은 transaction에서 처리하며, release는 `crew_participant.id`당 한 번만 허용한다. 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
 - 멱등성: 동일 사용자가 이미 `CANCELLED`된 신청에 대해 다시 호출하면 `APPLICATION_NOT_CANCELLABLE`을 반환한다. 동일 idempotency 응답을 원하면 클라이언트가 `204 No Content` polling 패턴을 별도로 처리한다.
 - `CANCELLED`는 pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다.
 
@@ -805,7 +806,7 @@ Error:
   4. reserve snapshot(`deposit_amount`)은 그대로 유지해 activation/frozen baseline과 정산 입력으로 사용한다.
 - 위 단계 중 하나라도 실패하면 `LOCKED`로 전이하지 않는다. 별도 중간 상태를 만들지 않고, 신청자 `crew_participant.status`는 `PENDING`로 유지하거나 승인 실패 응답으로 처리한다.
 - `INSUFFICIENT_BALANCE`는 신청 생성 시 reserve에 실패할 때 발생한다. 승인 endpoint는 추가 잔액 차감을 수행하지 않는다.
-- `CREW_DEPOSIT_LOCK point_history`는 신청 생성 시점의 reserve 성공 원장으로 생성된다. 사용자 측 별도 deposit-lock endpoint는 제공하지 않는다.
+- 신청 생성 시점의 reserve 성공 원장은 `CREW_DEPOSIT_RESERVE point_history`로 이미 기록되어 있다. 승인은 `reserved_balance -> locked_balance` bucket transition만 수행하며 새 `point_history`를 만들지 않는다. 사용자 측 별도 deposit-lock endpoint는 제공하지 않는다.
 
 ### `POST /api/crews/{crewId}/applications/{crewParticipantId}/reject`
 
@@ -839,7 +840,7 @@ Error:
 
 - 호출자는 해당 `crew.host_member_id`와 일치해야 한다. 아니면 `FORBIDDEN_NOT_HOST`.
 - 거절은 `PENDING` 상태에서만 가능하다. 다른 상태는 `APPLICATION_NOT_REJECTABLE`로 거절한다.
-- 기존 reserve는 `CREW_CANCELLED_REFUND` 계열 point_history로 반환하고, `point_account.balance`를 같은 금액만큼 복구한다. terminal 전이와 reserve release는 같은 transaction에서 처리하며, release는 `crew_participant.id`당 한 번만 허용한다. 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
+- 기존 reserve는 `CREW_RESERVE_RELEASE` point_history로 반환하고, `point_account.available_balance`를 같은 금액만큼 복구한다. terminal 전이와 reserve release는 같은 transaction에서 처리하며, release는 `crew_participant.id`당 한 번만 허용한다. 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
 - `REJECTED`는 terminal pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다. 동일 crew 재신청은 MVP에서 허용하지 않는다.
 
 ### `GET /api/crews/{crewId}/applications`
@@ -900,7 +901,7 @@ Query:
 
 | 필드     | 타입      | 필수 | 설명 |
 | -------- | --------- | ---- | ---- |
-| `state`  | `string`  | N    | `ACTIVE` (lifecycle 활성 멤버: `LOCKED`/`ACTIVE` 등 active membership), `LOCKED`, `WITHDRAWN`(brownfield-deferred) 중 하나. 생략 시 `ACTIVE`. |
+| `state`  | `string`  | N    | filter alias label. `ACTIVE`, `LOCKED`, `WITHDRAWN` 중 하나. 생략 시 `ACTIVE`. `ACTIVE`는 ParticipantStatus enum 값이 아니라 "active membership" alias이며 MVP에서는 `LOCKED` participant 집합을 의미한다. `LOCKED`는 ParticipantStatus enum 값을 직접 지정한다. `WITHDRAWN`은 brownfield-deferred reference이며 MVP active baseline authority가 아니다. |
 | `cursor` | `string`  | N    | 이전 응답의 `next_cursor`로 다음 slice를 조회한다. |
 | `limit`  | `integer` | N    | 기본 50, 최대 200. |
 
@@ -1466,7 +1467,7 @@ Error:
 - settlement input freeze 이후에는 `SETTLEMENT_INPUT_FROZEN`로 거절한다. host moderation은 pre-freeze contextual review authority만 가진다.
 - 트랜잭션 단계:
   1. 대상 `mission_log`가 `PENDING_REVIEW`이고 settlement input freeze 이전인지 확인한다.
-  2. `mission_log.certification_status = SUCCESS`, `decision_type = MANUAL_APPROVE`, `decided_by = moderator_member_id`, `decided_at = now`로 갱신한다.
+  2. `mission_log.certification_status = SUCCESS`, `decision_type = MANUAL_APPROVE`, `moderator_id = host member 내부 FK`, `moderator_decided_at = now`로 갱신한다. internal FK `moderator_id`는 response에 직접 노출하지 않고 `moderator_member_uuid`로만 노출한다.
   3. `moderation_history`에 append-only 레코드를 삽입한다. `before_state`/`after_state`는 latest-effective snapshot JSON이다.
 - 본 API는 settlement 재계산을 trigger하지 않는다. 최종 인정 횟수와 환급액은 종료 시점 단일 settlement 트랜잭션에서 결정한다.
 - `point_history`, `crew_participant`, `settlement_item`을 직접 변경하지 않는다.
@@ -2009,7 +2010,9 @@ Error:
 - partial 상태에서는 일부 item의 `point_history_id`가 `null`일 수 있고, 이 경우 `status`는 `SUCCEEDED`가 아니라 `RETRY_WAIT` 또는 `FAILED`다.
 - 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. Brownfield `HOST_REMAINDER` 명칭은 legacy alias일 뿐 host reward/authority/privilege가 아니다.
 - 전체 인정 성공 `0`이면 all-fail equal-principal refund를 적용한다. 각 참여자는 자기 `deposit_amount`를 환급받고 host/winner/draw remainder 추가 지급은 발생하지 않는다.
-- `settlement.algorithm_version`, `settlement.rule_context_snapshot`, `settlement_item.effective_moderation_snapshot`, `settlement_item.moderation_chain_ref`은 정산 시점 컨텍스트 스냅샷 source-of-truth다(ERD §정산/Settlement-design §7 참조). 이 컨텍스트를 API 응답에 어떤 모양으로 노출할지는 deferred decision이다. 노출하더라도 read-only replay/audit 컨텍스트이고, 현재 엔진으로의 reinterpretation/recalculation 권한이 아니다.
+- `settlement.algorithm_version`, `settlement.rule_context_snapshot`, `settlement_item.effective_moderation_snapshot`, `settlement_item.moderation_chain_ref`, `settlement_item.withdrawn_at_snapshot`은 정산 시점 컨텍스트 스냅샷 source-of-truth다(ERD §정산/Settlement-design §7 참조). API 응답에 노출하더라도 read-only replay/audit 컨텍스트이고, 현재 엔진으로의 reinterpretation/recalculation 권한이 아니다.
+- per-item 금액 필드 의미 정렬: `settlement_item.refund_amount`는 persisted 최종 환급 source of truth다. API 응답의 `final_amount`는 동일 값을 노출하는 read-only alias이며 별도 저장 컬럼이 아니다. `base_refund_amount`/`remainder_bonus_amount`/`reward_amount`는 deterministic 환급 산출을 설명하는 snapshot 컬럼으로 `reward_amount = base_refund_amount + remainder_bonus_amount`, `refund_amount = reward_amount` invariant를 만족한다. payout mutation authority는 여전히 `refund_amount`와 연결된 `point_history`다.
+- `remainder_winner_crew_participant_id`는 brownfield `TOP_1_ALL`/`DRAW_SPLIT_ONE_WON` reference를 위해 응답 schema에 유지하는 nullable projection field다. MVP `DETERMINISTIC_REMAINDER_ALLOCATION` 정책에서는 잔액이 per-item으로 분배되므로 항상 `null`이며, ERD `settlement` 헤더에는 별도 저장 컬럼을 두지 않는다. 본 필드가 `null`이 아닌 값으로 노출되더라도 host reward/winner/draw authority를 부활시키지 않는다.
 - `settlement_item`에는 저장 `rank` 컬럼이 없다. UI 표시용 최종 순위가 필요하면 `final_rank`라는 logical projection으로 노출하고, `recognized_success_count DESC`, 동률이면 `crew_participant_id ASC` 기준으로 read-time 계산한다. `final_rank`는 payout authority가 아니며 지급 결과 변경에 사용하지 않는다.
 
 ### `GET /api/admin/settlements`
@@ -2433,16 +2436,16 @@ Error:
 - `cursor`는 클라이언트가 직접 해석하지 않고 다음 요청에 그대로 전달하는 값으로 취급한다.
 - `limit`이 `1` 미만이거나 `100`을 초과하면 `INVALID_LIMIT`를 반환한다.
 - `cursor` 형식이 잘못되었거나 해석할 수 없으면 `INVALID_CURSOR`를 반환한다.
-- `CREW_DEPOSIT_LOCK`는 자산 이동이 아니라 lock 이벤트다.
-- `CREW_SETTLEMENT_REFUND`와 `CREW_CANCELLED_REFUND`는 실제 사용 가능 잔액 증가 이벤트다.
+- `CREW_DEPOSIT_RESERVE`는 자산 이동이 아니라 reserve lock 이벤트다.
+- `CREW_SETTLEMENT_REFUND`와 `CREW_RESERVE_RELEASE`는 실제 사용 가능 잔액 증가 이벤트다.
 - `reference_type`은 `POINT_CHARGE`, `CREW_PARTICIPANT`, `SETTLEMENT_ITEM`만 사용한다.
 - `reference_type` / `reference_id` 매핑은 아래와 같다.
 
 | 도메인 동작         | `transaction_type`       | `reference_type`   | `reference_id` 규칙                                                                                                 | `idempotency_key` 예시 |
 | ------------------- | ------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | 포인트 충전         | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. | `charge:{paymentKey}` |
-| 크루 참여 보증금 reserve | `CREW_DEPOSIT_LOCK`      | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `crew:{crewId}:participant:{participantId}:reserve` |
-| PENDING reserve release | `CREW_CANCELLED_REFUND`  | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `crew:{crewId}:participant:{participantId}:reserve-release` |
+| 크루 참여 보증금 reserve | `CREW_DEPOSIT_RESERVE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `crew:{crewId}:participant:{participantId}:reserve` |
+| PENDING reserve release | `CREW_RESERVE_RELEASE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `crew:{crewId}:participant:{participantId}:reserve-release` |
 | 일반 정산 환급      | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                | `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}` |
 
 `{participantId}` placeholder는 내부적으로 `crew_participant.id`를 가리킨다. API field로 직접 노출할 때는 `crewParticipantId`로 정렬한다. `{settlementType}`은 §3.8의 `daily_settlement_type` (`A` / `B` / `C`) 값이다.
@@ -2671,7 +2674,7 @@ RUNNING
 - 최종 정산 인정 시각 판단은 `server_time` 기준이며, `exif_taken_at`은 촬영 시각 검증용 보조 정보로만 사용해야 한다.
 - `failure_reason = null`이어도 최종 정산에서 제외될 수 있으므로, `DAILY` 중복이나 `SPECIFIC_DAYS` 제외 여부는 `settlement_item.calculation_reason`이 포함된 정산 결과 화면에서 확인해야 한다.
 - 정산 결과 화면은 먼저 `GET /api/crews/{crewId}/settlement`를 polling하고, `status = SUCCEEDED`가 되면 `settlement_id`로 `GET /api/settlements/{settlementId}`를 호출한다.
-- 포인트 내역 화면은 `transaction_type` 그대로 내려받고, UI에서 `POINT_CHARGE`, `CREW_DEPOSIT_LOCK`, `CREW_SETTLEMENT_REFUND`, `CREW_CANCELLED_REFUND`를 한국어 라벨로 매핑한다.
+- 포인트 내역 화면은 `transaction_type` 그대로 내려받고, UI에서 `POINT_CHARGE`, `CREW_DEPOSIT_RESERVE`, `CREW_RESERVE_RELEASE`, `CREW_SETTLEMENT_REFUND`를 한국어 라벨로 매핑한다.
 - 포인트 내역 화면의 `next_cursor`는 UI가 직접 해석하지 말고 다음 요청에 그대로 전달해야 한다.
 - `Settlement.status = SUCCEEDED` 전에는 일부 `point_history_id`가 비어 있을 수 있으므로, 정산 상세의 item 금액과 포인트 내역 표시 시 상태를 함께 봐야 한다.
 - Dashboard 화면의 금액, 비율, 순위는 “예상”, “현재 기준”, “추정” 라벨로 표시하고 “확정”, “최종”, “정산 완료” 라벨은 Settlement API 결과에만 사용한다.

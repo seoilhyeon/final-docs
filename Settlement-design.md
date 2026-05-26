@@ -423,7 +423,13 @@ where id = :settlementId
 | `period_start_at`             | 계산 기간 시작                                                        |
 | `period_end_at`               | 계산 기간 종료                                                        |
 | `share_ratio`                 | 최종 지분율                                                           |
-| `refund_amount`               | 최종 지급/환급 총액. 절사 전 금액, base refund, remainder bonus, reward는 MVP에서 저장 컬럼이 아닌 계산 중간값이다 |
+| `base_refund_amount`          | 절사 전 base refund 스냅샷. 설명용이며 payout authority가 아님         |
+| `remainder_bonus_amount`      | deterministic remainder allocation으로 분배된 잔액 스냅샷. payout authority가 아님 |
+| `reward_amount`               | base + remainder bonus 합산 보상 스냅샷. payout authority가 아님       |
+| `refund_amount`               | 최종 지급/환급 총액의 persisted source of truth. `reward_amount = base_refund_amount + remainder_bonus_amount`, `refund_amount = reward_amount` invariant를 만족한다. API 응답의 `final_amount`는 본 컬럼의 read-only alias projection이다 |
+| `withdrawn_at_snapshot`       | 정산 시점 `crew_participant.withdrawn_at` snapshot. brownfield/deferred reference이며 MVP active settlement에서는 `null` |
+| `effective_moderation_snapshot` | 정산 시점 latest-effective moderation state JSON snapshot. read-only audit/replay context |
+| `moderation_chain_ref`        | 정산 시점 `moderation_history` chain reference. audit linkage이며 payout authority가 아님 |
 | `draw_key_snapshot`           | non-payout 표시/설명 ordering에 사용한 키. 지급액 결정 권한 아님       |
 | `tie_break_rank`              | non-payout 표시/설명 정렬 순위                                        |
 | `calculation_reason`          | MVP 설명/검증에 필요한 최소 opaque 포함/제외 근거 JSON 또는 TEXT      |
