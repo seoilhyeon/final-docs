@@ -40,9 +40,37 @@
 ### 2.2 인증
 
 - 로그인 이후 API는 `Authorization: Bearer {accessToken}` 헤더를 사용한다.
-- access token은 로그인/재발급 응답 body로 내려주며, FE는 메모리 기반으로 다룬다.
+- access token은 로그인/재발급 응답 body의 `access_token` 필드(snake_case)로 내려주며, FE는 메모리 기반으로 다룬다.
+- access token은 protected API 응답 헤더로 새 값을 내려보내지 않는다. filter/interceptor 단계에서 응답 `Authorization` 헤더를 새 access token으로 덮어쓰는 implicit refresh 흐름은 canonical contract가 아니다.
 - refresh token은 `HttpOnly`, `Secure`, `SameSite` 속성이 적용된 쿠키로만 전달한다. response body, `localStorage`, `sessionStorage`, JS 접근 대상으로 노출하지 않는다.
-- refresh token은 별도 API(`POST /api/auth/refresh`)로 재발급하며, 클라이언트는 refresh cookie를 자동 전송하기만 한다.
+- refresh token은 별도 API(`POST /api/auth/refresh`)로 재발급하며, 클라이언트는 refresh cookie를 자동 전송하기만 한다. 모든 protected API 요청에서 만료된 access token을 받아 자동 재발급해 주는 middleware 흐름은 canonical contract가 아니며, 필요 시 reference/implementation detail로만 기술한다.
+
+#### 2.2.1 JWT claim
+
+- 공통: `sub = member.uuid`, `iat`, `exp`.
+- access token: `type = access`.
+- refresh token: `type = refresh`.
+- `email`이나 DB 내부 Long `member.id`를 JWT subject로 사용하지 않는다.
+
+#### 2.2.2 토큰 수명
+
+- access token: 30분(`30m`).
+- refresh token: 7일(`7d`).
+- 구체적인 초 단위 값은 서버 설정 source of truth이며, 본 명세 wording은 정합성 기준선이다.
+
+#### 2.2.3 Refresh cookie 속성
+
+- 공통: `HttpOnly` 강제. JS access 금지.
+- local/dev: `Secure=false`, `SameSite=Lax` 사용 가능.
+- production: `Secure=true`, `SameSite=Lax` 기본. 크로스 사이트 cookie 송수신이 필요한 경우 `SameSite=None; Secure`.
+- 브라우저 클라이언트는 refresh cookie 송수신을 위해 요청에 `credentials: include`를 적용한다.
+
+#### 2.2.4 CORS
+
+- refresh token cookie 전달은 `Set-Cookie` 응답 헤더 + 브라우저 자동 cookie 처리에 의존한다.
+- `Set-Cookie`는 JS에서 읽을 수 있는 response header가 아니다. 클라이언트 코드가 `Set-Cookie` 헤더를 직접 읽어 refresh token을 추출하는 흐름은 금지한다.
+- `Access-Control-Expose-Headers`에 `Set-Cookie`를 의존하는 흐름도 canonical이 아니다.
+- 쿠키 인증을 위해 서버는 credentials 요청을 허용하고, 클라이언트는 `credentials: include`로 호출한다.
 
 ### 2.3 식별자 경계
 
