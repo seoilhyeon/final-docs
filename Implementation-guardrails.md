@@ -21,6 +21,7 @@
 - admin settlement list/retry API (`GET /api/admin/settlements`, `POST /api/admin/settlements/{settlementId}/retry`) 또는 admin manual settlement mutation surface
 - AI habit report endpoint/surface
 - `GET /api/notifications/stream` 같은 notification stream / SSE surface
+- `notification_delivery_attempt`, notification preference matrix, notification template CMS/table, campaign/broadcast, transport redesign을 MVP active persistence로 승격
 - `WITHDRAWN`, active withdrawal, 중도탈퇴, rejoin lifecycle semantics
 - `WEEKLY_N`
 - correction workflow, public replay engine, recalculation engine, correction/replay mutation surface
@@ -43,7 +44,30 @@
 - all-fail = equal principal refund.
 - `settlement_item` + `point_history` linkage가 final settlement와 refund authority다.
 
-## 0.1 Schema implementation conventions
+## 0.1 Greenfield schema-to-entity readiness
+
+- Backend persistence implementation is greenfield for MVP entities/enums/Flyway migrations. Do not assume existing entities are the authority or patch target; create entities, enums, and migrations from finalized docs.
+- `docs/ERD-dondok.md` owns the active table/relationship set. `docs/Schema-migration-spec.md` owns high-risk migration guidance, V1 ordering, and minimal notification persistence shape.
+- Code generation starts only after docs freeze for the current phase. Generated JPA entities must not introduce endpoint/status/table semantics that are absent from backend API docs and derived implementation docs.
+- `backend/build.gradle` must include Flyway support (`org.flywaydb:flyway-core`, `org.flywaydb:flyway-mysql`) before implementation is considered migration-ready.
+- V1 migration must be validated with Testcontainers MySQL. H2-only validation is not enough for MySQL FK, nullable unique, CHECK, index, and boolean behavior.
+
+## 0.2 Minimal notification persistence allowlist
+
+Allowed MVP notification persistence is limited to:
+
+- `notification_device`: authenticated member Android FCM device/token registration lifecycle for active device register/update/delete API.
+- `notification`: minimal inbox/read/unread row for active notification list, unread count, mark-read, and read-all API.
+- `notification.read_at`: nullable timestamp; `NULL` means unread.
+
+Notification implementation guardrails:
+
+- notification persistence is UX/refetch hint only and not canonical domain state.
+- notification payload, inbox row, unread/read state, and FCM delivery state must not be modeled as mission certification, crew lifecycle, settlement, moderation, point ledger, audit history, or unresolved task authority.
+- Do not add notification status workflow/status machine. `read_at` is the only read/unread persistence state.
+- Do not add `notification_delivery_attempt` table, notification preference matrix, template CMS/table, campaign/broadcast, SSE/stream, realtime transport redesign, or notification transport retry topology in V1.
+
+## 0.3 Schema implementation conventions
 
 - Primary keys use `BIGINT` auto increment.
 - Monetary amounts use `BIGINT` only. Do not use floating-point money types.
@@ -243,6 +267,8 @@ MVP 구현에서 이 guardrail 범위의 canonical transaction type은 아래와
 - Deferred/Brownfield/Removed/Contract Drift Notes surface를 active MVP API, roadmap commitment, implementation permission처럼 사용
 - crew start, crew withdraw, admin settlement list/retry, AI habit report, notification stream/SSE, `WITHDRAWN`, active withdrawal/rejoin, `WEEKLY_N`, correction/replay engine, admin manual settlement surface 재도입
 - notification payload, inbox row, unread/read state를 mission certification, crew lifecycle, settlement, point ledger canonical state로 모델링
+- notification task workflow/status machine을 생성하거나 `read_at` 외 별도 notification status enum을 도입
+- `notification_delivery_attempt` MVP table, notification preference/template persistence, SSE/stream, transport redesign 재도입
 - API display/convenience/projection field를 final settlement, payout guarantee, lifecycle authority, ledger truth로 모델링
 - host 또는 admin/manual surface를 lifecycle, settlement, ledger authority로 모델링
 - `settlement_pending_balance` persisted column 추가
@@ -255,6 +281,11 @@ MVP 구현에서 이 guardrail 범위의 canonical transaction type은 아래와
 - projection을 frozen/final/guaranteed payout처럼 모델링
 - private crew MVP semantics 구현
 - `APPROVED_LOCK_PENDING` 재도입
+- `approved_at` 컬럼 추가
+- `payload_hash` / persisted payload consistency framework 구현
+- AI habit report entity/API 구현
+- replay/correction engine 구현
+- active `WITHDRAWN` 또는 active `WEEKLY_N` 구현 (no active WITHDRAWN / no active WEEKLY_N)
 - all-fail을 profit/reward/increase로 모델링
 - retry/replay를 correction/dispute mutation으로 섞기
 

@@ -14,7 +14,9 @@ Authoritative references:
 Scope:
 
 - This document is DB/Flyway/JPA oriented.
-- It covers only core MVP backend entities: `crew_participant`, `point_account`, `point_history`, `settlement`, `settlement_item`.
+- Code generation must wait for docs freeze: entity/enums/Flyway migrations are created from the finalized ERD/Schema/guardrail docs.
+- It gives detailed Flyway guidance for high-risk core MVP backend entities: `crew_participant`, `point_account`, `point_history`, `settlement`, `settlement_item`.
+- Greenfield V1 must create entities/migrations from finalized docs, not patch assumed existing entities. `docs/ERD-dondok.md` owns the active table/relationship set; this spec provides migration ordering and high-risk table guidance plus the minimal notification persistence required by the active notification API.
 - It does not redesign product semantics, lifecycle semantics, settlement semantics, or Deferred/Brownfield/Removed domains. It does not create active endpoint/status/feature semantics absent from backend API docs/API-spec.
 
 ## 1. Schema conventions
@@ -24,6 +26,7 @@ Canonical rules for this migration round:
 - PK strategy: every table primary key is `BIGINT` auto increment.
 - Money type: every persisted monetary amount uses `BIGINT` only.
 - Enum persistence: application enums are stored as `STRING` (`VARCHAR`) values, not ordinal integers.
+- External UUID columns (e.g. `member.uuid`, `notification.uuid`) use `BINARY(16)` for DB storage. API serialization renders the canonical `CHAR(36)` form. This is the single project-wide convention; individual table specs do not re-decide UUID storage type.
 - Audit columns:
   - `created_at DATETIME(6) NOT NULL`
   - `updated_at DATETIME(6) NOT NULL` for mutable aggregate/cache tables
@@ -187,6 +190,7 @@ Append-only authoritative point ledger. It records every reserve, reserve releas
 - `available_after`, `reserved_after`, and `locked_after` are reconciliation/debugging snapshots, not authority over append-only ledger ordering or idempotency.
 - `payload_hash` is deferred for MVP and is not required in this migration.
 - Payload consistency verification framework is deferred for MVP.
+- No `point_charge` table is created. Point charge confirmation appends directly to `point_history` with `transaction_type = POINT_CHARGE`, `reference_type = POINT_CHARGE`, `reference_id = created point_history.id`, and `idempotency_key = charge:{paymentKey}`.
 - Same-key retry with the same canonical input should reuse/link the existing ledger row.
 - Same-key retry with a different canonical input is an idempotency conflict and must not create a new ledger row.
 
@@ -249,6 +253,7 @@ Settlement header and execution claim row for one crew. It stores frozen aggrega
 - `baseline_frozen_at` is persisted freeze evidence for the LOCKED-only baseline; retry must complete the same settlement row rather than replace baseline semantics.
 - `Settlement.status = SUCCEEDED` is allowed only after every `settlement_item` has a valid `point_history_id` and corresponding `point_history` row.
 - Retry/replay/correction remain separated. Retry completes unfinished existing settlement execution; replay is audit/reconstruction; correction workflow is Deferred/Brownfield historical/reference-only and not implemented by this migration.
+- `last_retry_at` / `next_retry_at` may be omitted from V1 unless the runtime intentionally implements DB polling/scheduling. If retained, they remain Deferred/runtime metadata candidates and never active scheduler/API authority.
 
 ### 2.5 `settlement_item`
 
@@ -349,7 +354,19 @@ Rules:
 - Same-key retry with different canonical input is an idempotency conflict; do not create a second ledger row.
 - `payload_hash` is deferred for MVP, so same/different canonical input checks are application-level rules, not a persisted payload consistency framework.
 
-## 5. Projection rules
+## 5. Implementation enum / column notes
+
+- `SettlementStatus.NONE` is API projection only and must not be stored as a DB settlement status.
+- `ParticipantStatus` active persistence values are only `PENDING`, `LOCKED`, `REJECTED`, `CANCELLED`, `EXPIRED`.
+- `FrequencyType` active values are only `DAILY`, `SPECIFIC_DAYS`; `WEEKLY_N` is not active V1 cadence.
+- `MissionLogFailureReason` excludes `AFTER_WITHDRAWN` in MVP active persistence.
+- `MissionLogReactionType` should remain free `VARCHAR(20)` for MVP unless a later source-of-truth freezes a bounded Java enum.
+- `participant_status_snapshot` is `LOCKED` only for MVP active settlement.
+- `member.password_hash` may remain DB nullable; email/password signup enforces password presence at service level.
+- `crew.image_s3_key` is nullable and UI may use category/default fallback.
+- `withdrawn_at_snapshot` is always `NULL`/ignored in MVP active settlement.
+
+## 6. Projection rules
 
 Wallet/projection fields:
 
@@ -370,21 +387,105 @@ Rules:
 - Settlement baseline and final refund use frozen `LOCKED` participant snapshots and `settlement_item` / `point_history` linkage.
 - `settlement_pending_balance` must not exist as a persisted DB/account column.
 
-## 6. Migration sequencing
+## 7. Minimal notification persistence
+
+The active notification API requires minimal server-side persistence for FCM device lifecycle and inbox/read/unread. These tables are UX/refetch support only; they are not certification, settlement, lifecycle, ledger, or audit authority.
+
+### 7.1 `notification_device`
+
+#### Table purpose
+
+Authenticated member Android FCM device/token registration for active device register/update/delete API.
+
+#### Columns
+
+| Column | DB type | Nullable | Default | Meaning / purpose |
+| --- | --- | --- | --- | --- |
+| `id` | `BIGINT` | N | auto increment | Primary key. |
+| `member_id` | `BIGINT` | N | none | FK to `member.id`. |
+| `device_id` | `VARCHAR(100)` | N | none | Client device/installation identifier. |
+| `platform` | `VARCHAR(20)` | N | `ANDROID` | MVP active platform value is `ANDROID`. |
+| `fcm_token` | `VARCHAR(512)` | N | none | Current FCM token for the member/device. |
+| `app_version` | `VARCHAR(50)` | Y | `NULL` | Optional app version metadata. |
+| `enabled` | `BOOLEAN` | N | `TRUE` | Whether this registration is active for sending. |
+| `created_at` | `DATETIME(6)` | N | current timestamp | Audit create time. |
+| `updated_at` | `DATETIME(6)` | N | current timestamp | Audit update time. |
+
+#### Constraints / indexes
+
+- PK: `primary key (id)`.
+- FK: `member_id -> member.id` with `RESTRICT` / `NO ACTION`.
+- UNIQUE: `unique(member_id, device_id)`.
+- INDEX: `index(member_id, enabled)`.
+- Optional INDEX: `index(fcm_token)` only if token lookup is needed; do not require global unique token semantics in V1.
+
+#### Notes
+
+- This table does not freeze token refresh, invalid-token, provider retry, or delivery attempt lifecycle semantics.
+- Delete API may disable or delete a row according to implementation policy, but neither choice changes domain state authority.
+- Same `(member_id, device_id)` re-register updates the existing row in place: refresh `fcm_token`, set `enabled = TRUE`, bump `updated_at`. It does not insert a duplicate row.
+- A soft-disabled row (`enabled = FALSE`) is re-enabled by the same `(member_id, device_id)` re-register through the same in-place update path. `unique(member_id, device_id)` guarantees no duplicate device rows.
+
+### 7.2 `notification`
+
+#### Table purpose
+
+Per-member notification inbox/read row for active inbox, unread count, mark-read, and read-all API.
+
+#### Columns
+
+| Column | DB type | Nullable | Default | Meaning / purpose |
+| --- | --- | --- | --- | --- |
+| `id` | `BIGINT` | N | auto increment | Primary key. |
+| `uuid` | `BINARY(16)` | N | generated | External `notification_id`. DB stores `BINARY(16)`; API serializes canonical `CHAR(36)` per §1 convention. |
+| `member_id` | `BIGINT` | N | none | FK to receiving `member.id`. |
+| `event_type` | `VARCHAR(80)` | N | none | App routing/UI vocabulary, not DB enum/audit catalog. |
+| `resource_type` | `VARCHAR(50)` | N | none | Linked resource type string. |
+| `resource_id` | `VARCHAR(100)` | N | none | Linked resource identifier string. |
+| `deep_link` | `VARCHAR(255)` | N | none | App URL scheme for navigation. |
+| `display_text` | `VARCHAR(500)` | N | none | Server-generated display text; not final state. |
+| `requires_refetch` | `BOOLEAN` | N | `TRUE` | MVP treats every notification as requiring canonical refetch. |
+| `occurred_at` | `DATETIME(6)` | N | none | Event occurrence time for ordering. |
+| `read_at` | `DATETIME(6)` | Y | `NULL` | Read timestamp. `NULL` means unread. |
+| `created_at` | `DATETIME(6)` | N | current timestamp | Audit create time. |
+| `updated_at` | `DATETIME(6)` | N | current timestamp | Audit update time. |
+
+#### Constraints / indexes
+
+- PK: `primary key (id)`.
+- UNIQUE: `unique(uuid)`.
+- FK: `member_id -> member.id` with `RESTRICT` / `NO ACTION`.
+- INDEX: `index(member_id, occurred_at, id)` or an equivalent cursor-supporting order index.
+- INDEX: `index(member_id, read_at)` for unread count and read-all updates.
+
+#### Notes
+
+- `read_at IS NULL` is the only unread rule. Do not add notification status enum/workflow/status machine.
+- Inbox/read rows are non-authoritative UX/refetch hints. They do not own crew lifecycle, certification, moderation, settlement, point ledger, or unresolved task truth.
+- Do not create `notification_delivery_attempt`, notification preference matrix, template CMS, campaign/broadcast, SSE/stream, or notification transport redesign tables in V1.
+
+## 8. Migration sequencing
+
+Flyway readiness:
+
+- `backend/build.gradle` must include `org.flywaydb:flyway-core` and `org.flywaydb:flyway-mysql` before implementation is considered migration-ready.
+- Use `src/main/resources/db/migration/V1__init.sql` as the initial greenfield schema migration.
+- Validate V1 with Testcontainers MySQL; H2-only validation is not sufficient for MySQL FK/check/index behavior.
 
 Recommended Flyway-style order:
 
-1. Ensure prerequisite core `member` and `crew` tables exist.
+1. Create prerequisite identity/domain tables from ERD, including `member` and `crew`.
 2. Create `crew_participant` with lifecycle columns and `unique(crew_id, member_id)`.
 3. Create `point_account` with `available_balance`, `reserved_balance`, `locked_balance`, and `version`.
 4. Create `point_history` with append-only ledger columns and `unique(idempotency_key)`.
 5. Add/verify `crew_participant.released_point_history_id -> point_history.id` FK if circular ordering requires a post-create `ALTER TABLE`.
 6. Create `settlement` with status, baseline freeze, retry metadata, aggregate snapshots, and `version`.
 7. Create `settlement_item` with calculation snapshot fields and nullable `point_history_id` linkage.
-8. Add indexes and constraint hardening after base tables exist.
-9. Add DB-level CHECK constraints only where supported consistently by the chosen RDBMS and migration policy; otherwise enforce the same rules at application/JPA validation layer.
+8. Create minimal notification tables after `member` exists: `notification_device`, then `notification`.
+9. Add indexes and constraint hardening after base tables exist.
+10. Add DB-level CHECK constraints only where supported consistently by the chosen RDBMS and migration policy; otherwise enforce the same rules at application/JPA validation layer.
 
-## 7. Explicitly deferred MVP hardening
+## 9. Explicitly deferred MVP hardening
 
 Do not implement these in this migration round. These are historical/reference-only or future hardening candidates, not active MVP implementation permission or future delivery commitment:
 

@@ -92,27 +92,111 @@
 | `settlement`           | 방 종료 후 정산 헤더                | `crew 1:N settlement`                                                     |
 | `settlement_item`      | 참여자별 정산 스냅샷과 결과         | `settlement 1:N settlement_item`, `crew_participant 1:N settlement_item`  |
 
-### 2.2 First-release Non-transactional / Deferred
+### 2.2 First-release Non-transactional / Notification
 
-| 테이블명                                       | 역할                                              | 포함 판단                                                                                                                                   |
-| ---------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `notification_device` / `push_token` 후보      | Android-first FCM device lifecycle capability | backend active API는 FCM device lifecycle을 요구하지만, 정확한 ERD/table shape는 구현 evidence가 있을 때만 freeze한다. crew lifecycle, 인증, 검수, 정산, 포인트 원장 상태를 변경하지 않는다 |
-| `notification_event` / `notification_log` 후보 | notification inbox/read/unread UX hint capability | backend active API는 inbox/read/unread capability를 요구하지만, 정확한 table/migration shape는 구현 evidence가 있을 때만 freeze한다. canonical history/audit truth가 아니다 |
-| `notification_delivery_attempt` 후보           | FCM delivery attempt 관측 및 transport retry 지원 | Deferred operational hardening 후보. MVP semantic freeze 요구사항이 아니며 delivery success/failure/read 여부는 도메인 성공/실패나 settlement retry/replay/correction의 근거가 아니다              |
-| `notification_preference` 후보                 | 채널/이벤트별 수신 설정                           | Deferred/Brownfield historical/reference only. MVP에서는 세부 preference matrix를 schema로 freeze하지 않는다                                                             |
-| `notification_template` 후보                   | 알림 문구/template 관리                           | Deferred/Brownfield historical/reference only. MVP에서는 template CMS/table을 schema로 freeze하지 않는다                                                                 |
+| 테이블명                | 역할                                           | 포함 판단 |
+| ----------------------- | ---------------------------------------------- | --------- |
+| `notification_device`   | Android-first FCM device/token lifecycle 최소 persistence | MVP active notification API의 device 등록/갱신/비활성화를 구현하기 위한 thin transport persistence다. crew lifecycle, 인증, 검수, 정산, 포인트 원장 상태를 변경하지 않는다. |
+| `notification`          | notification inbox/read/unread 최소 persistence | MVP active notification API의 inbox, unread count, mark-read/read-all을 구현하기 위한 UX/refetch hint row다. canonical history/audit truth가 아니다. |
 
-### 2.3 Notification / FCM candidate boundary
+### 2.3 Deferred notification hardening
 
-- backend active API는 FCM device lifecycle과 notification inbox/read/unread capability를 포함하지만, 이 ERD는 정확한 notification table/migration shape를 새로 발명하지 않는다. 구현 evidence가 확인되기 전까지 notification 후보 엔티티는 hint/deep-link/refetch/transport 보조 persistence 후보이며 결제/정산/포인트/인증/검수의 새 authority가 아니다.
-- `notification_device` 또는 `push_token`은 backend active FCM device lifecycle capability를 저장하기 위한 구현 evidence가 확인될 때만 구체 table shape로 freeze한다. 이 semantic freeze에서 token refresh, invalid-token handling, provider retry 정책을 정하지 않으며 참여/인증/정산/원장 상태를 변경하지 않는다.
-- `notification_event` 또는 `notification_log`는 backend active inbox/read/unread capability를 저장하기 위한 구현 evidence가 확인될 때만 구체 table shape로 freeze한다. 사용자가 놓친 알림을 다시 볼 수 있게 하는 UX hint history일 뿐, MVP Core audit-grade canonical domain history가 아니다. 읽음/미읽음은 사용자 UX 상태이며 미해결 정산·인증·검수 task를 뜻하지 않는다. Persisted read state를 둔다면 nullable `read_at`만 사용하고 status enum/workflow로 확장하지 않는다.
-- `notification_delivery_attempt`는 MVP semantic freeze 요구사항이 아니라 후속 operational hardening 후보로만 둔다. 실패/재시도는 settlement retry, replay, correction, payout mutation과 분리한다.
-- 알림 payload/list item에 필요한 canonical refetch metadata 후보는 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 수준으로 제한한다. `event_type`은 앱 라우팅 vocabulary 후보이며 DB enum이나 audit event catalog freeze가 아니다. authoritative payout/certification/ledger snapshot은 포함하지 않는다.
-- Notification 후보 엔티티는 non-authoritative hint/deep-link/refetch/transport surface이므로 Core Mermaid에서 의도적으로 제외한다. Core Mermaid에 포함하면 canonical domain history/source of truth로 오해될 수 있다.
-- Preference matrix, template CMS/table, campaign/broadcast, advanced analytics, SSE/Web realtime reliability persistence는 Deferred/Brownfield historical/reference only로 유지하며 active MVP API나 implementation permission이 아니다.
+| 테이블명 / surface                          | 역할                                              | 포함 판단 |
+| ------------------------------------------- | ------------------------------------------------- | --------- |
+| `notification_delivery_attempt` 후보        | FCM delivery attempt 관측 및 transport retry 지원 | Deferred operational hardening 후보. MVP active schema가 아니며 delivery success/failure/read 여부는 도메인 성공/실패나 settlement retry/replay/correction의 근거가 아니다. |
+| `notification_preference` 후보              | 채널/이벤트별 수신 설정                           | Deferred/Brownfield historical/reference only. MVP에서는 세부 preference matrix를 schema로 freeze하지 않는다. |
+| `notification_template` 후보                | 알림 문구/template 관리                           | Deferred/Brownfield historical/reference only. MVP에서는 template CMS/table을 schema로 freeze하지 않는다. |
+| SSE/stream, transport redesign, analytics   | realtime/운영 topology 확장                       | Deferred/Brownfield historical/reference only. Active MVP API, future delivery commitment, implementation permission이 아니다. |
+
+### 2.4 Notification / FCM MVP persistence boundary
+
+- backend active API는 FCM device lifecycle과 notification inbox/read/unread capability를 포함하므로 MVP는 최소 `notification_device`와 `notification` persistence shape를 freeze한다.
+- Notification persistence는 non-authoritative UX/refetch hint only다. notification/inbox/read state는 crew lifecycle, mission certification, moderation, settlement, point ledger, audit-grade history, unresolved task authority가 아니다.
+- `notification_device`는 authenticated member의 Android FCM device/token registration을 저장하기 위한 최소 table이다. Token refresh, invalid-token handling, provider retry/invalidation lifecycle, transport provider semantics는 이 ERD에서 freeze하지 않는다.
+- `notification`은 사용자가 놓친 알림을 다시 볼 수 있게 하는 inbox/read UX row다. `read_at` nullable timestamp만 read/unread state로 사용하며, notification status workflow/status machine은 만들지 않는다.
+- 알림 payload/list item에 필요한 canonical refetch metadata는 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 수준으로 제한한다. `event_type`은 앱 라우팅 vocabulary이며 DB enum이나 audit event catalog가 아니다. authoritative payout/certification/ledger snapshot은 포함하지 않는다.
+- Notification table은 thin UX persistence이므로 Core Mermaid에서 의도적으로 제외한다. Core Mermaid에 포함하면 canonical domain history/source of truth로 오해될 수 있다. 필요하면 별도 notification Mermaid block에서만 표현한다.
+- Preference matrix, template CMS/table, campaign/broadcast, advanced analytics, `notification_delivery_attempt`, SSE/Web realtime reliability persistence는 Deferred/Brownfield historical/reference only로 유지하며 active MVP API나 implementation permission이 아니다.
 
 ## 3. 테이블 상세
+
+### `notification_device`
+
+역할:
+
+- authenticated member의 Android FCM device/token lifecycle을 저장한다.
+- Active notification API의 등록/갱신/비활성화 구현을 위한 transport persistence다.
+- Device/token row는 알림 수신성 관리용이며 lifecycle, certification, settlement, point ledger authority가 아니다.
+
+주요 컬럼:
+
+| 컬럼          | 타입 제안      | nullable | 설명 |
+| ------------- | -------------- | -------- | ---- |
+| `id`          | `BIGINT`       | N        | device row PK |
+| `member_id`   | `BIGINT`       | N        | 회원 FK. JWT `sub = member.uuid`의 내부 member 매핑 |
+| `device_id`   | `VARCHAR(100)` | N        | 클라이언트 기기/설치 식별자. API path/request의 device identifier와 매핑 |
+| `platform`    | `VARCHAR(20)`  | N        | MVP active 값은 `ANDROID` |
+| `fcm_token`   | `VARCHAR(512)` | N        | FCM token. Token refresh policy 자체는 freeze하지 않음 |
+| `app_version` | `VARCHAR(50)`  | Y        | 앱 버전. transport/debug metadata |
+| `enabled`     | `BOOLEAN`      | N        | 알림 수신 활성 여부. 기본 `true` |
+| `created_at`  | `DATETIME(6)`  | N        | 생성 시각 |
+| `updated_at`  | `DATETIME(6)`  | N        | 수정 시각 |
+
+PK / FK / Unique / Index:
+
+- PK: `id`
+- FK: `member_id -> member.id`
+- Unique: `unique(member_id, device_id)`
+- Index: `index(member_id, enabled)`
+- Optional index: `index(fcm_token)`은 token lookup이 필요할 때만 둔다. 전역 unique token 정책은 token transfer/invalidation policy가 freeze되기 전까지 요구하지 않는다.
+
+주의사항:
+
+- `DELETE /api/notification-devices/{deviceId}`는 구현에서 `enabled=false` soft-disable 또는 physical delete 중 하나를 선택할 수 있으나, 어떤 경우에도 domain state 삭제/변경 authority가 아니다.
+- 같은 `(member_id, device_id)`로 re-register 시 기존 row를 in-place update한다: `fcm_token` 갱신, `enabled = true`, `updated_at` 갱신. 중복 row를 insert하지 않는다.
+- soft-disable된 row는 같은 `(member_id, device_id)` re-register로 re-enable된다. `unique(member_id, device_id)` 제약이 중복 device row를 차단한다.
+- FCM provider retry, invalid-token handling, delivery attempt persistence는 Deferred/Brownfield operational hardening이다.
+
+### `notification`
+
+역할:
+
+- member별 알림 inbox/read/unread UX를 제공하는 thin persistence다.
+- Deep-link 후 canonical REST API refetch를 돕는 hint row이며 canonical audit history가 아니다.
+
+주요 컬럼:
+
+| 컬럼               | 타입 제안                    | nullable | 설명 |
+| ------------------ | ---------------------------- | -------- | ---- |
+| `id`               | `BIGINT`                     | N        | notification row PK |
+| `uuid`             | `BINARY(16)`                 | N        | API `notification_id`로 노출할 immutable identifier. DB는 `BINARY(16)` 저장, API는 canonical `CHAR(36)` 직렬화 (Schema-migration §1 convention) |
+| `member_id`        | `BIGINT`                     | N        | 수신 member FK |
+| `event_type`       | `VARCHAR(80)`                | N        | 앱 라우팅/UI vocabulary. DB enum/audit catalog가 아님 |
+| `resource_type`    | `VARCHAR(50)`                | N        | 연관 리소스 유형 문자열 |
+| `resource_id`      | `VARCHAR(100)`               | N        | 연관 리소스 식별자 문자열 |
+| `deep_link`        | `VARCHAR(255)`               | N        | 앱 내 이동 URL scheme |
+| `display_text`     | `VARCHAR(500)`               | N        | 서버 생성 표시 문구. 최종 상태 값이 아님 |
+| `requires_refetch` | `BOOLEAN`                    | N        | MVP에서는 항상 `true`로 취급 |
+| `occurred_at`      | `DATETIME(6)`                | N        | 알림 대상 이벤트 발생 시각 |
+| `read_at`          | `DATETIME(6)`                | Y        | 읽음 처리 시각. `NULL`이면 unread |
+| `created_at`       | `DATETIME(6)`                | N        | row 생성 시각 |
+| `updated_at`       | `DATETIME(6)`                | N        | row 수정 시각 |
+
+PK / FK / Unique / Index:
+
+- PK: `id`
+- Unique: `unique(uuid)`
+- FK: `member_id -> member.id`
+- Index: `index(member_id, occurred_at, id)` 또는 같은 cursor 조회를 지원하는 정렬 index
+- Index: `index(member_id, read_at)` for unread count/read-all
+
+주의사항:
+
+- `read_at IS NULL`이 unread의 유일한 persistence rule이다. 별도 notification status enum/workflow/status machine을 만들지 않는다.
+- `PATCH /api/notifications/{notificationId}/read`는 현재 member의 해당 row `read_at`을 채우는 UX action이다.
+- `PATCH /api/notifications/read-all`은 현재 member의 unread row만 대상으로 `read_at`을 채운다.
+- 알림 row, 읽음 상태, 미읽음 수는 mission certification, crew lifecycle, settlement, point ledger, moderation task authority가 아니다.
+- `notification_delivery_attempt`, template/preference CMS, campaign/broadcast, SSE/stream은 이 table로 우회 구현하지 않는다.
 
 ### `member`
 
