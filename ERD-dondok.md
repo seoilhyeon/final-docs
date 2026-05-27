@@ -31,13 +31,13 @@
 - 72h grace는 pre-freeze certification review/correction window다. 최종 3일 미션 결과는 grace 없이 즉시 freeze되며, post-freeze hidden mutation은 금지된다. Support correction은 별도 운영 의미 후보이며 settlement snapshot/ledger overwrite로 모델링하지 않는다.
 - `NOTIFY-003`은 projection 기반 알림이며 final settlement guarantee가 아니다. ERD에서는 알림을 정산 source of truth로 모델링하지 않는다. 상세 event contract는 `API-spec`의 projection boundary를 따른다.
 - `point_history`는 authoritative append-only ledger이고, `point_account` balance cache는 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage와 함께 검증되는 projection/cache layer다. 불일치 시 이 근거들을 함께 대조해 원인을 조사하고 캐시를 보정한다.
-- 최소 인원 baseline, activation eligibility, frozen participant baseline에는 `LOCKED` participant만 포함한다. `PENDING`은 capacity reservation과 reserve balance projection에는 포함하지만 baseline/activation/settlement 대상이 아니다. `REJECTED`/`CANCELLED`/`EXPIRED`는 terminal 상태다.
+- 최소 인원 baseline, activation eligibility, frozen participant baseline에는 `LOCKED` participant만 포함한다. `PENDING`은 capacity reservation과 reserve balance projection에는 포함하지만 baseline/activation/settlement 대상이 아니다. `REJECTED`/`EXPIRED`는 terminal 상태다. `CANCELLED`는 baseline/settlement 대상이 아닌 pre-start exit 상태이며 RECRUITING phase 안에서 동일 사용자의 재신청 시 `CANCELLED -> PENDING`으로 in-place reopen될 수 있다(§참여 lifecycle 참조).
 - Scheduler/runtime 실행 지연은 audit/recovery fact이며 lifecycle authority가 아니다. `start_at`, crew timezone, daily cutoff, mission period end 같은 scheduled semantic anchor가 eligibility와 cutoff의 기준이다.
 - Authoritative moderation persistence는 effective state, transition, reason-code, actor, timestamp, append-only chain reference를 남기는 transition ledger 성격이다. Human memo/support note/UX wording/operational comment는 non-authoritative context로 분리한다.
 
 ### 1.4 논리 삭제 정책
 
-- `crew_participant`는 물리 삭제하지 않고 participation lifecycle 상태로 관리한다. MVP 활성 기준에서는 `LOCKED`만 minimum baseline, activation eligibility, frozen participant baseline, settlement 대상 후보다. `PENDING`/`REJECTED`/`CANCELLED`/`EXPIRED`는 baseline/settlement 대상이 아니다. `WITHDRAWN`/active withdrawal/rejoin은 MVP active status가 아니고 Phase 2/deferred brownfield reference로만 남긴다.
+- `crew_participant`는 물리 삭제하지 않고 participation lifecycle 상태로 관리한다. MVP 활성 기준에서는 `LOCKED`만 minimum baseline, activation eligibility, frozen participant baseline, settlement 대상 후보다. `PENDING`/`REJECTED`/`CANCELLED`/`EXPIRED`는 baseline/settlement 대상이 아니다. `CANCELLED` row는 RECRUITING phase 안에서 동일 사용자의 재신청 시 `CANCELLED -> PENDING`으로 reopen될 수 있는 reusable row이며, 신규 row 생성 없이 기존 row를 그대로 재사용한다. `REJECTED`/`EXPIRED`는 reopen 대상이 아니다. `WITHDRAWN`/active withdrawal/rejoin은 MVP active status가 아니고 Phase 2/deferred brownfield reference로만 남긴다.
 - `mission_log`, `settlement`, `settlement_item`, `point_history`는 감사 추적을 위해 append-only에 가깝게 다룬다.
 - `crew.settlement_status`는 필요 시 조회 최적화용 비정규화 필드로 둘 수 있지만, 원천 상태는 항상 `settlement.status`다.
 
@@ -305,7 +305,7 @@ Unique / Index:
 
 - 모든 포인트 변경은 항상 `member_id` 기준으로 기록한다.
 - `CREW_DEPOSIT_RESERVE`는 `PENDING` 신청 reserve 생성 이벤트다.
-- `CREW_RESERVE_RELEASE`는 `PENDING -> REJECTED/CANCELLED/EXPIRED` terminal 전이와 같은 transaction에서 reserve를 반환하는 이벤트다.
+- `CREW_RESERVE_RELEASE`는 `PENDING -> REJECTED/CANCELLED/EXPIRED` 전이와 같은 transaction에서 reserve를 반환하는 이벤트다. `CANCELLED` row가 이후 reopen되어 새 `CREW_DEPOSIT_RESERVE`가 발행되어도 직전 `CREW_RESERVE_RELEASE` row는 append-only audit으로 유지되며, 매 사이클마다 별도 `point_history` row가 추가된다.
 - `CREW_SETTLEMENT_REFUND`는 일반 정산 환급 이벤트다.
 - `available_after`, `reserved_after`, `locked_after`는 reconciliation/debugging snapshot이며, append-only ledger ordering과 idempotency보다 우선하는 source of truth가 아니다.
 - `payload_hash` 저장과 payload consistency framework는 MVP에서 deferred이며 필수 컬럼/프레임워크로 도입하지 않는다.
@@ -562,14 +562,15 @@ Unique / Index:
 
 주의사항:
 
-- 한 `member`는 같은 `crew`에 하나의 `crew_participant` row만 가진다 (`unique(crew_id, member_id)`). 한 번 row가 생성되면 lifecycle 종료 후에도 재사용/재생성하지 않는다.
-- `REJECTED`, `CANCELLED`, `EXPIRED`는 terminal 상태다. 동일 `member`가 같은 `crew`에 재신청을 시도하면 unique 제약으로 차단되며 API는 `APPLICATION_NOT_ALLOWED`로 reject한다. 재참여/row 재사용/status 되돌리기는 MVP에서 허용하지 않는다.
+- 한 `member`는 같은 `crew`에 하나의 `crew_participant` row만 가진다 (`unique(crew_id, member_id)`). 신규 row 생성은 기존 row가 없을 때에만 수행하며, CANCELLED reopen은 신규 row 생성이 아니라 기존 row의 status/state column을 in-place 갱신하는 row resurrection 경로로 처리한다. 어떤 경우에도 같은 `(crew_id, member_id)`에 대해 두 번째 row를 만들지 않는다.
+- `REJECTED`, `EXPIRED`는 terminal 상태다. 동일 `member`가 같은 `crew`에 재신청을 시도하면 status guard로 차단되며 API는 `APPLICATION_NOT_ALLOWED`로 reject한다. `REJECTED`/`EXPIRED` row의 status 되돌리기/row 재사용은 MVP에서 허용하지 않는다.
+- `CANCELLED`는 reopen 가능한 pre-start exit 상태다. 동일 `member`가 같은 `crew`에 재신청을 시도하면 `crew.status = RECRUITING` + 서버 시간이 `recruitment_deadline` 전 + capacity 가능 + reserve 가능일 때 기존 row를 `CANCELLED -> PENDING`으로 in-place transition한다. 새 row를 생성하지 않으며 `unique(crew_id, member_id)`를 유지한다. host auto-created `LOCKED` row는 reopen 경로에 포함되지 않는다.
 - `PENDING`은 신청 제출 + 예치금 reserve 상태다. capacity reservation에는 포함하지만 최소 인원 baseline, activation eligibility, frozen participant baseline, settlement 대상에는 포함하지 않는다.
 - `LOCKED`는 방장 승인으로 reserve가 참여 확정된 상태다. 최소 인원 baseline, activation eligibility, frozen participant baseline, settlement 대상에는 `LOCKED`만 포함한다.
 - `REJECTED`는 방장이 신청을 거절한 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
-- `CANCELLED`는 사용자가 승인 전 `PENDING` 상태에서 신청을 취소한 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
+- `CANCELLED`는 사용자가 승인 전 `PENDING` 상태에서 신청을 취소한 pre-start exit 상태다. 기존 reserve는 취소 환급 원장으로 반환한다. `CANCELLED`는 reopen 가능 상태이며, 같은 사용자가 같은 크루에 재신청 시 `CANCELLED -> PENDING`으로 in-place 전이되어 row가 재사용된다. reopen 시 새 `CREW_DEPOSIT_RESERVE point_history` row가 append-only로 추가되고, `crew_participant.released_point_history_id`는 다시 `null`로 reset되어 다음 사이클 release를 받을 수 있는 상태가 된다. `pending_at`은 reopen 시각으로 갱신되며, 직전 `cancelled_at`은 in-place 전이 시 audit 용도로 그대로 둘지 갱신할지에 대한 latest-effective overwrite 규칙은 구현 단계에서 정한다(컨벤션: 최신 effective transition 시각만 유지하는 latest-effective overwrite 채택).
 - `EXPIRED`는 시작 전까지 처리되지 않아 자동 만료된 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
-- reserve release는 `crew_participant.id`당 한 번만 허용한다. terminal status 전이와 `CREW_RESERVE_RELEASE` 원장 생성은 같은 transaction에서 처리하며, 구현은 nullable unique `released_point_history_id`를 `crew_participant`에 두어 authoritative reserve-release ledger evidence로 사용한다. `reserve_released_at`만으로 release 완료를 증명하지 않으며, 하나의 release ledger row를 여러 participant가 공유할 수 없다.
+- reserve release는 같은 `crew_participant.id`의 현재 사이클당 한 번만 허용한다. `PENDING -> CANCELLED/REJECTED/EXPIRED` 전이와 `CREW_RESERVE_RELEASE` 원장 생성은 같은 transaction에서 처리하며, 구현은 nullable unique `released_point_history_id`를 `crew_participant`에 두어 현재 사이클의 reserve-release ledger evidence로 사용한다. `CANCELLED -> PENDING` reopen 시점에는 같은 transaction에서 `released_point_history_id`를 `null`로 reset하고 새 `CREW_DEPOSIT_RESERVE point_history` row를 insert해 다음 사이클을 시작한다. 직전 `CREW_RESERVE_RELEASE` row는 append-only audit으로 유지되며 reset/삭제하지 않는다. `reserve_released_at`만으로 release 완료를 증명하지 않으며, 하나의 release ledger row를 여러 participant가 공유할 수 없다.
 - 승인 후 lock 대기 상태(`APPROVED_LOCK_PENDING`)는 두지 않는다. 방장 승인은 `PENDING -> LOCKED` 상태 전이이며 추가 잔액 차감을 수행하지 않는다.
 - `WITHDRAWN`/active withdrawal/rejoin은 MVP active status가 아니다. 기존 row 재사용/withdrawal 재도입은 Phase 2/deferred brownfield reference다.
 - 보증금은 별도 계좌로 이동하지 않으며, `point_account.available_balance`에서 차감되고 append-only `CREW_DEPOSIT_RESERVE point_history`가 원장 이벤트로 남은 뒤 `crew_participant.deposit_amount`로 reserve/locked 상태를 표현한다.
@@ -1171,6 +1172,7 @@ erDiagram
     %% CREW_PARTICIPANT: nullable=deposit_amount, locked_at, released_point_history_id, withdrawn_at; UK(crew_id, member_id); nullable UK(released_point_history_id); IDX(crew_id, status), IDX(member_id, status).
     %% CREW_PARTICIPANT enum: MVP active status=PENDING|LOCKED|REJECTED|CANCELLED|EXPIRED; WITHDRAWN is deferred/brownfield only.
     %% CREW_PARTICIPANT note: PENDING reserves capacity/balance but is excluded from activation baseline and settlement; LOCKED is the frozen baseline/settlement candidate.
+    %% CREW_PARTICIPANT reopen: CANCELLED row is reusable. Same (crew_id, member_id) can reapply during RECRUITING + before recruitment_deadline + capacity OK + reserve OK; row transitions CANCELLED -> PENDING in place (no new row), released_point_history_id resets to null, a new CREW_DEPOSIT_RESERVE point_history row is appended. REJECTED/EXPIRED rows are terminal and not reopenable. Host auto-created LOCKED rows are not subject to reopen.
 
 
     CREW_NOTICE {

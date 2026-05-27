@@ -84,9 +84,9 @@ Participant-level lifecycle row for one member in one crew. It owns the particip
 - `PENDING` means application submitted plus reserve state.
 - `PENDING` counts toward capacity reservation only.
 - `LOCKED` is the only participant status included in activation eligibility, frozen participant baseline, and settlement baseline.
-- `REJECTED`, `CANCELLED`, and `EXPIRED` are terminal rows and remain preserved.
-- MVP disallows re-application to the same crew; `unique(crew_id, member_id)` is the DB enforcement point.
-- Reserve release is allowed once per `crew_participant.id`; terminal transition and reserve release happen in the same transaction.
+- `REJECTED` and `EXPIRED` are terminal rows and remain preserved. `CANCELLED` is a pre-start exit row that is preserved and is also reopen-eligible.
+- MVP allows re-application to the same crew only when the existing row is `CANCELLED`, the crew is `RECRUITING`, server time is before `recruitment_deadline`, capacity is available, and the participant has sufficient balance to re-reserve. `REJECTED`/`EXPIRED` rows block re-application. `unique(crew_id, member_id)` is the DB enforcement point; reopen reuses the existing row in place (no new row).
+- Reserve release is allowed once per current reserve cycle of `crew_participant.id`; terminal/`CANCELLED` transition and reserve release happen in the same transaction. On `CANCELLED -> PENDING` reopen, the same transaction resets `released_point_history_id` to `NULL` and inserts a new `CREW_DEPOSIT_RESERVE` `point_history` row, starting the next cycle; the prior `CREW_RESERVE_RELEASE` row is retained as append-only audit.
 - `released_point_history_id` is the authoritative evidence that reserve release occurred. Do not rely on timestamp-only release evidence.
 - No `WITHDRAWN` / rejoin semantics are introduced in this MVP migration.
 

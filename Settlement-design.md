@@ -72,7 +72,7 @@
 - 이 불변식은 `unique(crew_id, member_id)`로 강제하고, `crew_participant`는 정산과 감사 추적을 위해 물리 삭제하지 않는다.
 - MVP active `crew_participant.status`: `PENDING`, `LOCKED`, `REJECTED`, `CANCELLED`, `EXPIRED`. 승인 후 lock 대기 상태(`APPROVED_LOCK_PENDING`)는 두지 않으며 방장 승인은 기존 reserve를 `PENDING -> LOCKED`로 확정한다.
 - `PENDING`은 신청 제출 + 예치금 reserve 상태다. capacity reservation에는 포함하지만 activation eligibility, minimum participant baseline, frozen participant baseline, settlement eligibility에는 포함하지 않는다. `PENDING` 생성 시 `point_account.available_balance`가 감소하고 `reserved_balance`가 증가한다.
-- 사용자가 승인 전 신청을 취소하면 `PENDING -> CANCELLED`. 기존 reserve는 취소 환급 원장으로 반환한다.
+- 사용자가 승인 전 신청을 취소하면 `PENDING -> CANCELLED`. 기존 reserve는 취소 환급 원장으로 반환한다. `CANCELLED`는 reopen 가능한 pre-start exit 상태이며, 같은 사용자가 같은 크루에 재신청 시 `crew.status = RECRUITING` + 서버 시간이 `recruitment_deadline` 전 + capacity 가능 + reserve 가능 조건을 모두 만족하면 기존 row가 `CANCELLED -> PENDING`으로 in-place 전이된다. reopen은 RECRUITING phase에서만 일어나는 pre-activation 사이클 재시작이며 activation 이후 baseline/정산 권한과는 무관하다. 새 `crew_participant` row를 만들지 않고 `unique(crew_id, member_id)`를 그대로 유지한다.
 - 방장이 거절하거나 시작 전까지 처리되지 않아 자동 만료된 신청은 `REJECTED` / `EXPIRED`다. 기존 reserve는 반환되며 settlement baseline에 포함하지 않는다.
 - `LOCKED`는 방장 승인으로 reserve가 참여 확정된 상태다. MVP에서 activation eligibility, minimum participant baseline, frozen participant baseline, settlement eligibility의 participant anchor는 `LOCKED`만 사용한다.
 - `LOCKED` 이후에는 MVP에서 participant-side 변경/취소를 허용하지 않는다. 승인 + 예치 Lock 완료 후 상태 변경은 frozen baseline integrity와 deterministic settlement를 흔들 수 있으므로 별도 후속 설계 없이는 열지 않는다.
@@ -565,7 +565,7 @@ MVP `calculation_reason` vocabulary:
 - 보증금 reserve 처리, `crew_participant` 생성, `CREW_DEPOSIT_RESERVE` 원장 생성은 반드시 하나의 트랜잭션으로 처리한다.
 - 권장 순서는 `point_account.available_balance` 조건부 차감 및 `reserved_balance` 증가 -> `crew_participant` 생성 및 `deposit_amount` 반영 -> `CREW_DEPOSIT_RESERVE point_history` 생성이다.
 - 위 세 단계 중 하나라도 실패하면 전체 롤백한다. 잔액만 차감되고 participant가 생성되지 않거나, participant만 생기고 원장이 누락되는 상태를 허용하지 않는다.
-- `PENDING -> CANCELLED/REJECTED/EXPIRED` terminal 전이와 reserve release는 같은 transaction에서 처리한다. reserve release는 `crew_participant.id`당 한 번만 허용하며, 구현은 `released_point_history_id`를 authoritative reserve-release ledger evidence로 사용한다.
+- `PENDING -> CANCELLED/REJECTED/EXPIRED` 전이와 reserve release는 같은 transaction에서 처리한다. reserve release는 `crew_participant.id`의 현재 사이클당 한 번만 허용하며, 구현은 `released_point_history_id`를 현재 사이클의 reserve-release ledger evidence로 사용한다. `CANCELLED -> PENDING` reopen 시 같은 transaction에서 `released_point_history_id`를 `null`로 reset하고 새 `CREW_DEPOSIT_RESERVE point_history` row를 append-only로 추가해 다음 사이클을 시작한다. 직전 `CREW_RESERVE_RELEASE` row는 audit으로 유지된다.
 - ACTIVE withdrawal은 MVP active semantics가 아니라 brownfield/deferred다. 향후 재도입하더라도 `deposit_amount` 즉시 환급이나 frozen settlement input 변경으로 해석하지 않는다.
 - 최종 정산 또는 reserve release가 일어날 때만 `point_history`를 통해 해당 balance bucket이 변경된다.
 - 운영 검증이나 복구 중 `point_account` balance bucket이 reconciliation 결과와 다르면 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage를 함께 기준으로 캐시를 복구한다.
@@ -848,7 +848,8 @@ crew:{crewId}:participant:{participantId}:settlement-refund
 | 전체 인정 성공 0회           | 각 참여자의 잠겨 있던 자기 보증금을 equal-principal refund로 전액 환급한다. host/winner/draw remainder 지급 없음 |
 | 참여자별 보증금 상이         | 총 풀은 합산하되, 결과 설명은 `deposit_amount`, `refund_amount`, `share_ratio`로 제공                          |
 | `ACTIVE` 이후 신규 참여 요청 | 거절한다. MVP에서는 모집 완료 후 참여자 구성을 고정한다.                                                       |
-| 탈퇴 후 동일 방 재참여 요청  | MVP active flow에서는 지원하지 않고 거절한다. WITHDRAWN/rejoin은 brownfield/deferred이며 frozen baseline을 변경하지 않는다. |
+| 탈퇴 후 동일 방 재참여 요청  | ACTIVE 이후 탈퇴/재참여는 MVP active flow에서 지원하지 않고 거절한다. WITHDRAWN/rejoin은 brownfield/deferred이며 frozen baseline을 변경하지 않는다. |
+| `CANCELLED` 후 동일 방 재신청 요청 (RECRUITING phase) | 허용한다. 기존 `crew_participant` row를 `CANCELLED -> PENDING`으로 in-place 전이해 재사용하며, 신규 row를 만들지 않는다. activation 이전 reserve/release 사이클의 재시작일 뿐이고, frozen `LOCKED` baseline, settlement replay/final authority, append-only `point_history` invariant는 그대로 유지된다. host auto-created `LOCKED` row는 이 경로의 대상이 아니다. |
 | 같은 방 중복 정산 시도       | 상태 claim + unique 제약 + `point_history.idempotency_key` + `point_history_id` 연결 검증으로 차단 |
 | `Settlement` 누락            | 운영 복구 경로로 `PENDING` 생성, 단 `unique(crew_id)` 준수                                                     |
 | 이미 `SUCCEEDED`인 방 재요청 | 새 정산 생성 금지, 기존 결과 조회만 허용                                                                       |
@@ -1219,8 +1220,14 @@ total_remainder_amount = 0
 - `TS-17` 종료/취소 감지 시 `Settlement(PENDING)`가 먼저 생성되는지
 - `TS-17A` `unique(crew_id, member_id)` 제약이 같은 크루 중복 participant row 생성을 막는지
   기대 결과: 동일 `member`가 같은 `crew`에 두 번째 `crew_participant` row 생성을 시도하면 DB 제약 또는 동일 수준의 저장 전 검증으로 차단된다.
-- `TS-17A1` terminal 상태 재신청 차단
-  기대 결과: 동일 `member`가 같은 `crew`에 `REJECTED` / `CANCELLED` / `EXPIRED` 상태 row를 보유한 상태에서 `POST /api/crews/{crewId}/participants`를 재호출하면 `APPLICATION_NOT_ALLOWED`로 reject되고 기존 row의 status는 변경되지 않으며 신규 row도 생성되지 않는다.
+- `TS-17A1` `REJECTED` / `EXPIRED` terminal 상태 재신청 차단
+  기대 결과: 동일 `member`가 같은 `crew`에 `REJECTED` 또는 `EXPIRED` 상태 row를 보유한 상태에서 `POST /api/crews/{crewId}/participants`를 재호출하면 `APPLICATION_NOT_ALLOWED`로 reject되고 기존 row의 status는 변경되지 않으며 신규 row도 생성되지 않는다.
+- `TS-17A2` `CANCELLED` 상태 재신청 reopen 성공
+  기대 결과: 동일 `member`가 같은 `crew`에 `CANCELLED` row를 보유한 상태에서 `crew.status = RECRUITING` + 서버 시간이 `recruitment_deadline` 전 + capacity 가능 + reserve 가능 조건을 모두 만족하며 `POST /api/crews/{crewId}/participants`를 재호출하면 기존 row가 `CANCELLED -> PENDING`으로 in-place 전이되고, 같은 transaction에서 새 `CREW_DEPOSIT_RESERVE point_history` row가 append-only로 추가되며 `crew_participant.released_point_history_id`는 `null`로 reset되고 `pending_at`이 갱신된다. 직전 `CREW_RESERVE_RELEASE` row는 그대로 남고, `unique(crew_id, member_id)`는 유지되며 신규 row는 생성되지 않는다.
+- `TS-17A3` `CANCELLED` reopen 조건 미충족 시 차단
+  기대 결과: `crew.status != RECRUITING`, `recruitment_deadline` 경과, capacity 부족, reserve 부족 중 하나라도 발생하면 reopen이 일어나지 않고 해당 조건별 오류(`CREW_NOT_RECRUITING` / `CAPACITY_FULL` / `INSUFFICIENT_BALANCE` 등)로 reject되며 기존 `CANCELLED` row의 status, `released_point_history_id`, `cancelled_at`은 변경되지 않고 새 `point_history` row도 생성되지 않는다.
+- `TS-17A4` host auto-created `LOCKED` row는 reopen 경로에 포함되지 않음
+  기대 결과: 호스트 본인의 `crew_participant` row가 `LOCKED` 상태인 상황에서 호스트가 같은 endpoint를 호출하면 `unique(crew_id, member_id)` 제약 및 status guard로 `ALREADY_PARTICIPATING`로 reject되고, `LOCKED -> PENDING` 또는 `LOCKED -> CANCELLED`로 되돌아가는 in-place 전이는 일어나지 않는다.
 - `TS-17B` 실시간 대시보드 캐시와 `SUCCEEDED` 전 정산 계산 결과가 일시적으로 달라도 authoritative settlement input으로 정산값이 확정되는지
   기대 결과: 캐시 누락 또는 지연이 있어도 `settlement_item` 계산값은 `MissionLog` 원본, frozen `LOCKED` baseline, resolved certification state 기준으로 일관되게 생성된다.
 

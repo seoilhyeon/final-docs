@@ -104,7 +104,7 @@
 - `PENDING`: 사용자가 가입 신청을 완료하고 예치금이 reserve된 상태. 생성 트랜잭션에서 `point_account.balance`(available)가 감소하고 `crew_participant.deposit_amount`가 reserve snapshot이 된다. Capacity reservation에는 포함하지만 activation eligibility, frozen participant baseline, settlement 대상에는 포함하지 않는다.
 - `LOCKED`: 방장 승인으로 `PENDING` reserve가 참여 확정으로 전환된 상태. approval은 별도 중간 상태 없이 `PENDING -> LOCKED`를 만들며 activation eligibility, minimum baseline, frozen participant baseline, settlement eligibility의 participant anchor다.
 - `REJECTED`: 방장이 가입 신청을 거절한 terminal 상태. 기존 `PENDING` reserve는 취소 환급 원장으로 반환한다.
-- `CANCELLED`: 사용자가 승인 전 `PENDING` 상태에서 신청을 취소한 terminal 상태. 기존 reserve는 취소 환급 원장으로 반환한다.
+- `CANCELLED`: 사용자가 승인 전 `PENDING` 상태에서 신청을 취소한 pre-start exit 상태. 기존 reserve는 취소 환급 원장으로 반환한다. `CANCELLED`는 reopen 가능한 상태로, 동일 사용자가 같은 크루에 `crew.status = RECRUITING` + 서버 시간이 `recruitment_deadline` 전 + capacity 가능 + reserve 가능일 때 재신청하면 기존 `crew_participant` row를 `CANCELLED -> PENDING`으로 재사용한다(reopen). 새 row를 생성하지 않으며 `unique(crew_id, member_id)`를 유지한다. host auto-created `LOCKED` row는 reopen 대상이 아니다.
 - `EXPIRED`: 시작 전까지 처리되지 않아 자동 만료된 terminal 상태. 기존 reserve는 취소 환급 원장으로 반환한다.
 - MVP에서 `APPROVED_LOCK_PENDING` 같은 승인 후 lock 대기 중간 상태는 두지 않는다.
 - `WITHDRAWN`/active withdrawal/재참여 semantics는 MVP active contract가 아니라 brownfield/deferred reference다.
@@ -133,7 +133,7 @@
 
 - `POINT_CHARGE`
 - `CREW_DEPOSIT_RESERVE`: 크루 참여 보증금 reserve 시 발행되는 lock 이벤트다. 일반 참여자의 `PENDING` 신청 reserve와 `POST /api/crews` 시점 호스트 auto-participation `LOCKED` reserve가 모두 같은 transaction type을 사용한다. 자산 이동이 아니라 `available_balance -= deposit_amount` + `reserved_balance += deposit_amount` bucket transition을 기록한다. 별도 `CREW_OWNER_DEPOSIT`/`HOST_*` transaction type을 만들지 않는다.
-- `CREW_RESERVE_RELEASE`: `PENDING -> REJECTED/CANCELLED/EXPIRED` terminal 전이와 같은 transaction에서 reserve를 사용자 `available_balance`로 반환하는 이벤트다.
+- `CREW_RESERVE_RELEASE`: `PENDING -> REJECTED/CANCELLED/EXPIRED` 전이와 같은 transaction에서 reserve를 사용자 `available_balance`로 반환하는 이벤트다. `CANCELLED` row가 이후 reopen되어 새 `CREW_DEPOSIT_RESERVE`가 발행되어도 직전 `CREW_RESERVE_RELEASE` row는 append-only audit으로 유지되며, 매 reserve/release 사이클마다 별도 `point_history` row가 추가된다.
 - `CREW_SETTLEMENT_REFUND`: 일반 정산 환급 이벤트. `locked_balance -= deposit_amount` + 환급 결과만큼 `available_balance` 증가를 동일 transaction에서 처리한다.
 - 승인 시점 `PENDING -> LOCKED` 전이는 `reserved_balance -> locked_balance` bucket transition만 수행하며, 새 `point_history` row를 만들지 않는다. `CREW_DEPOSIT_LOCK`과 같은 별도 lock-event ledger type은 사용하지 않는다.
 
@@ -755,9 +755,12 @@ Error:
 
 - 신규 신청은 `RECRUITING` 상태이면서 서버 시간이 `recruitment_deadline` 전일 때만 허용한다.
 - `recruitment_deadline` 이후에는 `CREW_RECRUITMENT_CLOSED` 또는 `CREW_NOT_RECRUITING` 계열 오류로 거절한다.
-- 같은 `member`는 같은 `crew`에 단 하나의 `crew_participant` row만 가질 수 있다 (`unique(crew_id, member_id)`). 한 번 생성된 row는 lifecycle 종료 후에도 재사용/재생성하지 않는다.
+- 같은 `member`는 같은 `crew`에 단 하나의 `crew_participant` row만 가질 수 있다 (`unique(crew_id, member_id)`). 신규 row 생성과 reopen 경로 모두 이 제약을 유지하며, 신규 row 생성은 기존 row가 없을 때에만 일어난다.
 - 진행 중 상태(`PENDING`, `LOCKED`)에서 동일 사용자가 신청 시도하면 `ALREADY_PARTICIPATING`로 거절한다.
-- terminal 상태(`REJECTED`, `CANCELLED`, `EXPIRED`)에서 동일 사용자가 같은 방에 재신청 시도하면 `APPLICATION_NOT_ALLOWED`로 거절한다. MVP에서는 재참여/row 재사용/status 되돌리기를 허용하지 않는다.
+- `REJECTED`, `EXPIRED` row가 이미 존재하면 동일 사용자의 재신청은 `APPLICATION_NOT_ALLOWED`로 거절한다. 기존 row의 status는 변경하지 않으며 신규 row도 만들지 않는다.
+- `CANCELLED` row가 이미 존재하면 reopen 경로로 처리한다. `crew.status = RECRUITING` + 서버 시간이 `recruitment_deadline` 전 + capacity 가능(`PENDING + LOCKED < max_participants`) + reserve 가능(`available_balance >= crew.deposit_amount`)일 때 기존 `crew_participant` row를 `CANCELLED -> PENDING`으로 재사용한다. 새 row를 생성하지 않으며, 같은 transaction에서 `point_account.available_balance -= crew.deposit_amount` / `reserved_balance += crew.deposit_amount` bucket transition과 새 `CREW_DEPOSIT_RESERVE point_history` insert, `pending_at` 갱신, `released_point_history_id`를 다시 `null`로 reset하는 동작을 함께 수행한다. 직전 `CREW_RESERVE_RELEASE` row는 append-only audit으로 그대로 남는다. 위 조건을 하나라도 만족하지 못하면 reopen하지 않고 기존 조건별 오류(`CREW_NOT_RECRUITING` / `CAPACITY_FULL` / `INSUFFICIENT_BALANCE` 등)로 거절한다.
+- reopen 시 `point_history.idempotency_key`는 새 reserve/release 사이클을 식별하도록 cycle discriminator를 포함한다(§5.8 표 참조). 사이클 discriminator 없이 같은 key를 재사용해 append-only 원장을 덮어쓰지 않는다.
+- host auto-created `LOCKED` row는 reopen 대상이 아니다. 호스트 본인의 row가 `LOCKED`인 상태에서 이 endpoint 호출은 `unique(crew_id, member_id)` 제약 위반으로 `ALREADY_PARTICIPATING`로 거절한다.
 - `PENDING` 상태는 capacity reservation에 포함한다. 신청 생성 시 capacity 확인은 `PENDING + LOCKED < crew.max_participants` 기준이다.
 - `PENDING`은 `deposit_reserved_amount`를 갖지만 activation/minimum/frozen baseline과 settlement eligibility에는 포함하지 않는다. `LOCKED` 전이는 방장 승인 endpoint가 reserve를 확정하는 단일 상태 전이다.
 - 호스트는 자신이 생성한 크루에 대해 이 endpoint로 다시 신청하지 않는다. `POST /api/crews` 시점에 host용 `crew_participant` row가 이미 `LOCKED`로 auto-created되어 있으므로 호스트의 추가 신청 시도는 `unique(crew_id, member_id)` 제약으로 `ALREADY_PARTICIPATING`로 거절된다.
@@ -795,7 +798,7 @@ Error:
 - 취소는 `PENDING` 상태일 때만 허용한다. `LOCKED`, `REJECTED`, `EXPIRED`, `CANCELLED`는 `APPLICATION_NOT_CANCELLABLE`로 거절한다.
 - 기존 reserve는 `CREW_RESERVE_RELEASE` point_history로 반환하고, `point_account.available_balance`를 같은 금액만큼 복구한다. terminal 전이와 reserve release는 같은 transaction에서 처리하며, release는 `crew_participant.id`당 한 번만 허용한다. 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
 - 멱등성: 동일 사용자가 이미 `CANCELLED`된 신청에 대해 다시 호출하면 `APPLICATION_NOT_CANCELLABLE`을 반환한다. 동일 idempotency 응답을 원하면 클라이언트가 `204 No Content` polling 패턴을 별도로 처리한다.
-- `CANCELLED`는 pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다.
+- `CANCELLED`는 pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다. 같은 사용자가 같은 크루에 다시 신청하면 `POST /api/crews/{crewId}/participants` reopen 경로로 기존 row가 `CANCELLED -> PENDING`으로 재사용된다(§참여 신청 정책 참조). 직전 `cancelled_at`은 reopen 시 갱신되는 `pending_at`과 별개로 audit 용도로 row에 남는다.
 
 ### `POST /api/crews/{crewId}/applications/{crewParticipantId}/approve`
 
@@ -874,7 +877,7 @@ Error:
 - 호출자는 해당 `crew.host_member_id`와 일치해야 한다. 아니면 `FORBIDDEN_NOT_HOST`.
 - 거절은 `PENDING` 상태에서만 가능하다. 다른 상태는 `APPLICATION_NOT_REJECTABLE`로 거절한다.
 - 기존 reserve는 `CREW_RESERVE_RELEASE` point_history로 반환하고, `point_account.available_balance`를 같은 금액만큼 복구한다. terminal 전이와 reserve release는 같은 transaction에서 처리하며, release는 `crew_participant.id`당 한 번만 허용한다. 구현은 `released_point_history_id` 또는 `reserve_released_at` guard로 중복 release를 막는다.
-- `REJECTED`는 terminal pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다. 동일 crew 재신청은 MVP에서 허용하지 않는다.
+- `REJECTED`는 terminal pre-start exit 상태이며 capacity/baseline/settlement 대상이 아니다. 동일 crew 재신청은 MVP에서 허용하지 않는다(`APPLICATION_NOT_ALLOWED`). `CANCELLED` reopen 경로는 이 상태의 row에 적용되지 않는다.
 - 이 endpoint는 일반 참여자의 `PENDING` row에만 사용한다. `POST /api/crews` 시점에 auto-created된 호스트 본인의 `LOCKED` row는 거절 대상이 아니며, 호출 시 `APPLICATION_NOT_REJECTABLE`로 거절한다.
 
 ### `GET /api/crews/{crewId}/applications`
@@ -2404,7 +2407,7 @@ Response `200 OK`:
 - `available_balance`는 `point_account.balance`이며, `PENDING` reserve 또는 `LOCKED` deposit으로 이미 차감된 뒤 현재 사용 가능한 포인트 잔액만 의미한다.
 - `reserved_balance`, `active_locked_amount`, `settlement_pending_amount`, `locked_balance`는 DB 컬럼이 아니라 API 응답에서만 제공하는 wallet/projection 필드다. `settlement_pending_amount`는 DB/account column이 아니며 별도 settlement pending balance 컬럼도 두지 않는다.
 - `reserved_balance`는 승인 전 `PENDING` reserve 표시용이고, `active_locked_amount`는 진행/모집 중 `LOCKED` deposit, `settlement_pending_amount`는 종료 후 최종 정산 전 `LOCKED` deposit 표시용이다. `locked_balance = active_locked_amount + settlement_pending_amount`다. 모두 포인트 원장의 source of truth가 아니다.
-- MVP 기준 `reserved_balance`는 사용자의 `PENDING` 상태 `crew_participant.deposit_amount`, `locked_balance` 계열은 `LOCKED` 상태 `crew_participant.deposit_amount`를 `crew`과 조인해 계산한다. `REJECTED`/`CANCELLED`/`EXPIRED`는 반환 완료 terminal 상태라 합산 대상이 아니다.
+- MVP 기준 `reserved_balance`는 사용자의 `PENDING` 상태 `crew_participant.deposit_amount`, `locked_balance` 계열은 `LOCKED` 상태 `crew_participant.deposit_amount`를 `crew`과 조인해 계산한다. `REJECTED`/`EXPIRED`는 반환 완료 terminal 상태라 합산 대상이 아니다. `CANCELLED`도 합산 대상이 아니다(현재 사이클의 reserve가 반환된 상태). 같은 row가 이후 reopen되어 `PENDING`으로 복귀하면 새 사이클 reserve가 `reserved_balance` projection에 다시 합산된다.
 
 ```sql
 SELECT rp.status, COALESCE(SUM(rp.deposit_amount), 0) AS amount
@@ -2490,11 +2493,11 @@ Error:
 | 도메인 동작         | `transaction_type`       | `reference_type`   | `reference_id` 규칙                                                                                                 | `idempotency_key` 예시 |
 | ------------------- | ------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | 포인트 충전         | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. | `charge:{paymentKey}` |
-| 크루 참여 보증금 reserve | `CREW_DEPOSIT_RESERVE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `crew:{crewId}:participant:{participantId}:reserve` |
-| PENDING reserve release | `CREW_RESERVE_RELEASE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `crew:{crewId}:participant:{participantId}:reserve-release` |
+| 크루 참여 보증금 reserve | `CREW_DEPOSIT_RESERVE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `crew:{crewId}:participant:{participantId}:reserve:{cycle}` |
+| PENDING reserve release | `CREW_RESERVE_RELEASE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                               | `crew:{crewId}:participant:{participantId}:reserve-release:{cycle}` |
 | 일반 정산 환급      | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                | `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}` |
 
-`{participantId}` placeholder는 내부적으로 `crew_participant.id`를 가리킨다. API field로 직접 노출할 때는 `crewParticipantId`로 정렬한다. `{settlementType}`은 §3.8의 `daily_settlement_type` (`A` / `B` / `C`) 값이다.
+`{participantId}` placeholder는 내부적으로 `crew_participant.id`를 가리킨다. API field로 직접 노출할 때는 `crewParticipantId`로 정렬한다. `{settlementType}`은 §3.8의 `daily_settlement_type` (`A` / `B` / `C`) 값이다. `{cycle}` placeholder는 `crew_participant` row의 reserve/release 사이클 discriminator다. `crew_participant` row 최초 생성 시 사이클은 `1`이며, `CANCELLED -> PENDING` reopen 시점에 `crew_participant`의 직전 reserve/release 횟수에 따라 단조 증가한다. host auto-created `LOCKED` row는 reopen 대상이 아니므로 host 최초 reserve도 `{cycle} = 1`만 가진다. `{cycle}`은 같은 `crew_participant.id` 내에서 reserve/release 사이클을 식별하기 위한 discriminator이며, 사이클 numbering은 implementation detail로 ERD/구현 단계가 소유한다.
 
 
 ## 5.9 알림 / Android FCM / Inbox / SSE drift
@@ -2710,6 +2713,9 @@ PENDING --host approve + reserve 확정--> LOCKED
 PENDING --user cancel (DELETE /participants/me)--> CANCELLED
 PENDING --host reject--> REJECTED
 PENDING --시작 전까지 처리 안 됨--> EXPIRED
+CANCELLED --user reapply (POST /participants, crew RECRUITING + before recruitment_deadline + capacity OK + reserve OK)--> PENDING (reopen: 기존 row 재사용, new CREW_DEPOSIT_RESERVE cycle, released_point_history_id reset, pending_at 갱신)
+REJECTED / EXPIRED: terminal. 동일 crew 재신청은 APPLICATION_NOT_ALLOWED로 차단.
+host auto-created LOCKED row는 reopen 경로에 포함되지 않는다.
 WITHDRAWN / ACTIVE withdrawal: brownfield-deferred, not MVP active baseline authority
 ```
 

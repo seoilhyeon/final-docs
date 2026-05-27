@@ -43,15 +43,16 @@ MVP active status는 아래 다섯 개만 사용한다.
 
 ### Terminal state preservation
 
-- `REJECTED`, `CANCELLED`, `EXPIRED`는 terminal state다.
-- terminal `crew_participant` row는 삭제하지 않는다.
-- terminal row는 audit, duplicate-apply prevention, no-reapplication enforcement의 근거다.
+- `REJECTED`, `EXPIRED`는 terminal state다. `CANCELLED`는 reopen 가능한 pre-start exit state다.
+- terminal/`CANCELLED` `crew_participant` row는 삭제하지 않는다.
+- 모든 row는 audit, duplicate-apply prevention, reapply policy enforcement의 근거다.
 
-### No re-application in MVP
+### Reapply policy in MVP
 
-- MVP에서는 같은 `crew`에 같은 `member`가 재신청할 수 없다.
-- DB는 `unique(crew_id, member_id)`로 이를 강제한다.
-- terminal row를 삭제하거나 재사용해서 재신청처럼 보이게 만들지 않는다.
+- `REJECTED`/`EXPIRED` row가 있는 동일 `(crew_id, member_id)` 재신청은 `APPLICATION_NOT_ALLOWED`로 차단한다. terminal row를 삭제하거나 다른 status로 되돌리지 않는다.
+- `CANCELLED` row가 있는 동일 `(crew_id, member_id)` 재신청은 `crew.status = RECRUITING` + 서버 시간이 `recruitment_deadline` 전 + capacity 가능 + reserve 가능일 때 허용한다. 신규 row를 만들지 않고 기존 row를 `CANCELLED -> PENDING`으로 in-place 전이(reopen)하며 새 `CREW_DEPOSIT_RESERVE point_history`를 append-only로 추가한다. `released_point_history_id`는 `null`로 reset되고, `pending_at`이 갱신된다.
+- DB는 `unique(crew_id, member_id)`로 row duplication을 강제로 차단한다. reopen 경로도 같은 row를 재사용하므로 unique 제약을 유지한다.
+- host auto-created `LOCKED` row는 reopen 경로에 포함되지 않는다.
 
 ## 2. Balance model
 
@@ -203,7 +204,7 @@ MVP 구현에서 이 guardrail 범위의 canonical transaction type은 아래와
 - approval 시 새 ledger event 생성
 - `CREW_DEPOSIT_LOCK`을 apply/approval ledger로 재도입
 - terminal `crew_participant` row 삭제
-- 같은 crew/member 재신청을 위해 terminal row를 삭제하거나 우회
+- `REJECTED`/`EXPIRED` row를 삭제하거나 다른 status로 되돌려 재신청을 허용 (`CANCELLED` reopen은 신규 row 생성 없이 기존 row를 in-place 전이하는 경로이며 unique 우회가 아니다)
 - mutable `point_history`
 - host를 activation, settlement, ledger authority로 모델링
 - projection을 frozen/final/guaranteed payout처럼 모델링
