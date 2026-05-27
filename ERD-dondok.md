@@ -1176,7 +1176,8 @@ projection 운영 원칙:
 
 ```mermaid
 erDiagram
-    %% Structural mirror only; lifecycle/freeze/algorithm details are defined in the ERD text above.
+    %% Structural review summary + ERDCloud migration helper only; not the source of truth.
+    %% Detailed nullability, Deferred/Brownfield boundaries, and semantic authority rules follow the ERD field tables above and downstream guardrail docs (Schema-migration-spec, Implementation-guardrails, PRD/Usecase).
     %% Nullable convention in comments: listed columns are nullable; all other attributes in that entity are required.
 
     MEMBER {
@@ -1203,6 +1204,29 @@ erDiagram
         DATETIME created_at
     }
     %% MEMBER_REFRESH_TOKEN: nullable=revoked_at; UK(token_hash); IDX(member_id, expires_at).
+
+    NOTIFICATION_DEVICE {
+        BIGINT id PK
+        BIGINT member_id FK
+        VARCHAR device_id
+        VARCHAR platform
+        VARCHAR fcm_token
+        BOOLEAN enabled
+    }
+    %% NOTIFICATION_DEVICE: UK(member_id, device_id); re-register upserts in place (refresh fcm_token, enabled=true). DELETE may soft-disable or physical delete. Transport persistence only; no domain/lifecycle/settlement authority.
+
+    NOTIFICATION {
+        BIGINT id PK
+        UUID uuid UK
+        BIGINT member_id FK
+        VARCHAR event_type
+        VARCHAR resource_type
+        VARCHAR resource_id
+        VARCHAR deep_link
+        DATETIME occurred_at
+        DATETIME read_at
+    }
+    %% NOTIFICATION: nullable=read_at; UK(uuid); IDX(member_id, occurred_at, id), IDX(member_id, read_at). read_at IS NULL is sole unread rule; no status enum/workflow. Thin non-authoritative UX hint; not canonical audit history. No notification_delivery_attempt/template/preference/SSE/campaign.
 
     POINT_ACCOUNT {
         BIGINT id PK
@@ -1443,6 +1467,8 @@ erDiagram
     %% SETTLEMENT_ITEM enum: participant_status_snapshot is frozen LOCKED for MVP active settlement; WITHDRAWN/withdrawn_at_snapshot are Deferred/Brownfield historical/reference only and null/ignored in MVP active settlement.
 
     MEMBER ||--o{ MEMBER_REFRESH_TOKEN : has
+    MEMBER ||--o{ NOTIFICATION_DEVICE : registers
+    MEMBER ||--o{ NOTIFICATION : receives_notification
     MEMBER ||--|| POINT_ACCOUNT : owns
     MEMBER ||--o{ POINT_HISTORY : owns
     MEMBER ||--o{ CREW : hosts
