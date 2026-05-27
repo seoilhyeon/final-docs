@@ -2,8 +2,48 @@
 
 이 문서는 Dondok MVP 백엔드 구현 전에 고정된 lifecycle, balance, ledger, settlement 불변식을 모은 implementation source-of-truth다. PRD를 대체하지 않으며, 구현 중 semantic drift를 막기 위한 guardrail로 사용한다.
 
+## 0. API contract authority and resurrection guard
 
-## 0. Schema implementation conventions
+### Authority hierarchy
+
+- `backend/docs/api/*`는 endpoint inventory, HTTP method/path, path/query/body 규칙, response shape, 공통 API 규칙, active/deferred boundary의 MVP active API source다.
+- `docs/API-spec-dondok.md`는 `backend/docs/api/*`에서 동기화된 integrated API contract다. backend API 문서와 충돌하는 오래된 standalone API-spec 문구를 authority로 취급하지 않는다.
+- `docs/PRD-dondok.md`와 `docs/Usecase-dondok.md`는 semantic guardrail이다. Backend API 문서는 active API surface를 정의하지만 settlement authority, ledger authority, lifecycle authority, projection wording, notification authority 같은 제품 의미 경계를 override하지 않는다.
+- `docs/ERD-dondok.md`, `docs/Schema-migration-spec.md`, `docs/Settlement-design.md`는 API contract stabilization 이후 정렬되는 derived implementation docs다. 이 문서들을 active API source 우회나 신규 endpoint/status semantics 생성 근거로 사용하지 않는다.
+- Deferred/Brownfield/Removed/Contract Drift Notes는 historical/reference only다. active MVP API, future delivery commitment, implementation permission이 아니다.
+
+### Resurrection ban
+
+아래 surface는 재활성화 조건을 모두 통과하기 전까지 active contract로 구현, 노출, 테스트하거나 legacy/candidate 문서에서 재사용하지 않는다.
+
+- crew start API (`POST /api/crews/{crewId}/start`) 또는 동등한 명시적 start surface
+- crew withdraw API (`POST /api/crews/{crewId}/withdraw`) 또는 active withdrawal/rejoin flow
+- admin settlement list/retry API (`GET /api/admin/settlements`, `POST /api/admin/settlements/{settlementId}/retry`) 또는 admin manual settlement mutation surface
+- AI habit report endpoint/surface
+- `GET /api/notifications/stream` 같은 notification stream / SSE surface
+- `WITHDRAWN`, active withdrawal, 중도탈퇴, rejoin lifecycle semantics
+- `WEEKLY_N`
+- correction workflow, public replay engine, recalculation engine, correction/replay mutation surface
+
+재활성화 조건:
+
+1. `backend/docs/api/*`가 먼저 변경되어 해당 surface를 active로 만든다.
+2. `docs/API-spec-dondok.md`를 backend API 문서 기준으로 동기화한다.
+3. `docs/PRD-dondok.md`와 `docs/Usecase-dondok.md` semantic guardrail을 재검증한다.
+
+이 조건을 통과하기 전까지 구현은 해당 surface를 active routing, service contract, API test, generated client expectation에서 제외한다.
+
+### API convenience fields are non-authoritative
+
+- API display/convenience/projection field는 lifecycle, settlement, ledger authority가 될 수 없다.
+- projection != final settlement.
+- notification/inbox/read state != canonical domain state.
+- retry != correction/replay/recalculation.
+- host != lifecycle/settlement/ledger authority.
+- all-fail = equal principal refund.
+- `settlement_item` + `point_history` linkage가 final settlement와 refund authority다.
+
+## 0.1 Schema implementation conventions
 
 - Primary keys use `BIGINT` auto increment.
 - Monetary amounts use `BIGINT` only. Do not use floating-point money types.
@@ -199,6 +239,12 @@ MVP 구현에서 이 guardrail 범위의 canonical transaction type은 아래와
 
 아래 패턴은 구현 중 재도입하지 않는다.
 
+- `backend/docs/api/*` active contract에 없는 endpoint/method/path/status/field를 구현 또는 API test 대상으로 승격
+- Deferred/Brownfield/Removed/Contract Drift Notes surface를 active MVP API, roadmap commitment, implementation permission처럼 사용
+- crew start, crew withdraw, admin settlement list/retry, AI habit report, notification stream/SSE, `WITHDRAWN`, active withdrawal/rejoin, `WEEKLY_N`, correction/replay engine, admin manual settlement surface 재도입
+- notification payload, inbox row, unread/read state를 mission certification, crew lifecycle, settlement, point ledger canonical state로 모델링
+- API display/convenience/projection field를 final settlement, payout guarantee, lifecycle authority, ledger truth로 모델링
+- host 또는 admin/manual surface를 lifecycle, settlement, ledger authority로 모델링
 - `settlement_pending_balance` persisted column 추가
 - `settlement_pending_amount`를 account DB column으로 저장
 - approval 시 새 ledger event 생성
@@ -206,7 +252,6 @@ MVP 구현에서 이 guardrail 범위의 canonical transaction type은 아래와
 - terminal `crew_participant` row 삭제
 - `REJECTED`/`EXPIRED` row를 삭제하거나 다른 status로 되돌려 재신청을 허용 (`CANCELLED` reopen은 신규 row 생성 없이 기존 row를 in-place 전이하는 경로이며 unique 우회가 아니다)
 - mutable `point_history`
-- host를 activation, settlement, ledger authority로 모델링
 - projection을 frozen/final/guaranteed payout처럼 모델링
 - private crew MVP semantics 구현
 - `APPROVED_LOCK_PENDING` 재도입

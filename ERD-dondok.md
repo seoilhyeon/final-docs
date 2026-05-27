@@ -2,9 +2,13 @@
 
 기준 문서:
 
-- [PRD-dondok.md](./PRD-dondok.md)
-- [Settlement-design.md](./Settlement-design.md)
+- `backend/docs/api/*` — MVP active API source
+- [API-spec-dondok.md](./API-spec-dondok.md) — backend API 기준 integrated synchronized contract
+- [PRD-dondok.md](./PRD-dondok.md) / [Usecase-dondok.md](./Usecase-dondok.md) — semantic guardrail lane
+- [Settlement-design.md](./Settlement-design.md) — derived settlement/runtime design
 - [Implementation-guardrails.md](./Implementation-guardrails.md)
+
+이 ERD는 backend API authority 이후의 derived implementation doc다. ERD의 컬럼/관계/메모는 `backend/docs/api/*`에 없는 endpoint/status/feature를 active MVP surface로 승격하지 않으며, Deferred/Brownfield/Removed surface는 historical/reference only이고 active MVP implementation surface, future delivery commitment, implementation permission이 아니다.
 
 ## 1. ERD 설계 원칙
 
@@ -37,7 +41,7 @@
 
 ### 1.4 논리 삭제 정책
 
-- `crew_participant`는 물리 삭제하지 않고 participation lifecycle 상태로 관리한다. MVP 활성 기준에서는 `LOCKED`만 minimum baseline, activation eligibility, frozen participant baseline, settlement 대상 후보다. `PENDING`/`REJECTED`/`CANCELLED`/`EXPIRED`는 baseline/settlement 대상이 아니다. `CANCELLED` row는 RECRUITING phase 안에서 동일 사용자의 재신청 시 `CANCELLED -> PENDING`으로 reopen될 수 있는 reusable row이며, 신규 row 생성 없이 기존 row를 그대로 재사용한다. `REJECTED`/`EXPIRED`는 reopen 대상이 아니다. `WITHDRAWN`/active withdrawal/rejoin은 MVP active status가 아니고 Phase 2/deferred brownfield reference로만 남긴다.
+- `crew_participant`는 물리 삭제하지 않고 participation lifecycle 상태로 관리한다. MVP 활성 기준에서는 `LOCKED`만 minimum baseline, activation eligibility, frozen participant baseline, settlement 대상 후보다. `PENDING`/`REJECTED`/`CANCELLED`/`EXPIRED`는 baseline/settlement 대상이 아니다. `CANCELLED` row는 RECRUITING phase 안에서 동일 사용자의 재신청 시 `CANCELLED -> PENDING`으로 reopen될 수 있는 reusable row이며, 신규 row 생성 없이 기존 row를 그대로 재사용한다. `REJECTED`/`EXPIRED`는 reopen 대상이 아니다. `WITHDRAWN`/active withdrawal/rejoin은 MVP active status가 아니고 Deferred/Brownfield/Removed historical/reference-only로만 남긴다.
 - `mission_log`, `settlement`, `settlement_item`, `point_history`는 감사 추적을 위해 append-only에 가깝게 다룬다.
 - `crew.settlement_status`는 필요 시 조회 최적화용 비정규화 필드로 둘 수 있지만, 원천 상태는 항상 `settlement.status`다.
 
@@ -58,6 +62,13 @@
 - 표준 audit column은 `created_at`, `updated_at`이다.
 - `point_account`, `crew_participant`, `settlement`는 `version` 기반 optimistic locking을 둔다.
 - money/audit entity에는 soft delete를 사용하지 않는다.
+
+분류 규칙:
+
+- Active persistence authority: MVP 구현에 필요한 저장 원천.
+- Audit/explanation snapshot: deterministic explanation/replay를 위한 read-only context이며 recalculation/payout authority가 아니다.
+- Runtime metadata candidate: 구현 선택지이며 backend API/API-spec/schema migration이 freeze하기 전까지 active contract가 아니다.
+- Deferred/Brownfield/Removed reference: historical/reference only이며 active MVP implementation surface, future delivery commitment, implementation permission이 아니다.
 
 ## 2. 테이블 목록 요약
 
@@ -85,21 +96,21 @@
 
 | 테이블명                                       | 역할                                              | 포함 판단                                                                                                                                   |
 | ---------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `notification_device` / `push_token` 후보      | Android-first FCM credential lifecycle 지원 후보  | 후속 구현 후보. 이 semantic freeze에서 token refresh, invalid-token handling, provider retry 정책을 정하지 않으며 crew lifecycle, 인증, 검수, 정산, 포인트 원장 상태를 변경하지 않는다 |
-| `notification_event` / `notification_log` 후보 | 알림 inbox/read UX hint history 지원              | Thin notification 전략에서 필요한 경우만 검토하는 후보. Frontend local/browser state로 충분하면 backend persistence로 승격하지 않으며, canonical history/audit truth가 아니다 |
+| `notification_device` / `push_token` 후보      | Android-first FCM device lifecycle capability | backend active API는 FCM device lifecycle을 요구하지만, 정확한 ERD/table shape는 구현 evidence가 있을 때만 freeze한다. crew lifecycle, 인증, 검수, 정산, 포인트 원장 상태를 변경하지 않는다 |
+| `notification_event` / `notification_log` 후보 | notification inbox/read/unread UX hint capability | backend active API는 inbox/read/unread capability를 요구하지만, 정확한 table/migration shape는 구현 evidence가 있을 때만 freeze한다. canonical history/audit truth가 아니다 |
 | `notification_delivery_attempt` 후보           | FCM delivery attempt 관측 및 transport retry 지원 | Deferred operational hardening 후보. MVP semantic freeze 요구사항이 아니며 delivery success/failure/read 여부는 도메인 성공/실패나 settlement retry/replay/correction의 근거가 아니다              |
-| `notification_preference` 후보                 | 채널/이벤트별 수신 설정                           | Phase 2 deferred. MVP에서는 세부 preference matrix를 schema로 freeze하지 않는다                                                             |
-| `notification_template` 후보                   | 알림 문구/template 관리                           | Phase 2 deferred. MVP에서는 template CMS/table을 schema로 freeze하지 않는다                                                                 |
+| `notification_preference` 후보                 | 채널/이벤트별 수신 설정                           | Deferred/Brownfield historical/reference only. MVP에서는 세부 preference matrix를 schema로 freeze하지 않는다                                                             |
+| `notification_template` 후보                   | 알림 문구/template 관리                           | Deferred/Brownfield historical/reference only. MVP에서는 template CMS/table을 schema로 freeze하지 않는다                                                                 |
 
 ### 2.3 Notification / FCM candidate boundary
 
-- ERD의 notification 후보 엔티티는 Android-first FCM delivery와 inbox/read UX가 backend 저장을 실제로 필요로 할 때만 검토하는 보조 persistence 후보이며, thin notification의 기본값은 hint/deep-link/transport다. 결제/정산/포인트/인증/검수의 새 authority가 아니다.
-- `notification_device` 또는 `push_token`은 후속 구현에서 authenticated member의 FCM credential lifecycle 저장이 필요할 때만 검토한다. 이 semantic freeze에서 token refresh, invalid-token handling, provider retry 정책을 정하지 않으며 참여/인증/정산/원장 상태를 변경하지 않는다.
-- `notification_event` 또는 `notification_log`는 사용자가 놓친 알림을 다시 볼 수 있게 하는 UX hint history가 꼭 필요할 때의 후보일 뿐, MVP Core persistence default나 audit-grade canonical domain history가 아니다. 읽음/미읽음은 사용자 UX 상태이며 미해결 정산·인증·검수 task를 뜻하지 않는다. Persisted read state를 둔다면 nullable `read_at`만 사용하고 status enum/workflow로 확장하지 않는다.
+- backend active API는 FCM device lifecycle과 notification inbox/read/unread capability를 포함하지만, 이 ERD는 정확한 notification table/migration shape를 새로 발명하지 않는다. 구현 evidence가 확인되기 전까지 notification 후보 엔티티는 hint/deep-link/refetch/transport 보조 persistence 후보이며 결제/정산/포인트/인증/검수의 새 authority가 아니다.
+- `notification_device` 또는 `push_token`은 backend active FCM device lifecycle capability를 저장하기 위한 구현 evidence가 확인될 때만 구체 table shape로 freeze한다. 이 semantic freeze에서 token refresh, invalid-token handling, provider retry 정책을 정하지 않으며 참여/인증/정산/원장 상태를 변경하지 않는다.
+- `notification_event` 또는 `notification_log`는 backend active inbox/read/unread capability를 저장하기 위한 구현 evidence가 확인될 때만 구체 table shape로 freeze한다. 사용자가 놓친 알림을 다시 볼 수 있게 하는 UX hint history일 뿐, MVP Core audit-grade canonical domain history가 아니다. 읽음/미읽음은 사용자 UX 상태이며 미해결 정산·인증·검수 task를 뜻하지 않는다. Persisted read state를 둔다면 nullable `read_at`만 사용하고 status enum/workflow로 확장하지 않는다.
 - `notification_delivery_attempt`는 MVP semantic freeze 요구사항이 아니라 후속 operational hardening 후보로만 둔다. 실패/재시도는 settlement retry, replay, correction, payout mutation과 분리한다.
 - 알림 payload/list item에 필요한 canonical refetch metadata 후보는 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 수준으로 제한한다. `event_type`은 앱 라우팅 vocabulary 후보이며 DB enum이나 audit event catalog freeze가 아니다. authoritative payout/certification/ledger snapshot은 포함하지 않는다.
 - Notification 후보 엔티티는 non-authoritative hint/deep-link/refetch/transport surface이므로 Core Mermaid에서 의도적으로 제외한다. Core Mermaid에 포함하면 canonical domain history/source of truth로 오해될 수 있다.
-- Preference matrix, template CMS/table, campaign/broadcast, advanced analytics, SSE/Web realtime reliability persistence는 Phase 2/deferred로 유지한다.
+- Preference matrix, template CMS/table, campaign/broadcast, advanced analytics, SSE/Web realtime reliability persistence는 Deferred/Brownfield historical/reference only로 유지하며 active MVP API나 implementation permission이 아니다.
 
 ## 3. 테이블 상세
 
@@ -150,7 +161,7 @@ Unique / Index:
 - `member.id`는 내부 persistence identity이고 외부 사용자 식별자로 노출하지 않는다.
 - `member.uuid`는 회원 생성 시 발급하고 변경하지 않는 immutable external canonical identifier다.
 - `email`은 변경 가능하고 PII이므로 canonical identity로 사용하지 않는다.
-- JWT와 SSE를 포함한 외부 계약에서 이 identifier를 사용하는 방식은 `API-spec-dondok.md`가 소유한다.
+- JWT 등 외부 계약에서 이 identifier를 사용하는 방식은 `API-spec-dondok.md`가 소유한다. SSE/stream surface는 backend active API에 없는 경우 Deferred/Brownfield historical/reference-only로만 다룬다.
 - `member`는 계정의 기준 키고, 정산 계산 단위는 아니다.
 - `member`는 사용자 식별·인증·프로필 상태를 담당하며, 포인트 현재 잔액처럼 빈번히 변하는 금액 상태는 직접 보관하지 않는다.
 - 프로필은 닉네임 + 프로필 이미지 + 상태 메시지로 제한된다.
@@ -530,10 +541,13 @@ Unique / Index:
 | `crew_id`        | `BIGINT`      | N        | 방 FK                                                 |
 | `member_id`      | `BIGINT`      | N        | 회원 FK                                               |
 | `status`         | `VARCHAR(30)` | N        | 참여 lifecycle 상태                                   |
-| `deposit_amount` | `BIGINT`      | Y        | 참여 예치금 snapshot. `PENDING` 생성 시 `crew.deposit_amount`를 reserve 금액으로 기록하고, `LOCKED` 이후에는 정산 입력 deposit으로 유지한다 |
+| `deposit_amount` | `BIGINT`      | N        | 참여 예치금 snapshot. `PENDING` 생성 시 `crew.deposit_amount`를 reserve 금액으로 기록하고, `LOCKED` 이후에는 정산 입력 deposit으로 유지한다 |
+| `pending_at`      | `DATETIME(6)` | N        | 신청 제출/예치 reserve 생성 시각. eligible `CANCELLED -> PENDING` reopen 시 latest-effective 신청 시각으로 갱신 가능 |
 | `locked_at`      | `DATETIME(6)` | Y        | 방장 승인으로 `PENDING -> LOCKED` 확정된 시각 |
+| `rejected_at`    | `DATETIME(6)` | Y        | host rejection terminal 시각 |
+| `cancelled_at`   | `DATETIME(6)` | Y        | 승인 전 applicant cancellation 시각 |
+| `expired_at`     | `DATETIME(6)` | Y        | 시작 전 자동 만료 terminal 시각 |
 | `released_point_history_id` | `BIGINT` | Y        | reserve release 원장 FK. terminal release의 authoritative evidence |
-| `withdrawn_at`   | `DATETIME(6)` | Y        | brownfield/deferred withdrawal 시각 reference         |
 | `version`        | `BIGINT`      | N        | optimistic locking version                            |
 | `created_at`     | `DATETIME(6)` | N        | 생성 시각                                             |
 | `updated_at`     | `DATETIME(6)` | N        | 수정 시각                                             |
@@ -558,7 +572,7 @@ Unique / Index:
 상태값 / Enum:
 
 - MVP active `status`: `PENDING`, `LOCKED`, `REJECTED`, `CANCELLED`, `EXPIRED`
-- `WITHDRAWN`/active withdrawal/rejoin은 MVP active status가 아니며, Phase 2/deferred brownfield reference로만 보존한다.
+- `WITHDRAWN`/active withdrawal/rejoin/`withdrawn_at`은 MVP active status/column requirement가 아니며 Deferred/Brownfield/Removed historical/reference only로만 보존한다. active MVP implementation surface, future delivery commitment, implementation permission이 아니다.
 
 주의사항:
 
@@ -571,8 +585,9 @@ Unique / Index:
 - `CANCELLED`는 사용자가 승인 전 `PENDING` 상태에서 신청을 취소한 pre-start exit 상태다. 기존 reserve는 취소 환급 원장으로 반환한다. `CANCELLED`는 reopen 가능 상태이며, 같은 사용자가 같은 크루에 재신청 시 `CANCELLED -> PENDING`으로 in-place 전이되어 row가 재사용된다. reopen 시 새 `CREW_DEPOSIT_RESERVE point_history` row가 append-only로 추가되고, `crew_participant.released_point_history_id`는 다시 `null`로 reset되어 다음 사이클 release를 받을 수 있는 상태가 된다. `pending_at`은 reopen 시각으로 갱신되며, 직전 `cancelled_at`은 in-place 전이 시 audit 용도로 그대로 둘지 갱신할지에 대한 latest-effective overwrite 규칙은 구현 단계에서 정한다(컨벤션: 최신 effective transition 시각만 유지하는 latest-effective overwrite 채택).
 - `EXPIRED`는 시작 전까지 처리되지 않아 자동 만료된 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
 - reserve release는 같은 `crew_participant.id`의 현재 사이클당 한 번만 허용한다. `PENDING -> CANCELLED/REJECTED/EXPIRED` 전이와 `CREW_RESERVE_RELEASE` 원장 생성은 같은 transaction에서 처리하며, 구현은 nullable unique `released_point_history_id`를 `crew_participant`에 두어 현재 사이클의 reserve-release ledger evidence로 사용한다. `CANCELLED -> PENDING` reopen 시점에는 같은 transaction에서 `released_point_history_id`를 `null`로 reset하고 새 `CREW_DEPOSIT_RESERVE point_history` row를 insert해 다음 사이클을 시작한다. 직전 `CREW_RESERVE_RELEASE` row는 append-only audit으로 유지되며 reset/삭제하지 않는다. `reserve_released_at`만으로 release 완료를 증명하지 않으며, 하나의 release ledger row를 여러 participant가 공유할 수 없다.
+- `approved_at` 컬럼은 만들지 않는다. 승인 evidence는 `LOCKED` status와 `locked_at`이다.
 - 승인 후 lock 대기 상태(`APPROVED_LOCK_PENDING`)는 두지 않는다. 방장 승인은 `PENDING -> LOCKED` 상태 전이이며 추가 잔액 차감을 수행하지 않는다.
-- `WITHDRAWN`/active withdrawal/rejoin은 MVP active status가 아니다. 기존 row 재사용/withdrawal 재도입은 Phase 2/deferred brownfield reference다.
+- `WITHDRAWN`/active withdrawal/rejoin/`withdrawn_at`은 MVP active status/column requirement가 아니다. 기존 row 재사용/withdrawal 재도입은 Deferred/Brownfield/Removed historical/reference only다.
 - 보증금은 별도 계좌로 이동하지 않으며, `point_account.available_balance`에서 차감되고 append-only `CREW_DEPOSIT_RESERVE point_history`가 원장 이벤트로 남은 뒤 `crew_participant.deposit_amount`로 reserve/locked 상태를 표현한다.
 - `deposit_amount`는 participant 단위 예치금 snapshot의 source of truth다. `PENDING` 생성 시 `crew.deposit_amount`를 snapshot으로 복사 저장하고, `LOCKED` 전이 후에도 같은 값을 유지한다.
 - 신청 생성 트랜잭션은 capacity 확인(`PENDING + LOCKED < max_participants`) → `point_account.available_balance >= crew.deposit_amount` 조건부 차감 및 `reserved_balance` 증가 → `CREW_DEPOSIT_RESERVE point_history` insert → `crew_participant.deposit_amount` snapshot → `status = PENDING` 기록을 하나의 트랜잭션으로 함께 성공 또는 함께 롤백한다.
@@ -585,7 +600,7 @@ Unique / Index:
 역할:
 
 - 방의 인증 주기 규칙을 정의한다.
-- MVP active는 `DAILY`, `SPECIFIC_DAYS` 중 하나를 가진다. `WEEKLY_N`은 Phase 2/deferred reference이며 MVP active strategy 아니다.
+- MVP active는 `DAILY`, `SPECIFIC_DAYS` 중 하나를 가진다. `WEEKLY_N`은 Deferred/Brownfield historical/reference-only이며 MVP active strategy, future delivery commitment, implementation permission이 아니다.
 
 주요 컬럼:
 
@@ -594,7 +609,7 @@ Unique / Index:
 | `id`                    | `BIGINT`      | N        | 규칙 PK                                              |
 | `crew_id`               | `BIGINT`      | N        | 방 FK                                                |
 | `frequency_type`        | `VARCHAR(20)` | N        | 인증 주기 타입                                       |
-| `frequency_count`       | `INT`         | Y        | Phase 2 `WEEKLY_N` reference 전용. MVP active 미사용 |
+| `frequency_count`       | `INT`         | Y        | Deferred/Brownfield `WEEKLY_N` reference 전용. MVP active 미사용 |
 | `daily_settlement_type` | `CHAR(1)`     | N        | 일일 인증/정산 cadence type (A/B/C)                  |
 | `created_at`            | `DATETIME(6)` | N        | 생성 시각                                            |
 | `updated_at`            | `DATETIME(6)` | N        | 수정 시각                                            |
@@ -613,14 +628,14 @@ Unique / Index:
 
 상태값 / Enum:
 
-- `frequency_type`: MVP active `DAILY`, `SPECIFIC_DAYS`. `WEEKLY_N`은 Phase 2/deferred reference
+- `frequency_type`: MVP active `DAILY`, `SPECIFIC_DAYS`. `WEEKLY_N`은 Deferred/Brownfield historical/reference-only
 - `daily_settlement_type`: `A`, `B`, `C` (각 타입의 인증 마감/정산 cutoff는 `Settlement-design.md`이 소유)
 
 주의사항:
 
 - `DAILY`는 하루 최대 1회 인정 규칙을 애플리케이션 계산으로 처리한다.
 - `SPECIFIC_DAYS`는 특정 날짜가 아니라 반복 요일 규칙이며, 허용 요일 목록을 `mission_schedule_day`에서 읽는다.
-- Phase 2 `WEEKLY_N` reference에서는 `frequency_count`가 필수다. MVP active strategy 아님.
+- Deferred/Brownfield historical/reference-only `WEEKLY_N` reference에서는 `frequency_count`가 필요할 수 있으나 MVP active strategy나 implementation permission이 아니다.
 - `daily_settlement_type`은 방 생성 시 필수다. A/B/C는 매일 인증 마감 시각과 정산 batch 시각의 cadence anchor이며, lifecycle/settlement authority는 `Settlement-design.md`이 소유한다.
 
 ### `mission_schedule_day`
@@ -708,7 +723,7 @@ Unique / Index:
 상태값 / Enum:
 
 - `certification_status`: `PENDING_REVIEW`, `SUCCESS`, `FAILED`
-- `failure_reason`: `EXIF_MISSING`, `EXIF_TIME_INVALID`, `BEFORE_START`, `AFTER_END`, `AFTER_WITHDRAWN`
+- `failure_reason`: MVP active `EXIF_MISSING`, `EXIF_TIME_INVALID`, `BEFORE_START`, `AFTER_END`. `AFTER_WITHDRAWN`은 Deferred/Brownfield historical/reference-only이며 active MVP failure reason이 아니다
 - `decision_type`: `MANUAL_APPROVE`, `MANUAL_REJECT`, `AUTO_APPROVE`, `AUTO_REJECT`
 - `reject_reason_code`: `TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER`
 
@@ -721,8 +736,8 @@ Unique / Index:
 - `image_hash`는 서버가 S3 object에서 직접 계산한 SHA-256이며 클라이언트 제출 hash를 신뢰해서 저장하는 컬럼이 아니다. 동일/유사 사진 식별에 사용하는 fraud/risk signal이며 단독으로 final 인정/거절 authority가 아니다.
 - EXIF가 없거나 유효하지 않으면 `failure_reason`은 `EXIF_MISSING` 또는 `EXIF_TIME_INVALID`가 된다.
 - 정산 인정 횟수 계산 기준 시간은 `exif_taken_at`이 아니라 `server_time`이다.
-- `withdrawn_at` cutoff는 brownfield/deferred reference다. MVP active settlement에서는 frozen `LOCKED` baseline과 resolved certification state를 소급 변경하는 규칙으로 사용하지 않는다.
-- `DAILY` 중복, `SPECIFIC_DAYS` 제외, `WEEKLY_N` 상한 제외 같은 최종 인정 제외 근거는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`에 남긴다.
+- `withdrawn_at` cutoff는 Deferred/Brownfield historical/reference-only다. MVP active settlement에서는 frozen `LOCKED` baseline과 resolved certification state를 소급 변경하는 규칙으로 사용하지 않으며 active column/status requirement가 아니다.
+- `DAILY` 중복, `SPECIFIC_DAYS` 제외 같은 최종 인정 제외 근거는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`에 남긴다. `WEEKLY_N` 상한 제외는 Deferred/Brownfield historical/reference-only다.
 - 조회 시점 성공 표시와 최종 인정 횟수는 다를 수 있으므로, 최종 결과는 `settlement_item`에서 설명한다.
 - `certification_status`는 인증 피드 badge, projection/dashboard, 알림 입력에서 사용하는 resolved certification state다. (`PENDING_REVIEW`: 업로드 직후 검수/판정 대기, `SUCCESS`: 인증 인정, `FAILED`: 인정 불가.) EXIF/hash raw signal이나 host moderation `decision_type`/`reject_reason_code`와 같은 의미 axis로 사용하지 않으며, settlement 인정 횟수 계산은 `calculation_reason`을 통해 별도 표현한다.
 - 일반 feed timeline은 history-preserving append-only activity stream이다. 같은 참여자/날짜/cadence slot에서 `FAILED`/`PENDING_REVIEW` 재업로드나 host moderation 상태 전이로 여러 `mission_log` row가 생기면 이전 시도도 visible item으로 유지할 수 있으며, 기존 row를 overwrite하거나 synthetic row로 대체하지 않는다.
@@ -863,6 +878,7 @@ Unique / Index:
 | `id`                              | `BIGINT`       | N        | 정산 PK                                                            |
 | `crew_id`                         | `BIGINT`       | N        | 대상 방 FK                                                         |
 | `status`                          | `VARCHAR(20)`  | N        | 정산 상태                                                          |
+| `baseline_frozen_at`              | `DATETIME(6)`  | N        | frozen `LOCKED` participant baseline selection evidence. retry/replay/recalculation 권한이 아니다 |
 | `batch_run_key`                   | `VARCHAR(100)` | Y        | 배치 실행 식별자                                                   |
 | `retry_count`                     | `INT`          | N        | 누적 재시도 횟수                                                   |
 | `total_participants`              | `INT`          | N        | 정산 대상 participant 수                                           |
@@ -905,7 +921,8 @@ Unique / Index:
 - `Settlement(PENDING)`는 종료/취소 감지 시 선생성하며, 아직 워커가 claim하지 않은 실행 전 상태다.
 - `Settlement.status`가 정산 상태의 원천이고, `crew.settlement_status`는 projection이다. Host moderation authority는 settlement authority가 아니며, freeze 이후 정산/일별 결과 mutation은 금지된다.
 - 같은 crew에는 MVP authoritative final settlement row를 하나만 허용한다. 정상 종료와 시작 전 취소는 lifecycle/reason input이지 별도 settlement type이 아니다.
-- `total_participants`는 frozen participant baseline에 포함된 `LOCKED` participant 중 정산 대상 deposit이 존재하는 수다. `PENDING`/`REJECTED`/`CANCELLED`/`EXPIRED`는 정산 baseline에 포함하지 않는다. `WITHDRAWN`/active withdrawal 정산 포함 여부는 Phase 2/deferred brownfield semantics다.
+- `baseline_frozen_at`은 baseline selection 시점을 증명하는 persisted freeze evidence이며 retry/replay/recalculation/correction 권한이 아니다.
+- `total_participants`는 frozen participant baseline에 포함된 `LOCKED` participant 중 정산 대상 deposit이 존재하는 수다. `PENDING`/`REJECTED`/`CANCELLED`/`EXPIRED`는 정산 baseline에 포함하지 않는다. `WITHDRAWN`/active withdrawal 정산 포함 여부는 Deferred/Brownfield/Removed historical/reference-only semantics다.
 - `total_locked_amount`는 정산 실행 시점에 정산 대상 participant `crew_participant.deposit_amount` 합계를 스냅샷으로 고정한 값이다.
 - `total_locked_amount`는 `point_history`나 `point_account`를 다시 합산해 계산하지 않는다.
 - 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. Brownfield winner/draw/top-contributor 필드는 deprecated reference일 뿐 지급액 결정 authority가 아니며, host discretion이나 random payout을 허용하지 않는다.
@@ -942,7 +959,7 @@ Unique / Index:
 | `remainder_bonus_amount`        | `BIGINT`        | N        | deterministic remainder allocation으로 분배된 잔액 스냅샷. payout authority는 `refund_amount`다   |
 | `reward_amount`                 | `BIGINT`        | N        | base + remainder bonus 합산 보상 스냅샷. 설명용 컬럼이며 payout authority가 아니다                 |
 | `refund_amount`                 | `BIGINT`        | N        | 최종 지급/환급 총액의 persisted source of truth. API 응답의 `final_amount`는 본 컬럼의 alias projection이며 별도 저장하지 않는다 |
-| `withdrawn_at_snapshot`         | `DATETIME(6)`   | Y        | 정산 시점 `crew_participant.withdrawn_at` snapshot. brownfield/deferred reference이며 MVP active settlement에서는 항상 `null`이다 |
+| `withdrawn_at_snapshot`         | `DATETIME(6)`   | Y        | 정산 시점 `crew_participant.withdrawn_at` snapshot. Deferred/Brownfield historical/reference-only이며 MVP active settlement에서는 항상 `null`이다 |
 | `effective_moderation_snapshot` | `JSON`          | Y        | 정산 시점 latest-effective moderation state snapshot. read-only audit/replay context이며 payout/recalculation authority가 아니다 |
 | `moderation_chain_ref`          | `JSON`          | Y        | 정산 시점 `moderation_history` chain reference (예: `{"latest_id":..., "count":...}`). audit linkage이며 payout authority가 아니다 |
 | `draw_key_snapshot`             | `CHAR(64)`      | Y        | non-payout 표시/설명 ordering key                                                                |
@@ -971,20 +988,20 @@ Unique / Index:
 
 상태값 / Enum:
 
-- `participant_status_snapshot`: MVP active settlement에서는 frozen `LOCKED`; `WITHDRAWN`은 brownfield/deferred reference
-- `calculation_reason` vocabulary는 JSON 내부 진단 코드 문자열이며 DB enum/constraint나 public API enum이 아니다. MVP discoverability 목적의 대표 값은 `DAILY_DUPLICATE`, `INVALID_SCHEDULE_DAY`, `BEFORE_START`, `AFTER_END`다. `WEEKLY_N_OVERFLOW`, `AFTER_WITHDRAWN_AT`은 Phase 2/deferred reference로만 남긴다.
+- `participant_status_snapshot`: MVP active settlement에서는 frozen `LOCKED`; `WITHDRAWN`은 Deferred/Brownfield historical/reference-only
+- `calculation_reason` vocabulary는 JSON 내부 진단 코드 문자열이며 DB enum/constraint나 public API enum이 아니다. MVP discoverability 목적의 대표 값은 `DAILY_DUPLICATE`, `INVALID_SCHEDULE_DAY`, `BEFORE_START`, `AFTER_END`다. `WEEKLY_N_OVERFLOW`, `AFTER_WITHDRAWN_AT`은 Deferred/Brownfield historical/reference-only로만 남기며 active MVP calculation branch가 아니다.
 
 주의사항:
 
 - 정산 계산 단위는 `crew_participant_id`고, 실제 포인트 지급 단위는 `member_id`다.
 - 같은 방에서 한 `member`가 하나의 `participant`만 가진다는 불변식이 있으므로 계산과 지급 연결이 안정적이다.
-- `calculation_reason`은 `DAILY` 중복 제외, `SPECIFIC_DAYS` 비유효 요일 제외, resolved certification state, Phase 2/deferred cadence/withdrawal reference를 설명해야 한다.
+- `calculation_reason`은 `DAILY` 중복 제외, `SPECIFIC_DAYS` 비유효 요일 제외, resolved certification state, Deferred/Brownfield cadence/withdrawal reference를 설명해야 한다.
 - `calculation_reason` 값 공간은 정산 스냅샷의 설명/QA 검색성을 위한 vocabulary이며, DB 제약이나 API 응답 enum으로 승격하지 않는다.
 - `calculation_reason`은 reason-code mapping version과 함께 해석한다. 과거 정산 설명은 현재 UX wording이 아니라 당시 vocabulary 기준으로 reconstruction되어야 한다.
 - `settlement_item`은 참여자별 deterministic 계산 snapshot이고, `point_history`는 그 결과를 실제 잔액에 반영하는 authoritative append-only ledger다. `Settlement.status = SUCCEEDED` 이후에는 frozen snapshot과 연결된 `point_history`가 운영/분쟁/조회 기준이며 post-freeze mutation은 금지된다.
 - `refund_amount`는 per-item 최종 환급 총액의 persisted source of truth이고, `base_refund_amount` + `remainder_bonus_amount` + `reward_amount`는 동일 환급 결과를 deterministic하게 설명/감사하기 위한 snapshot columns다. 이 세 컬럼은 항상 `reward_amount = base_refund_amount + remainder_bonus_amount`, `refund_amount = reward_amount` invariant를 만족하도록 settlement 트랜잭션에서 함께 기록한다. payout mutation authority는 여전히 `refund_amount`와 연결된 `point_history`다. API 응답에서 `final_amount`를 노출하는 경우 본 `refund_amount`의 read-only alias로 해석한다.
 - `effective_moderation_snapshot`, `moderation_chain_ref`, `withdrawn_at_snapshot`은 정산 시점 컨텍스트를 설명하기 위한 read-only audit/replay context이며 현재 엔진으로의 reinterpretation, recalculation, payout rewrite authority가 아니다. settlement input freeze 이후에 `moderation_history`에 새 row가 append되어도 본 snapshot 컬럼을 mutate하지 않는다.
-- `withdrawn_at_snapshot`은 brownfield/deferred withdrawal reference로만 사용한다. MVP active settlement에서는 frozen `LOCKED` baseline을 사용하므로 항상 `null`이며, 이 값이 채워져 있어도 frozen baseline이나 `refund_amount`를 소급 변경하는 근거가 되지 않는다.
+- `withdrawn_at_snapshot`은 Deferred/Brownfield historical/reference-only withdrawal reference로만 사용한다. MVP active settlement에서는 frozen `LOCKED` baseline을 사용하므로 항상 `null`이며, 이 값이 채워져 있어도 frozen baseline이나 `refund_amount`를 소급 변경하는 근거가 되지 않는다.
 - 정산 실행에서는 `settlement_item`을 먼저 생성해 계산 결과를 고정하고, 이후 `point_history`를 생성한 뒤 `point_history_id`를 연결한다.
 - 두 단계는 participant별 `idempotency_key`를 통해 느슨하게 연결되므로, partial 재시도 시 이미 반영된 환급은 재사용하고 누락된 환급만 안전하게 이어서 처리할 수 있어야 한다.
 - `point_history_id`는 중간 실패 복구를 위해 nullable이지만, `settlement.status = SUCCEEDED`인 결과에서는 모두 채워져 있어야 한다.
@@ -1164,15 +1181,18 @@ erDiagram
         BIGINT member_id FK
         VARCHAR status
         BIGINT deposit_amount
+        DATETIME pending_at
         DATETIME locked_at
+        DATETIME rejected_at
+        DATETIME cancelled_at
+        DATETIME expired_at
         BIGINT released_point_history_id FK, UK
-        DATETIME withdrawn_at
         BIGINT version
         DATETIME created_at
         DATETIME updated_at
     }
-    %% CREW_PARTICIPANT: nullable=deposit_amount, locked_at, released_point_history_id, withdrawn_at; UK(crew_id, member_id); nullable UK(released_point_history_id); IDX(crew_id, status), IDX(member_id, status).
-    %% CREW_PARTICIPANT enum: MVP active status=PENDING|LOCKED|REJECTED|CANCELLED|EXPIRED; WITHDRAWN is deferred/brownfield only.
+    %% CREW_PARTICIPANT: nullable=locked_at, rejected_at, cancelled_at, expired_at, released_point_history_id; deposit_amount and pending_at are NOT NULL; withdrawn_at is not an MVP active column requirement. UK(crew_id, member_id); nullable UK(released_point_history_id); IDX(crew_id, status), IDX(member_id, status).
+    %% CREW_PARTICIPANT enum: MVP active status=PENDING|LOCKED|REJECTED|CANCELLED|EXPIRED; WITHDRAWN/withdrawn_at/active withdrawal/rejoin are Deferred/Brownfield historical/reference only, not implementation permission.
     %% CREW_PARTICIPANT note: PENDING reserves capacity/balance but is excluded from activation baseline and settlement; LOCKED is the frozen baseline/settlement candidate.
     %% CREW_PARTICIPANT reopen: CANCELLED row is reusable. Same (crew_id, member_id) can reapply during RECRUITING + before recruitment_deadline + capacity OK + reserve OK; row transitions CANCELLED -> PENDING in place (no new row), released_point_history_id resets to null, a new CREW_DEPOSIT_RESERVE point_history row is appended. REJECTED/EXPIRED rows are terminal and not reopenable. Host auto-created LOCKED rows are not subject to reopen.
 
@@ -1220,7 +1240,7 @@ erDiagram
         DATETIME created_at
         DATETIME updated_at
     }
-    %% MISSION_RULE: nullable=frequency_count; UK(crew_id); frequency_type MVP=DAILY|SPECIFIC_DAYS, WEEKLY_N deferred; daily_settlement_type=A|B|C.
+    %% MISSION_RULE: nullable=frequency_count; UK(crew_id); frequency_type MVP=DAILY|SPECIFIC_DAYS, WEEKLY_N Deferred/Brownfield historical/reference-only; daily_settlement_type=A|B|C.
 
     MISSION_SCHEDULE_DAY {
         BIGINT id PK
@@ -1251,7 +1271,7 @@ erDiagram
     }
     %% MISSION_LOG: nullable=image_url, image_hash, exif_taken_at, failure_reason, moderator_id, moderator_decided_at, decision_type, reject_reason_code, reject_memo; image_s3_key and caption are required together; CHECK(char_length(caption) between 5 and 100).
     %% MISSION_LOG indexes: IDX(crew_participant_id, server_time), IDX(crew_participant_id, certification_status, server_time).
-    %% MISSION_LOG enums: certification_status=PENDING_REVIEW|SUCCESS|FAILED; failure_reason=EXIF_MISSING|EXIF_TIME_INVALID|BEFORE_START|AFTER_END|AFTER_WITHDRAWN; decision_type=MANUAL_APPROVE|MANUAL_REJECT|AUTO_APPROVE|AUTO_REJECT; reject_reason_code=TIME_VIOLATION|DUPLICATE|MISSION_MISMATCH|UNCLEAR|INAPPROPRIATE|OTHER.
+    %% MISSION_LOG enums: certification_status=PENDING_REVIEW|SUCCESS|FAILED; failure_reason MVP=EXIF_MISSING|EXIF_TIME_INVALID|BEFORE_START|AFTER_END; AFTER_WITHDRAWN is Deferred/Brownfield reference only; decision_type=MANUAL_APPROVE|MANUAL_REJECT|AUTO_APPROVE|AUTO_REJECT; reject_reason_code=TIME_VIOLATION|DUPLICATE|MISSION_MISMATCH|UNCLEAR|INAPPROPRIATE|OTHER.
     %% MISSION_LOG note: image_url is a nullable serving URL; image_hash and exif_taken_at are server-derived risk/timing signals, not final decision inputs; caption is required display/replay evidence, not a standalone decision input; created_at and id remain available for deterministic tie-breaks.
 
     MODERATION_HISTORY {
@@ -1283,6 +1303,7 @@ erDiagram
         BIGINT id PK
         BIGINT crew_id FK, UK
         VARCHAR status
+        DATETIME baseline_frozen_at
         VARCHAR batch_run_key
         INT retry_count
         INT total_participants
@@ -1301,7 +1322,7 @@ erDiagram
         DATETIME updated_at
         BIGINT version
     }
-    %% SETTLEMENT: nullable=batch_run_key, failure_code, failure_message, started_at, finished_at; UK(crew_id); IDX(status, retry_count, created_at).
+    %% SETTLEMENT: baseline_frozen_at is persisted freeze evidence; nullable=batch_run_key, failure_code, failure_message, started_at, finished_at; UK(crew_id); IDX(status, retry_count, created_at).
     %% SETTLEMENT enums: status=PENDING|RUNNING|SUCCEEDED|FAILED|RETRY_WAIT; remainder_policy=DETERMINISTIC_REMAINDER_ALLOCATION; failure_code=INPUT_LOAD_FAILED|CALCULATION_FAILED|POINT_CREDIT_FAILED|DUPLICATE_SETTLEMENT|LOCK_ACQUIRE_FAILED|UNKNOWN.
     %% SETTLEMENT note: one authoritative final row per crew; Settlement.status is source of truth, crew.settlement_status is projection.
 
@@ -1335,7 +1356,7 @@ erDiagram
     }
     %% SETTLEMENT_ITEM: nullable=withdrawn_at_snapshot, effective_moderation_snapshot, moderation_chain_ref, draw_key_snapshot, tie_break_rank, point_history_id; UK(settlement_id, crew_participant_id); nullable UK(point_history_id); IDX(member_id).
     %% SETTLEMENT_ITEM note: participant snapshot; refund_amount is the persisted per-item payout source of truth and API final_amount is its read-only alias; base_refund_amount + remainder_bonus_amount + reward_amount are deterministic explanation snapshots (reward_amount = base + bonus; refund_amount = reward_amount). effective_moderation_snapshot/moderation_chain_ref/withdrawn_at_snapshot are read-only audit/replay context, not payout/recalculation authority.
-    %% SETTLEMENT_ITEM enum: participant_status_snapshot is frozen LOCKED for MVP active settlement; WITHDRAWN is deferred/brownfield reference.
+    %% SETTLEMENT_ITEM enum: participant_status_snapshot is frozen LOCKED for MVP active settlement; WITHDRAWN/withdrawn_at_snapshot are Deferred/Brownfield historical/reference only and null/ignored in MVP active settlement.
 
     MEMBER ||--o{ MEMBER_REFRESH_TOKEN : has
     MEMBER ||--|| POINT_ACCOUNT : owns
@@ -1373,8 +1394,8 @@ erDiagram
 ## 8. 남은 결정 사항
 
 - 현재 ERD MVP active schema 생성을 막는 P0 필수 결정 사항은 없다.
-- 단, 아래 항목들은 ERD에서 물리 테이블/컬럼/enum으로 freeze하지 않는 deferred / Phase 2 / API-level 결정 사항이다.
-- Phase 2 hardening registry: audit-grade notification durability, notification preference matrix, notification template CMS/table, campaign/broadcast system, SSE/Web realtime reliability persistence, full AI replay reproducibility, AI report append-regeneration/invalidation lifecycle, immutable event sourcing migration, provider-level AI determinism, distributed replay engine, full provenance governance.
+- 단, 아래 항목들은 ERD에서 active 물리 테이블/컬럼/enum으로 freeze하지 않는 Deferred/Brownfield/Removed historical/reference-only / API-level 결정 사항이다. active MVP implementation surface, future delivery commitment, implementation permission이 아니다.
+- Deferred/Brownfield hardening registry: audit-grade notification durability, notification preference matrix, notification template CMS/table, campaign/broadcast system, SSE/Web realtime reliability persistence, full AI replay reproducibility, AI report append-regeneration/invalidation lifecycle, immutable event sourcing migration, provider-level AI determinism, distributed replay engine, full provenance governance.
 - `mission_log_reaction` 외 feed-status 테이블/컬럼은 만들지 않는다. 성공/실패/미제출/검토중 일자 상태는 API projection으로 계산한다.
 - `crew_notice` / `crew_notice_comment` / `crew_notice_reaction`은 채팅 없는 MVP의 크루 communication surface다. 이 테이블들은 settlement, ledger, certification, lifecycle, moderation authority를 갖지 않는다.
 - 인증 방식 enum/컬럼, OCR/AI vision persistence, 도딘 출금/payout/bank account schema는 MVP active schema로 freeze하지 않는다.
@@ -1392,4 +1413,4 @@ erDiagram
 - replay context (`algorithm_version`, `rule_context_snapshot`)의 public API exposure 정책은 deferred decision이다. ERD는 저장 schema만 freeze한다.
 - `member.is_host_ever`, `member.hosted_crew_count`는 별도 column으로 저장하지 않는 derived projection이며 authoritative counter source-of-truth가 아니다. host badge/카운터는 settlement/lifecycle authority가 아니다.
 - admin/correction/dispute workflow는 이 ERD가 발명하지 않는다. host moderation은 input authority이며 settlement/lifecycle/ledger authority가 아니다.
-- `ai_habit_report`는 MVP 제외 / Phase 2 candidate다. MVP Core ERD에서는 테이블/FK/관계로 freeze하지 않는다. settlement/ledger/certification authority가 아니며, MVP schema authority도 아니다. Phase 2 도입 시점에 settlement 성공 이후의 후행 산출물로서 별도 결정한다. 다른 AI 기능 entity는 이 ERD가 발명하지 않는다.
+- `ai_habit_report`는 MVP 제외 / Deferred/Brownfield historical/reference-only candidate다. MVP Core ERD에서는 테이블/FK/관계로 freeze하지 않는다. settlement/ledger/certification authority가 아니며, MVP schema authority도 아니다. 재도입하려면 backend API/API-spec 변경과 semantic guardrail 재검증 이후 settlement 성공 후행 산출물로 별도 결정한다. 다른 AI 기능 entity는 이 ERD가 발명하지 않는다.

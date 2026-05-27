@@ -2,7 +2,9 @@
 
 작성 기준 문서: `docs/Dondok_프로젝트기획안.docx` 및 최신 semantic reconciliation / freeze 결과. 이 PRD는 Dondok의 최상위 원본 intent source가 아니라, 최신 기획안과 폐기되지 않은 최종 합의를 안정적으로 정리한 canonical synthesis layer다. 오래된 회의 로그, 중간 검토안, rollback된 semantics, unresolved 논의는 L1 intent authority로 취급하지 않는다.
 
-ERD/API/Settlement/Test 문서는 이 PRD synthesis를 기준으로 후속 propagation 단계에서 정렬되는 derived implementation docs다. 단, PRD 자체도 L1 intent source를 override하는 constitution이 아니며, semantic authority의 최상위 기준은 최신 기획안과 최신 accepted freeze 결과다.
+API surface authority는 `backend/docs/api/*`가 소유하고, `docs/API-spec-dondok.md`는 이를 통합 동기화한 계약이다. 이 PRD는 semantic guardrail lane으로 제품 의미와 정책 경계를 제공하지만, backend active API에 없는 endpoint/status/field/feature를 단독으로 active MVP contract에 승격하지 않는다.
+
+ERD/Schema/Settlement/Test 문서는 API contract stabilization 이후 이 PRD synthesis와 backend API authority를 함께 기준으로 정렬되는 derived implementation docs다. 단, PRD 자체도 L1 intent source를 override하는 constitution이 아니며, semantic authority의 최상위 기준은 최신 기획안과 최신 accepted freeze 결과다.
 
 ## Canonical Synthesis Register
 
@@ -28,6 +30,17 @@ ERD/API/Settlement/Test 문서는 이 PRD synthesis를 기준으로 후속 propa
 - MVP에는 별도 제품 내 dispute/central judgment workflow를 두지 않는다. 예외 상황은 이메일 또는 오픈카톡 등 외부 운영 문의 fallback으로 처리한다.
 - P0의 목적은 재미있는 습관 앱 전체가 아니라, 사용자가 실제 돈이 걸린 계약 구조를 신뢰할 수 있게 만드는 trust loop 완성이다.
 
+API authority propagation에서도 아래 semantic anchor는 유지한다.
+
+- projection != final settlement.
+- retry != correction.
+- replay != recalculation.
+- notification/inbox != canonical state.
+- host != lifecycle/settlement/ledger authority.
+- all-fail = equal principal refund.
+- `settlement_item` + `point_history` = final authority.
+- API convenience/display/projection field != authoritative state.
+
 ### Deliberately unresolved implementation details
 
 아래 항목은 PRD synthesis에서 boundary만 유지하고, ERD/API/Settlement/Test propagation 단계에서 별도 정렬한다.
@@ -42,13 +55,13 @@ ERD/API/Settlement/Test 문서는 이 PRD synthesis를 기준으로 후속 propa
 - role-based moderation history visibility matrix
 - post-final correction/support workflow 세부 운영
 - Redis/Redisson/distributed lock/concurrency control 전략
-- notification transport(SSE/FCM/push 등)와 delivery topology
+- notification transport 중 active FCM device/inbox/read/unread UX와 Deferred/Removed SSE/stream 경계
 - `point_account`의 물리적 balance shape(`available`, `locked`, `pending`, `total` 등)와 cache/reconciliation 전략
 - settlement amount unit 재검토 후보와 기존 정수/절사 baseline 변경 여부
 
 ### Downstream alignment rule
 
-이 PRD synthesis와 downstream 문서가 충돌하면, downstream 문서는 latest accepted semantics와 PRD synthesis를 기준으로 후속 propagation 단계에서 정렬한다. 이 정렬은 PRD가 L1 intent source를 override한다는 뜻이 아니라, 최신 기획안과 semantic freeze 결과를 PRD가 canonical하게 정리한 범위 안에서 derived docs를 맞추는 작업이다. 다만 이 PRD는 schema/API field name, batch job implementation, enum value 같은 구현 세부를 premature freeze하지 않는다.
+이 PRD synthesis와 downstream 문서가 충돌하면, downstream 문서는 latest accepted semantics와 PRD synthesis를 기준으로 후속 propagation 단계에서 정렬한다. 이 정렬은 PRD가 L1 intent source를 override한다는 뜻이 아니라, 최신 기획안과 semantic freeze 결과를 PRD가 canonical하게 정리한 범위 안에서 derived docs를 맞추는 작업이다. 다만 API surface authority는 `backend/docs/api/*`가 소유하고 `docs/API-spec-dondok.md`가 이를 통합 동기화한다. PRD는 schema/API field name, endpoint, enum value, batch job implementation 같은 구현 세부를 premature freeze하지 않으며, backend active API에 없는 표면을 active MVP contract로 되살리지 않는다.
 
 ## 1. Summary
 
@@ -199,11 +212,11 @@ AI, 인증 피드/리액션, 알림, 운영 탭, 반응형 UX는 제품 경험�
 - best-effort 알림 / 외부 운영 문의 안내
 - 모바일/데스크톱 반응형 UX
 
-P1 이후 프로토타입 후보:
+P1 이후 프로토타입 후보(비확정 / non-commitment boundary):
 
 - 결과 카드 / 공유 / 다운로드 polish (정산 완료 후 final result 전용)
 - 정산 완료 이메일/리포트 polish
-- AI 습관 리포트
+- AI 습관 리포트 (Deferred/Brownfield; active MVP API 아님)
 - retention visual / social richness 확장
 
 단, 결과 카드와 공유 욕구 자체는 단순 polish로 삭제할 수 있는 intent가 아니다. MVP에서 저장/다운로드 구현을 P1로 미루더라도, final settlement 이후 완주 기록·공동 성취·다시 보고 싶은 결과 entry point는 PRD에 살아 있어야 한다. Projection 상태를 공유 카드처럼 포장하지 않고, final result 전용 completion ritual로 다룬다.
@@ -269,13 +282,13 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 | 반응형 UX                    | 모바일/데스크톱에서 핵심 trust loop를 수행할 수 있게 한다.       | Presentation requirement, not authority semantics.                                       |
 | Host badge/counter           | Host 역할과 검토 책임을 이해시킨다.                              | Host badge는 activation/settlement authority가 아니다.                                   |
 
-#### P1 / Later 후보
+#### P1 / Later 후보 (non-commitment boundary)
 
 | 기능                                    | 설명                                                | 이유                                                                            |
 | --------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------- |
 | 결과 카드 저장/공유/다운로드            | final settlement 이후 결과를 카드로 저장하거나 공유 | 구현 polish는 P1이나 completion/virality intent는 PRD에 보존한다. Projection 공유 카드로 오해시키지 않는다. |
 | 정산 이메일/리포트 polish               | 정산 결과 알림·요약 고도화                          | MVP trust loop 이후 communication polish                                        |
-| AI 습관 리포트                          | 개인 습관 요약/코칭                                 | Settlement input이 아니므로 Phase 1 이후 가능                                   |
+| AI 습관 리포트                          | 개인 습관 요약/코칭                                 | Deferred/Brownfield historical/reference only. Active MVP API, future delivery commitment, implementation permission이 아니다. |
 | Retention visual / social richness 확장 | 배지, streak, 외부 공유 등                          | P0 authority와 직접 무관                                                        |
 | 제품 내 dispute workflow                | 앱 내 이의제기/중재 워크플로                        | MVP에서는 운영 문의 fallback만 둠                                               |
 
@@ -284,19 +297,23 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 | 범위 | MVP 판단 | Boundary |
 | --- | --- | --- |
 | Android FCM push | 포함 | Background/off-app 재진입 transport. Delivery success/failure는 domain success/failure가 아니다. |
+| FCM device lifecycle | 포함 | 활성 notification API surface다. Device token 등록/갱신/삭제는 알림 수신성 관리일 뿐 domain state authority가 아니다. |
 | 인앱 토스트 | 포함 | Foreground 즉시 피드백. Durable history나 canonical state가 아니다. |
-| 알림 목록/읽음 | 얇은 후보 | UX hint/read affordance 후보일 뿐 backend persistence 기본값이 아니다. Persisted read state를 둔다면 nullable `read_at`만 사용하고 status/task workflow로 확장하지 않는다. Frontend local state/browser permission으로 충분한 상태는 서버 저장으로 승격하지 않는다. Audit history, certification history, settlement history, ledger history가 아니다. |
-| notification event/log | 얇은 후보 | 알림 목록과 운영 추적이 꼭 필요할 때만 검토하는 non-authoritative 기록 후보이며 Core persistence default가 아니다. |
-| delivery attempt observability | deferred operational hardening 후보 | FCM 발송/실패/transport retry 관측은 후속 운영 hardening 후보일 뿐 MVP semantic freeze 요구사항이 아니다. Settlement retry/replay/correction과 분리한다. |
-| notification preference matrix | Phase 2 | OS permission 또는 최소 설정 이상은 후속 결정으로 둔다. |
-| notification template CMS/table | Phase 2 | MVP는 문서/코드 상수로 시작할 수 있으며 문구 안정화 전 table을 freeze하지 않는다. |
-| SSE/Web realtime reliability | Phase 2/drift candidate | Android-first FCM MVP를 역으로 결정하지 않는다. 기존 SSE 문구는 재사용 가능한 non-authority semantics만 흡수한다. |
-| campaign/broadcast/advanced analytics | Phase 2 | Trust-loop MVP 이후 확장 후보. |
+| 알림 목록/읽음/미읽음 | 포함 | Active MVP notification inbox/read/unread UX다. `read_at`/unread count는 UX hint이며 task workflow, audit history, certification history, settlement history, ledger history가 아니다. |
+| deep-link 후 canonical refetch | 포함 | 알림 클릭은 관련 canonical API state를 다시 조회하게 하는 UX recovery semantics다. 새 endpoint, event enum, transport topology, delivery attempt schema, canonical state authority를 만들지 않는다. |
+| notification event/log | 내부/후속 후보 | 알림 목록과 운영 추적이 꼭 필요할 때만 검토하는 non-authoritative 기록 후보이며 PRD가 DB enum이나 audit event catalog를 freeze하지 않는다. |
+| delivery attempt observability | Deferred/Brownfield | FCM 발송/실패/transport retry 관측은 후속 운영 hardening 후보일 뿐 MVP semantic freeze 요구사항이 아니다. Settlement retry/replay/correction과 분리한다. |
+| notification preference matrix | Deferred/Brownfield | OS permission 또는 최소 설정 이상은 후속 결정으로 둔다. |
+| notification template CMS/table | Deferred/Brownfield | MVP는 문서/코드 상수로 시작할 수 있으며 문구 안정화 전 table을 freeze하지 않는다. |
+| SSE/Web realtime reliability | Deferred/Removed | Active MVP API가 아니다. Android-first FCM + inbox/read UX를 역으로 결정하지 않으며, 기존 SSE/stream 문구는 historical/reference only로 containment한다. |
+| campaign/broadcast/advanced analytics | Deferred/Brownfield | Trust-loop MVP 이후 검토 후보일 뿐 future delivery commitment나 implementation permission이 아니다. |
 
-Notification payload/list item을 도입하더라도 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 같은 refetch hint 중심으로 제한한다. `event_type`은 앱 라우팅 vocabulary 후보일 뿐 DB enum이나 audit event catalog freeze가 아니다. 최종 환급금, 인증 truth, ledger truth, settlement retry/replay 상태를 notification-owned truth로 싣지 않는다.
+Notification payload/list item은 refetch hint 중심으로 제한한다. `event_type`은 앱 라우팅 vocabulary 후보일 뿐 DB enum이나 audit event catalog freeze가 아니다. 최종 환급금, 인증 truth, ledger truth, settlement retry/replay 상태를 notification-owned truth로 싣지 않는다. Deep-link/refetch는 UX recovery semantics only이며 active API inventory나 transport topology를 PRD에서 새로 만들지 않는다.
 
 
 #### Phase 2 Defer
+
+이 섹션의 항목은 Deferred/Brownfield/Removed historical/reference only다. Active MVP API가 아니며, future delivery commitment나 implementation permission도 아니다. 재활성화하려면 먼저 `backend/docs/api/*` 변경, `docs/API-spec-dondok.md` 동기화, PRD/Usecase semantic guardrail 재검증을 통과해야 한다.
 
 | 기능                                  | Defer 이유                                                                |
 | ------------------------------------- | ------------------------------------------------------------------------- |
@@ -334,14 +351,14 @@ Dashboard는 운영 중 사용자에게 예상 상태와 그 이유를 설명하
 - baseline이 최소 인원을 충족하고 host disband가 없으면 system은 `start_at` 기준 자동 `ACTIVE`로 전이한다.
 - MVP에서 `activated_at = start_at`이다. 실제 scheduler 실행 시각/저장 방식은 downstream implementation detail로 freeze하지 않는다.
 - `ACTIVE` 이후 Host cancel authority는 없다.
-- MVP에서 `ACTIVE` 중도 탈퇴, 중도 참여, 재참여는 지원하지 않는다. 모두 Phase 2로 이연한다.
+- MVP에서 `ACTIVE` 중도 탈퇴, 중도 참여, 재참여는 지원하지 않는다. 해당 surface는 Deferred/Brownfield historical/reference only이며 active MVP API, future delivery commitment, implementation permission이 아니다.
 - Payout 대상은 frozen participant baseline 기준이다. `ACTIVE` 이후 업로드하지 않은 참여자는 실패/미인증 상태로 정산에 포함된다.
 - MVP cadence는 매일 또는 특정 요일 반복이다.
 - MVP는 A/B/C 일일 인증·정산 타입을 지원한다.
   - A(아침형): 인증 마감 09:00, 일일 정산 12:00.
   - B(표준형): 인증 마감 21:00, 일일 정산 00:00.
   - C(올빼미형): 인증 마감 23:59, 일일 정산 익일 12:00.
-- Weekly-N cadence는 Phase 2로 이연한다.
+- Weekly-N cadence는 Deferred/Brownfield historical/reference only이며 active MVP API, future delivery commitment, implementation permission이 아니다.
 - Final settlement batch는 마지막 인증 주기의 일일 정산 완료 시점 + 24시간 후 실행된다.
 - Grace period는 일반 인증 주기에 72시간을 적용하되, 마지막 3일은 grace 없이 즉시 terminal 상태로 처리한다.
 - Projection은 final settlement batch 전까지 항상 현재 기준 예상이며, batch 이후 authoritative 값은 settlement snapshot과 point_history에서만 확인한다.
@@ -377,7 +394,7 @@ Dashboard는 운영 중 사용자에게 예상 상태와 그 이유를 설명하
 | 모집 마감 전 최소 인원 미달       | 미션 미시작 + 예치 도딘 환급                                                          |
 | 모집 마감 전 Host 해체            | 미션 미시작 + 예치 도딘 환급                                                          |
 | ACTIVE 이후 취소 요청             | MVP에서 미지원. 운영 문의 fallback만 제공                                             |
-| ACTIVE 중도 탈퇴/중도 참여/재참여 | MVP에서 미지원, Phase 2                                                               |
+| ACTIVE 중도 탈퇴/중도 참여/재참여 | MVP에서 미지원. Deferred/Brownfield historical/reference only이며 active MVP API, future delivery commitment, implementation permission이 아님 |
 | 인증 업로드 지연                  | Grace rule에 따라 pending/terminal 결정                                               |
 | EXIF/hash 부재                    | Risk signal로 표시, host moderation 맥락 검토                                         |
 | 알림 미수신                       | User must still be able to certify manually                                           |
@@ -445,17 +462,17 @@ P1 후보는 아래와 같다.
 
 - 결과 카드 / 공유 / 다운로드 polish (정산 완료 후 final result 전용)
 - 정산 완료 이메일/리포트 polish
-- AI 습관 리포트
-- 리텐션 시각 요소 / social richness 확장
+- AI 습관 리포트 (Deferred/Brownfield; active MVP API 아님)
+- 리텐션 시각 요소 / social richness 확장 (Deferred/Brownfield)
 
-Phase 2 후보는 아래와 같다.
+Deferred/Brownfield 후보는 아래와 같다. 이 목록은 historical/reference only이며 future delivery commitment나 implementation permission이 아니다.
 
-- 중도 참여 / 중도 탈퇴 / 재참여
-- Weekly-N cadence
+- 중도 참여 / 중도 탈퇴 / 재참여 (`WITHDRAWN`/ACTIVE-phase withdrawal/rejoin active MVP lifecycle 아님)
+- Weekly-N cadence (active MVP cadence 아님)
 - 현금 인출
-- 정식 어드민 / 복잡한 운영자 도구
+- 정식 어드민 / 복잡한 운영자 도구 (admin settlement list/retry/manual mutation active API 아님)
 - complex fraud scoring / advanced anti-cheat
-- WebSocket chat / SSE realtime sync / iOS Web Push reliability guarantees
+- WebSocket chat / SSE realtime sync / iOS Web Push reliability guarantees (notification stream/SSE active MVP API 아님)
 - 대규모 공개 크루와 시즌제 운영
 - cooperative contribution visibility / non-adversarial progress framing
 - 포인트 만료 구현, 만료 원장 이벤트, 만료 API, 만료 DB 스키마, 만료 transaction type
@@ -474,15 +491,15 @@ Phase 2 후보는 아래와 같다.
 
 ### Future Release
 
-다음 버전에서 우선 검토할 항목은 아래와 같다.
+다음 항목은 future candidate이며 active MVP API, future delivery commitment, implementation permission이 아니다. 재활성화하려면 backend API 문서 변경과 API-spec 동기화, PRD/Usecase semantic 재검증이 먼저 필요하다.
 
 - 포인트 인출과 실제 운영 결제 키 전환
 - 더 강한 부정행위 탐지
 - 모바일 앱 또는 PWA 강화
 - 대규모 크루와 시즌제 운영
 - 추천 미션 개인화 고도화
-- 신고, 제재, 운영 정책 도구
-- AI 습관 리포트와 결과 공유 고도화
+- 신고, 제재, 운영 정책 도구 (admin settlement/manual mutation active API 아님)
+- AI 습관 리포트와 결과 공유 고도화 (AI habit report active API 아님)
 - 포인트 만료 정책과 만료 알림/소멸 처리
 
 ### Out of Scope for MVP
@@ -605,7 +622,7 @@ Phase 2 후보는 아래와 같다.
 
 ## 10. Downstream Propagation Preparation
 
-이 섹션은 후속 ERD/API/Settlement/Test 정렬을 위한 영향도 지도다. PRD는 제품 의미와 정책 boundary를 정리하되, API specification, ERD, requirements specification, wireframe/QA, 외부 WBS/GitHub Issues, implementation gate, settlement recovery runbook 계열 downstream 문서를 직접 수정하거나 구현 세부를 freeze하지 않는다.
+이 섹션은 후속 backend API/API-spec/ERD/Settlement/Test 정렬을 위한 영향도 지도다. PRD는 제품 의미와 정책 boundary를 정리하되, active API surface는 `backend/docs/api/*`와 `docs/API-spec-dondok.md`가 소유한다. PRD는 API specification, ERD, requirements specification, wireframe/QA, 외부 WBS/GitHub Issues, implementation gate, settlement recovery runbook 계열 downstream 문서를 직접 수정하거나 구현 세부를 freeze하지 않는다.
 
 ### Policy impact map
 
@@ -639,9 +656,9 @@ Phase 2 후보는 아래와 같다.
 2. PRD synthesis wording stabilization
 3. Glossary authority wording alignment
 4. Usecase semantic bridge alignment
-5. Settlement semantics wording confirmation
-6. ERD impact mapping
-7. API contract patch
+5. `backend/docs/api/*` active API source 및 `docs/API-spec-dondok.md` integrated contract 확인
+6. Settlement semantics wording confirmation
+7. ERD/Schema impact mapping
 8. Requirements / WBS / GitHub Issues / wireframe / QA scenario alignment
 
 ### Freeze-before-propagation areas

@@ -4,6 +4,9 @@ Status: canonical implementation-ready migration specification for MVP backend s
 
 Authoritative references:
 
+- `backend/docs/api/*` — MVP active API source
+- `docs/API-spec-dondok.md` — backend API 기준 integrated synchronized contract
+- `docs/PRD-dondok.md` / `docs/Usecase-dondok.md` — semantic guardrail lane
 - `docs/ERD-dondok.md`
 - `docs/Settlement-design.md`
 - `docs/Implementation-guardrails.md`
@@ -12,7 +15,7 @@ Scope:
 
 - This document is DB/Flyway/JPA oriented.
 - It covers only core MVP backend entities: `crew_participant`, `point_account`, `point_history`, `settlement`, `settlement_item`.
-- It does not redesign product semantics, lifecycle semantics, settlement semantics, or deferred Phase 2 domains.
+- It does not redesign product semantics, lifecycle semantics, settlement semantics, or Deferred/Brownfield/Removed domains. It does not create active endpoint/status/feature semantics absent from backend API docs/API-spec.
 
 ## 1. Schema conventions
 
@@ -31,7 +34,7 @@ Canonical rules for this migration round:
 - `point_history` is append-only. Do not update or soft-delete ledger rows after insertion.
 - Balance reconciliation uses `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage, and `point_account` cached balances together because approval is a bucket transition without a ledger row.
 - Money/audit entities do not use soft delete.
-- Terminal `crew_participant` rows are preserved; no physical delete or row reuse for MVP re-application.
+- Terminal `crew_participant` rows are preserved with no physical delete. Eligible pre-approval reapply reuses only the existing `CANCELLED` row in place (`CANCELLED -> PENDING`) and creates no new row; `REJECTED`/`EXPIRED` remain terminal and are not reused.
 
 ## 2. Table specifications
 
@@ -88,7 +91,7 @@ Participant-level lifecycle row for one member in one crew. It owns the particip
 - MVP allows re-application to the same crew only when the existing row is `CANCELLED`, the crew is `RECRUITING`, server time is before `recruitment_deadline`, capacity is available, and the participant has sufficient balance to re-reserve. `REJECTED`/`EXPIRED` rows block re-application. `unique(crew_id, member_id)` is the DB enforcement point; reopen reuses the existing row in place (no new row).
 - Reserve release is allowed once per current reserve cycle of `crew_participant.id`; terminal/`CANCELLED` transition and reserve release happen in the same transaction. On `CANCELLED -> PENDING` reopen, the same transaction resets `released_point_history_id` to `NULL` and inserts a new `CREW_DEPOSIT_RESERVE` `point_history` row, starting the next cycle; the prior `CREW_RESERVE_RELEASE` row is retained as append-only audit.
 - `released_point_history_id` is the authoritative evidence that reserve release occurred. Do not rely on timestamp-only release evidence.
-- No `WITHDRAWN` / rejoin semantics are introduced in this MVP migration.
+- No `WITHDRAWN`, `withdrawn_at`, ACTIVE withdrawal, or rejoin semantics are introduced in this MVP migration. They are Deferred/Brownfield/Removed historical/reference-only, not active MVP implementation surface, future delivery commitment, or implementation permission.
 
 ### 2.2 `point_account`
 
@@ -203,8 +206,8 @@ Settlement header and execution claim row for one crew. It stores frozen aggrega
 | `baseline_frozen_at` | `DATETIME(6)` | N | settlement creation/freeze time | Timestamp when LOCKED-only settlement baseline is frozen. |
 | `batch_run_key` | `VARCHAR(100)` | Y | `NULL` | Worker/batch execution identifier. |
 | `retry_count` | `INT` | N | `0` | Accumulated retry count. |
-| `last_retry_at` | `DATETIME(6)` | Y | `NULL` | Last retry attempt timestamp. |
-| `next_retry_at` | `DATETIME(6)` | Y | `NULL` | Optional retry scheduling timestamp. |
+| `last_retry_at` | `DATETIME(6)` | Y | `NULL` | Deferred/runtime scheduling metadata candidate. Not required active MVP persistence and not API/settlement authority. |
+| `next_retry_at` | `DATETIME(6)` | Y | `NULL` | Deferred/runtime scheduling metadata candidate for optional DB polling. Do not treat as active MVP scheduler semantics. |
 | `failure_code` | `VARCHAR(50)` | Y | `NULL` | Latest failure code. |
 | `failure_message` | `VARCHAR(500)` | Y | `NULL` | Latest failure summary. |
 | `total_participants` | `INT` | N | `0` | Count of `LOCKED` participants in frozen baseline. |
@@ -236,16 +239,16 @@ Settlement header and execution claim row for one crew. It stores frozen aggrega
 
 - `unique(crew_id)` for duplicate settlement prevention.
 - `index(status, retry_count, created_at)` for batch claim/retry scans.
-- Optional: `index(next_retry_at, status)` if retry scheduling uses DB polling.
+- Deferred/optional: `index(next_retry_at, status)` only if a later runtime scheduling implementation adopts DB polling; not an active MVP migration requirement.
 
 #### Notes
 
 - Settlement baseline uses `LOCKED` participants only.
 - `PENDING`, `REJECTED`, `CANCELLED`, and `EXPIRED` participants are excluded from settlement baseline.
 - MVP has exactly one authoritative final settlement row per crew. Normal end and before-start cancellation are lifecycle/reason inputs to that row, not separate settlement types.
-- `baseline_frozen_at` records when baseline selection is frozen; retry must complete the same settlement row rather than replace baseline semantics.
+- `baseline_frozen_at` is persisted freeze evidence for the LOCKED-only baseline; retry must complete the same settlement row rather than replace baseline semantics.
 - `Settlement.status = SUCCEEDED` is allowed only after every `settlement_item` has a valid `point_history_id` and corresponding `point_history` row.
-- Retry/replay/correction remain separated. Retry completes unfinished execution; replay is audit/reconstruction; correction workflow is deferred.
+- Retry/replay/correction remain separated. Retry completes unfinished existing settlement execution; replay is audit/reconstruction; correction workflow is Deferred/Brownfield historical/reference-only and not implemented by this migration.
 
 ### 2.5 `settlement_item`
 
@@ -274,7 +277,7 @@ Participant-level settlement calculation snapshot and refund ledger linkage row.
 | `remainder_bonus_amount` | `BIGINT` | N | `0` | Deterministic remainder allocation share snapshot. Explanation column, not payout authority. |
 | `reward_amount` | `BIGINT` | N | `0` | `base_refund_amount + remainder_bonus_amount` snapshot. Explanation column, not payout authority. |
 | `refund_amount` | `BIGINT` | N | `0` | Final credited/refunded amount. Persisted per-item payout source of truth. API response `final_amount` is a read-only alias for this column. Invariant: `refund_amount = reward_amount = base_refund_amount + remainder_bonus_amount`. |
-| `withdrawn_at_snapshot` | `DATETIME(6)` | Y | `NULL` | Settlement-time `crew_participant.withdrawn_at` snapshot. Brownfield/deferred reference; always `NULL` in MVP active settlement. |
+| `withdrawn_at_snapshot` | `DATETIME(6)` | Y | `NULL` | Settlement-time `crew_participant.withdrawn_at` snapshot. Deferred/Brownfield historical/reference-only; always `NULL`/ignored in MVP active settlement. |
 | `effective_moderation_snapshot` | `JSON` | Y | `NULL` | Settlement-time latest-effective moderation state snapshot. Read-only audit/replay context. |
 | `moderation_chain_ref` | `JSON` | Y | `NULL` | Settlement-time `moderation_history` chain reference (e.g. `{"latest_id":..., "count":...}`). Audit linkage, not payout authority. |
 | `draw_key_snapshot` | `CHAR(64)` | Y | `NULL` | Non-payout display/explanation ordering key. |
@@ -383,11 +386,15 @@ Recommended Flyway-style order:
 
 ## 7. Explicitly deferred MVP hardening
 
-Do not implement these in this migration round:
+Do not implement these in this migration round. These are historical/reference-only or future hardening candidates, not active MVP implementation permission or future delivery commitment:
 
 - `payload_hash`
 - Payload consistency verification framework
-- Withdrawal / rejoin lifecycle
+- Withdrawal / rejoin lifecycle (`WITHDRAWN`, `withdrawn_at`, ACTIVE withdrawal)
+- `WEEKLY_N` active cadence
+- Admin settlement mutation/list/retry public API surface
 - Correction workflow
 - Private crew semantics
 - Automatic replay recovery engine
+- Notification delivery topology redesign, delivery attempt persistence expansion, SSE/stream
+- AI habit report/report lifecycle

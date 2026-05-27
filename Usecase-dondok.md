@@ -23,9 +23,10 @@ Dondok은 돈이 걸린 그룹 습관 계약 플랫폼이다. 따라서 단순�
 | Layer | Role | 이 문서와의 관계 |
 |---|---|---|
 | PRD | canonical synthesis layer | 제품 의미와 정책의 상위 합성 레이어다. 이 문서는 PRD 의미를 행동 흐름으로 풀어 downstream drift를 줄인다. |
-| Usecase-dondok | behavioral semantic bridge | usecase, pressure finding, unresolved semantic, propagation risk를 묶는 브리지다. |
+| Usecase-dondok | behavioral semantic bridge | usecase, pressure finding, unresolved semantic, propagation risk를 묶는 브리지다. Endpoint/status resurrection source가 아니다. |
+| backend/docs/api/* | MVP active API source | active endpoint/method/path/request/response boundary를 소유한다. 이 문서는 의미 경계를 제공하지만 active API surface를 추가하지 않는다. |
+| API-spec-dondok | integrated synchronized API contract | backend API 문서를 통합한 FE/BE/QA 계약이며, 이 문서의 semantic guardrail을 위반하지 않도록 해석한다. |
 | ERD | derived data model | 이 문서의 append-only, replay, source-of-truth 요구를 데이터 구조로 반영한다. |
-| API spec | derived public contract | 이 문서의 권한/상태/용어 경계를 외부 계약으로 반영한다. |
 | Settlement design | derived settlement authority design | 이 문서의 deterministic settlement, retry/replay/correction 분리를 계산/복구 정책으로 반영한다. |
 | QA/Test | derived behavioral verification | 이 문서의 lifecycle, freeze, projection/final, retry/replay edge를 테스트 매트릭스로 반영한다. |
 
@@ -38,7 +39,9 @@ Dondok은 돈이 걸린 그룹 습관 계약 플랫폼이다. 따라서 단순�
 - retry를 correction으로 해석하지 않는다.
 - replay를 recalculation으로 해석하지 않는다.
 - 업로드 객체 존재를 인증 권한으로 해석하지 않는다.
-- notification/SSE/AI/social/feed를 canonical state authority로 해석하지 않는다.
+- notification/inbox/read/SSE/AI/social/feed를 canonical state authority로 해석하지 않는다.
+- API convenience/display/projection field를 authoritative state로 해석하지 않는다.
+- Usecase에 남은 Deferred/Brownfield/Removed mention을 active MVP API, future delivery commitment, implementation permission으로 해석하지 않는다.
 - unresolved semantic을 조용히 resolved로 바꾸지 않는다.
 
 ### 1.4 Downstream propagation role
@@ -49,7 +52,10 @@ Downstream 문서는 이 문서를 다음 방식으로 소비해야 한다.
 2. 이 문서의 hard blocker를 먼저 해결하거나 명시적으로 unsafe/deferred로 표시한다.
 3. propagation warning은 삭제하지 말고 PRD/API/Wireframe/QA/Support에 라벨과 함께 전달한다.
 4. Brownfield Conflict는 기존 문서/구현 흔적을 지우지 말고 drift candidate로 표시한다.
-5. 실제 구현 세부값은 이 문서가 아니라 API/ERD/Settlement 문서에서 freeze한다.
+5. 실제 API surface는 `backend/docs/api/*`와 `docs/API-spec-dondok.md`에서 확인한다.
+6. 실제 구현 세부값은 이 문서가 아니라 backend API/API-spec/ERD/Settlement 문서에서 freeze한다.
+
+Deferred/Brownfield/Removed surface는 historical/reference only다. Active MVP API가 아니며, future delivery commitment나 implementation permission도 아니다. 재활성화하려면 먼저 `backend/docs/api/*` 변경, `docs/API-spec-dondok.md` 동기화, PRD/Usecase semantic guardrail 재검증을 통과해야 한다. 예: AI habit report, ACTIVE-phase withdrawal/rejoin/`WITHDRAWN`, `WEEKLY_N`, admin settlement, notification stream/SSE, correction/replay engine은 backend active API 없이는 active usecase가 아니다.
 
 ### 1.5 Canonical constraints preserved here
 
@@ -59,17 +65,23 @@ Downstream 문서는 이 문서를 다음 방식으로 소비해야 한다.
 - Dondok is not a punitive elimination game, gambling-like reward loop, or adversarial leaderboard app.
 - Host has certification input moderation authority only.
 - Host is NOT lifecycle, settlement amount, ledger, final settlement, participant baseline, replay/retry/correction authority.
+- host != lifecycle/settlement/ledger authority.
 - Projection is a current-basis estimate for anxiety reduction, state visibility, and settlement explanation.
 - Projection != final settlement.
+- projection != final settlement.
 - All-fail settlement = equal principal refund; prior zero-refund wording is rejected/brownfield drift only.
 - Retry != correction.
+- retry != correction.
 - Replay != recalculation.
+- replay != recalculation.
 - Correction after final settlement is a separate support/operations adjustment semantic, not hidden mutation.
 - Moderation history is append-only.
 - Final settlement must be deterministic, explainable, replayable, and auditable.
 - Notifications are non-authoritative hints.
+- Notification/inbox/read state != canonical state.
 - Server time is authoritative timing source.
-- Settlement snapshot + `point_history` become authoritative after settlement success.
+- Settlement snapshot + `settlement_item` + `point_history` become authoritative after settlement success.
+- API convenience/display/projection field != authoritative state.
 - Brownfield conflicts remain visible until intentionally resolved.
 
 ## 2. Behavioral Semantic Principles
@@ -141,11 +153,11 @@ Host moderation은 인증 입력 상태에 영향을 줄 수 있다. 그러나 h
 
 ### 2.7 Lifecycle ownership
 
-Lifecycle 전이는 system rules가 소유한다. Host는 lifecycle authority가 아니다. Brownfield 문서나 API가 host manual start를 암시하면 Brownfield Conflict / Drift Candidate로 남긴다.
+Lifecycle 전이는 system rules가 소유한다. Host는 lifecycle authority가 아니다. Brownfield 문서나 API가 host manual start를 암시하면 Brownfield Conflict / Drift Candidate로 남긴다. Manual start `/start`는 active MVP API가 아니며 historical/reference only로 containment한다.
 
 ### 2.8 Notification non-authority
 
-Notification은 canonical state가 아니라 hint/deep-link다. 사용자는 알림을 통해 진입할 수 있지만 최종 상태는 canonical API response와 authoritative records가 결정한다.
+Notification은 canonical state가 아니라 hint/deep-link다. 사용자는 알림을 통해 진입할 수 있지만 최종 상태는 canonical API response와 authoritative records가 결정한다. Active notification semantics는 FCM device lifecycle, inbox/read/unread, deep-link 후 canonical refetch UX에 한정하며, SSE/stream은 Deferred/Removed historical/reference only다.
 
 ### 2.9 Emotional trust semantics
 
@@ -460,14 +472,14 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 
 - **Actors**: Participant, system, client
 - **Classification**: cross-cutting non-authoritative semantics (notification = hint only; canonical state is refetched from API)
-- **Preconditions**: Notification/SSE/FCM/event delivery exists.
-- **Main Flow**: Notification arrives as a best-effort re-entry hint; the client follows `deep_link` and refetches canonical API state before rendering current truth.
+- **Preconditions**: Active notification UX exists through FCM device lifecycle, notification inbox/read/unread, and deep-link refetch behavior. SSE/stream is Deferred/Removed historical/reference only unless backend API docs promote it.
+- **Main Flow**: Notification arrives as a best-effort re-entry hint; the client follows `deep_link` and refetches canonical API state before rendering current truth. Deep-link/refetch is UX recovery semantics only and does not introduce endpoint names, event catalog enums, transport topology, delivery attempt schema, or canonical state authority.
 - **Failure Flow**: Late, missed, duplicate, or out-of-order notification contradicts current canonical state; canonical API state wins and notification failure does **not** trigger domain retry.
-- **Authority Boundary**: Notification, FCM delivery state, inbox/read state, and delivery attempt state are non-authoritative UX/transport surfaces. They do not own crew lifecycle, certification, moderation, settlement, or point ledger truth.
+- **Authority Boundary**: Notification, FCM delivery state, inbox/read/unread state, and any delivery attempt state are non-authoritative UX/transport surfaces. They do not own crew lifecycle, certification, moderation, settlement, or point ledger truth.
 - **Projection Impact**: UI may refresh estimates or final state after canonical refetch; notification payload/list text is not a projection or final settlement snapshot.
 - **Settlement Impact**: None; notification failure cannot rollback settlement and notification retry is transport retry, not settlement retry/replay/correction.
 - **UX Risk**: User thinks no notification means no payout, stale success means final state, unread means unresolved certification/settlement work, or inbox history is an audit ledger.
-- **Related Domain Objects**: notification event/log candidate only if thin inbox persistence is later chosen (`read_at` nullable UX state only), deferred notification delivery attempt candidate, canonical API response. Event catalog names are app routing vocabulary candidates, not DB enum or audit authority.
+- **Related Domain Objects**: active notification inbox/read state as UX hint only, FCM device registration surface, deferred notification delivery attempt candidate, canonical API response. Event catalog names are app routing vocabulary candidates, not DB enum or audit authority.
 
 ### UC-A20 — Support Explanation by Lifecycle State
 
@@ -687,7 +699,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 
 - PRD should use this document to check whether synthesis wording creates downstream ambiguity.
 - ERD should use this document to identify data evidence needed for append-only history, replay, and source-of-truth guarantees.
-- API spec should use this document to keep public state/copy from implying wrong authority.
+- `backend/docs/api/*` owns active API surface, and API-spec should use this document to keep public state/copy from implying wrong authority without resurrecting deferred endpoints/statuses.
 - Settlement design should use this document to protect deterministic, replayable, explainable finality.
 - QA should use this document to build scenario matrices around authority boundaries, not just endpoint success.
 - Wireframes should use this document to avoid trust-breaking labels and misleading finality.
@@ -810,7 +822,8 @@ A UX state/copy is semantically risky if it causes users to believe any of the f
 ### 10.1 Source documents
 
 - `docs/PRD-dondok.md` — canonical synthesis layer.
-- `docs/API-spec-dondok.md` — derived public API contract.
+- `backend/docs/api/*` — MVP active API source.
+- `docs/API-spec-dondok.md` — backend API 기준 integrated synchronized API contract.
 - `docs/ERD-dondok.md` — derived data model.
 - `docs/Settlement-design.md` — derived settlement/recovery design.
 - `docs/runbooks/settlement-recovery.md` — operational recovery guidance.
