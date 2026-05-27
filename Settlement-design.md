@@ -584,7 +584,9 @@ MVP `calculation_reason` vocabulary:
 ### 8.2 DAILY
 
 - 기준: 미션 기간 동안 하루 최대 1회 인정
-- 구현: 날짜별 성공 로그를 집계하고 같은 날 다중 성공은 1회만 인정
+- 구현: 날짜별 성공 로그를 집계하고 같은 날 다중 성공이 발견되면 1회만 인정
+- 제출 경로 가정: `POST /api/mission-logs`의 same-slot SUCCESS submission guard(`MISSION_ALREADY_COMPLETED`)에 의해 일반 제출 경로에서는 같은 day/cadence slot에 duplicate `SUCCESS` row가 생성되지 않는다. 따라서 일반 흐름에서는 duplicate success 제외가 거의 발생하지 않는다.
+- Defensive guard: legacy/import/support/brownfield data, race/replay 시나리오 등 비정상 입력에서도 정산 결과의 결정성을 보존하기 위해, 정산 계산은 duplicate `SUCCESS` row를 안전하게 1건만 인정하고 나머지를 제외 근거와 함께 기록한다.
 - 스냅샷: `recognized_dates_count`, `excluded_success_count`, `calculation_reason`에 중복 제외 근거 저장
 
 ### 8.3 SPECIFIC_DAYS
@@ -842,7 +844,7 @@ crew:{crewId}:participant:{participantId}:settlement-refund
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | 인원 미달 방 취소            | 방별 `min_participants`를 기준으로 같은 crew의 단일 settlement row를 생성한 뒤 전액 환급                      |
 | 중도 탈퇴                    | ACTIVE withdrawal은 brownfield/deferred. MVP 정산은 frozen `LOCKED` baseline을 소급 변경하지 않음              |
-| DAILY 하루 다중 인증         | 같은 날짜 성공 로그는 1회만 인정, 나머지는 제외 근거 저장                                                      |
+| DAILY 하루 다중 인증         | 일반 제출 경로에서는 `POST /api/mission-logs`의 same-slot SUCCESS guard(`MISSION_ALREADY_COMPLETED`)로 같은 날 추가 SUCCESS row가 생성되지 않는다. legacy/import/replay 등 brownfield 입력에 대비해 정산 계산은 duplicate SUCCESS를 1회만 인정하고 나머지는 제외 근거를 저장하는 defensive guard를 유지한다 |
 | SPECIFIC_DAYS 비유효 요일    | `mission_schedule_day`에 없는 요일의 성공 로그는 제외                                                          |
 | WEEKLY_N 상한 초과           | Phase 2/deferred reference. MVP active cadence 아님                                                           |
 | 전체 인정 성공 0회           | 각 참여자의 잠겨 있던 자기 보증금을 equal-principal refund로 전액 환급한다. host/winner/draw remainder 지급 없음 |

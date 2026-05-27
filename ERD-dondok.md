@@ -725,7 +725,9 @@ Unique / Index:
 - `DAILY` 중복, `SPECIFIC_DAYS` 제외, `WEEKLY_N` 상한 제외 같은 최종 인정 제외 근거는 `mission_log.failure_reason`이 아니라 `settlement_item.calculation_reason`에 남긴다.
 - 조회 시점 성공 표시와 최종 인정 횟수는 다를 수 있으므로, 최종 결과는 `settlement_item`에서 설명한다.
 - `certification_status`는 인증 피드 badge, projection/dashboard, 알림 입력에서 사용하는 resolved certification state다. (`PENDING_REVIEW`: 업로드 직후 검수/판정 대기, `SUCCESS`: 인증 인정, `FAILED`: 인정 불가.) EXIF/hash raw signal이나 host moderation `decision_type`/`reject_reason_code`와 같은 의미 axis로 사용하지 않으며, settlement 인정 횟수 계산은 `calculation_reason`을 통해 별도 표현한다.
-- 일반 feed timeline은 history-preserving append-only activity stream이다. 같은 참여자/날짜/cadence slot에서 재업로드나 상태 변화로 여러 `mission_log` row가 생기면 이전 시도도 visible item으로 유지할 수 있으며, 기존 row를 overwrite하거나 synthetic row로 대체하지 않는다.
+- 일반 feed timeline은 history-preserving append-only activity stream이다. 같은 참여자/날짜/cadence slot에서 `FAILED`/`PENDING_REVIEW` 재업로드나 host moderation 상태 전이로 여러 `mission_log` row가 생기면 이전 시도도 visible item으로 유지할 수 있으며, 기존 row를 overwrite하거나 synthetic row로 대체하지 않는다.
+- 같은 `crew_participant`의 같은 cadence slot에 이미 `certification_status = SUCCESS`인 `mission_log` row가 존재하면 추가 제출은 application layer에서 `MISSION_ALREADY_COMPLETED`로 거절한다. 기존 SUCCESS row는 그대로 유지하며 새 row를 append하지 않고, SUCCESS row를 overwrite/delete/hide하지 않는다. SUCCESS submission guard는 제출 가능 여부 guard일 뿐이며 settlement recognition authority가 아니다.
+- cadence slot 식별은 `mission_rule.frequency_type`, `mission_schedule_day`, `Asia/Seoul` timezone, `server_time`에서 도출되는 service-level 값이므로 단일 DB unique constraint로 강제하지 않는다. 구현은 service-level guard + transaction/concurrency guard 조합으로 처리한다.
 - `NOT_SUBMITTED`는 `mission_log` row가 없는 day/member slot projection이다. 미제출을 표현하기 위해 persisted `mission_log` row, feed status 컬럼, 별도 feed table을 만들지 않는다.
 - Day/member slot, dashboard, projection은 latest/effective 상태 하나를 사용하는 current-focused summary다. Feed item count와 reaction count는 recognized success count가 아니며, 최종 정산 인정 여부는 `settlement_item.calculation_reason`과 연결된 `point_history`로 설명한다.
 - `failure_reason`(system/timing axis)과 `reject_reason_code`(host moderation rejection axis)는 서로 다른 의미 axis다. 한쪽 enum을 다른 쪽에 재사용하지 않는다.

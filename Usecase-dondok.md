@@ -279,9 +279,9 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Participant, system
 - **Classification**: actor-performed usecase (Participant certification submission; upload ≠ certification success)
 - **Preconditions**: Participant is eligible to submit; upload route available.
-- **Main Flow**: User uploads image, then creates mission-log/certification record with `image_s3_key` and required 5~100 char `caption` through server validation.
-- **Failure Flow**: Upload succeeds but mission-log creation fails; image object orphaned; image-only or caption-only submission is rejected; validation delayed near cutoff.
-- **Authority Boundary**: Upload object existence and caption text alone do not establish certification. The server-validated `MissionLog` boundary requires both image object key and caption.
+- **Main Flow**: User uploads image, then creates mission-log/certification record with `image_s3_key` and required 5~100 char `caption` through server validation. Submission eligibility per cadence slot follows the latest/effective state: `NOT_SUBMITTED` allows submission; `PENDING_REVIEW`/`FAILED` allows reupload as an append-only new `mission_log` row; `SUCCESS` is terminal for slot submission and the server rejects further uploads with `MISSION_ALREADY_COMPLETED` without creating a new row.
+- **Failure Flow**: Upload succeeds but mission-log creation fails; image object orphaned; image-only or caption-only submission is rejected; validation delayed near cutoff; client retries after a SUCCESS already exists in the same slot and is rejected with `MISSION_ALREADY_COMPLETED`.
+- **Authority Boundary**: Upload object existence and caption text alone do not establish certification. The server-validated `MissionLog` boundary requires both image object key and caption. SUCCESS submission guard is a submission-eligibility guard only and is not a settlement recognition authority; recognized success counts remain owned by `settlement_item.calculation_reason` and linked `point_history`.
 - **Projection Impact**: No projection impact until successful/eligible mission-log candidate exists. Caption may be displayed for feed/replay context but does not decide success/failure by itself.
 - **Settlement Impact**: No recognition without authoritative log/input; caption is not settlement input.
 - **UX Risk**: User thinks “image uploaded” equals “certification submitted.”
@@ -317,8 +317,8 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 
 - **Actors**: Participant, system
 - **Classification**: shared input rule (cadence cap; projection·settlement에 동일 적용; diagram에서는 floating «shared input rule» 노드로 표현될 수 있음)
-- **Preconditions**: Multiple successful raw logs exist in the same cadence period.
-- **Main Flow**: Raw logs remain append-only; general feed preserves visible activity history, while slot/dashboard projection and settlement recognize only allowed current/effective input according to cadence.
+- **Preconditions**: Multiple raw logs (across `FAILED`/`PENDING_REVIEW` reuploads or host moderation transitions) exist in the same cadence period; or brownfield/import/replay inputs surface duplicate SUCCESS rows.
+- **Main Flow**: Raw logs remain append-only; general feed preserves visible activity history across `FAILED`/`PENDING_REVIEW` reuploads, while slot/dashboard projection and settlement recognize only allowed current/effective input according to cadence. In the normal submission path, once a slot reaches `SUCCESS` the `POST /api/mission-logs` SUCCESS submission guard (`MISSION_ALREADY_COMPLETED`) prevents additional rows from being appended for that slot, so duplicate SUCCESS rows do not arise in the normal path; settlement still applies a defensive duplicate-success exclusion for brownfield/import/replay inputs.
 - **Failure Flow**: Feed item count or visible success badge inflates final settlement recognized count.
 - **Authority Boundary**: Settlement recognition does not come from feed visibility or reaction activity. Reactions are social metadata only and do not affect certification, payout calculation, point ledger, crew status, or participant status.
 - **Projection Impact**: Projection must apply current-basis recognition rules to latest/effective slot state, but remains a non-final estimate until Settlement.status = SUCCEEDED and point_history is committed.
@@ -331,7 +331,7 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Host, participant, system
 - **Classification**: actor-performed usecase (Host moderation of certification input; append-only, pre-freeze only)
 - **Preconditions**: Certification log exists and is eligible for review.
-- **Main Flow**: Host records contextual certification input review decision with actor, reason category, and time; `mission_log` latest-effective moderation columns update and `moderation_history` receives an append-only row. If the participant reuploads, the feed may keep prior attempts visible as `이전 시도` while slot/projection uses the latest/effective state.
+- **Main Flow**: Host records contextual certification input review decision with actor, reason category, and time; `mission_log` latest-effective moderation columns update and `moderation_history` receives an append-only row. After a `MANUAL_REJECT` (`FAILED`) decision the participant may reupload as a new append-only `mission_log` row, and the feed may keep prior attempts visible as `이전 시도` while slot/projection uses the latest/effective state. A `MANUAL_APPROVE` decision transitions the existing row to `SUCCESS` in place; once a slot has a `SUCCESS` row, additional `POST /api/mission-logs` calls for that slot are rejected with `MISSION_ALREADY_COMPLETED`.
 - **Failure Flow**: Host decision overwrites prior history, deletes audit rows, or directly mutates settlement/ledger.
 - **Authority Boundary**: Host can affect certification input before freeze; host cannot determine settlement amount, ledger output, final settlement, participant baseline, replay, retry, or correction. Participants receive reason-code-level rejection explanation only; raw `reject_memo` text stays hidden in MVP.
 - **Projection Impact**: Current-basis projection may update when effective moderation input changes, with explanation of the changed input state. Feed timeline visibility itself is not a settlement input mutation.

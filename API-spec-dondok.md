@@ -1196,8 +1196,11 @@ Error:
 - `CREW_NOT_FOUND`
 - `PARTICIPANT_NOT_FOUND`
 - `PARTICIPANT_WITHDRAWN`
+- `MISSION_ALREADY_COMPLETED`
 
 `PARTICIPANT_WITHDRAWN`와 `AFTER_WITHDRAWN`은 brownfield/deferred withdrawal 상태를 방어적으로 표현하는 코드다. MVP active settlement에서 frozen `LOCKED` baseline을 변경하는 근거가 아니다.
+
+`MISSION_ALREADY_COMPLETED`는 같은 `crew_participant`의 같은 cadence slot(day/슬롯)에 이미 `certification_status = SUCCESS`인 `mission_log`가 존재해 추가 제출이 차단되었음을 의미한다. 이 경우 새 `mission_log` row를 생성하지 않으며, 기존 SUCCESS row를 overwrite/delete/update하지 않는다.
 
 정책:
 
@@ -1226,6 +1229,10 @@ Error:
 - `certification_status = SUCCESS`는 인증 성공 표시이며, 최종 정산에서 인정된다는 의미는 아니다.
 - `certification_status = FAILED`여도 원본 로그는 저장할 수 있다.
 - `certification_status = PENDING_REVIEW`는 업로드 직후 검수/판정 대기 상태다.
+- 같은 `crew_participant`의 같은 cadence slot(day/슬롯)에 이미 `certification_status = SUCCESS`인 `mission_log`가 존재하면 추가 제출을 `MISSION_ALREADY_COMPLETED`로 거절한다. 기존 SUCCESS row는 그대로 유지하며, 새 `mission_log` row를 생성하거나 SUCCESS row를 overwrite/delete/update하지 않는다.
+- 같은 slot의 기존 latest/effective 상태가 `PENDING_REVIEW` 또는 `FAILED`인 경우에는 재업로드를 허용한다. 재업로드는 새 `mission_log` row append로 처리하며, 이전 `FAILED`/`PENDING_REVIEW` row는 그대로 보존된다.
+- SUCCESS는 해당 day/cadence slot의 submission-complete 상태로, 일반 제출 경로에서는 같은 slot에 추가 SUCCESS/PENDING_REVIEW/FAILED row가 새로 생기지 않는다. 단, SUCCESS row를 정산에서 인정할지 여부는 settlement calculation이 결정하며, SUCCESS는 final settlement recognition을 보장하지 않는다.
+- cadence slot 계산은 `frequency_type` / `mission_schedule_day` / timezone(`Asia/Seoul`) / `server_time`에 따라 도출하는 service-level 식별자다. 단일 DB unique constraint로 강제하지 않으며, 구현은 service-level guard와 transaction/concurrency guard로 처리한다.
 - `certification_status`는 인증 피드 badge, dashboard projection, 알림 input에 쓰이는 resolved state이며 EXIF/hash raw signal이나 host moderation `decision_type`/`reject_reason_code`와 동일 axis로 해석하지 않는다.
 - `mission_log.failure_reason`은 인증 시점 실패 사유(system/timing axis)다.
 - `decision_type`, `reject_reason_code`는 호스트 검수자 결과 axis이며 시스템 `failure_reason`과 의미 vocabulary가 다르다. `reject_memo`는 internal/private non-response context다. 자세한 사항은 §3.9/§3.10 참조.
@@ -1400,6 +1407,25 @@ Response `200 OK`:
 {
   "items": [
     {
+      "mission_log_id": 9101,
+      "crew_id": 42,
+      "crew_title": "아침 6시 기상",
+      "crew_participant_id": 101,
+      "image_url": "https://cdn.example.com/mission/9101.jpg",
+      "caption": "오늘 미션 인증합니다",
+      "server_time": "2026-05-12T06:05:00+09:00",
+      "certification_status": "SUCCESS",
+      "reject_reason_code": null,
+      "reaction_counts": {
+        "👏": 2,
+        "🔥": 1
+      },
+      "my_reactions": ["👏"],
+      "links": {
+        "crew_feed": "/api/crews/42/feed"
+      }
+    },
+    {
       "mission_log_id": 9003,
       "crew_id": 42,
       "crew_title": "아침 6시 기상",
@@ -1409,6 +1435,8 @@ Response `200 OK`:
       "server_time": "2026-05-11T07:10:02+09:00",
       "certification_status": "PENDING_REVIEW",
       "reject_reason_code": null,
+      "reaction_counts": {},
+      "my_reactions": [],
       "links": {
         "crew_feed": "/api/crews/42/feed"
       }
@@ -1423,6 +1451,8 @@ Response `200 OK`:
       "server_time": "2026-05-11T06:30:00+09:00",
       "certification_status": "FAILED",
       "reject_reason_code": "MISSION_MISMATCH",
+      "reaction_counts": {},
+      "my_reactions": [],
       "links": {
         "crew_feed": "/api/crews/42/feed"
       }
@@ -1443,7 +1473,7 @@ Error:
 - 본 API는 호출자가 참여자(또는 호스트)인 모든 크루에 걸친 `mission_log` row의 append-only timeline이다. 호출자가 제출한 mission_log만 반환한다.
 - `crew_id`가 주어지면 크루가 없으면 `CREW_NOT_FOUND`, 호출자가 해당 크루 참여자가 아니면 `PARTICIPANT_NOT_FOUND`.
 - 기본 정렬은 `server_time DESC`이며 동일 시각 tie-break는 deterministic ordering으로 처리한다.
-- 같은 참여자/같은 날짜/cadence slot에 재업로드나 상태 변화로 여러 로그가 생기면, 이전 `FAILED`/`PENDING_REVIEW` item도 visible item으로 유지한다. 삭제/숨김/overwrite로 정산 입력을 바꾸지 않는다.
+- 같은 참여자/같은 날짜/cadence slot에 여러 `mission_log` row가 생기는 경우는 `FAILED`/`PENDING_REVIEW` 재업로드와 host moderation 상태 전이로 한정된다. 이전 `FAILED`/`PENDING_REVIEW` item도 visible item으로 유지하며, 삭제/숨김/overwrite로 정산 입력을 바꾸지 않는다. 같은 slot에 SUCCESS row가 이미 존재하는 경우 추가 제출은 `POST /api/mission-logs`에서 `MISSION_ALREADY_COMPLETED`로 차단되므로, 본 API에서 SUCCESS 이후 같은 slot의 새 `PENDING_REVIEW`/`FAILED` item이 이어지는 흐름은 나타나지 않는다.
 - `NOT_SUBMITTED`는 synthetic slot projection이며 `mission_log` row가 없으므로 본 API에 포함하지 않는다.
 - `certification_status`는 visible mission-log state(`PENDING_REVIEW`/`SUCCESS`/`FAILED`)다. `SUCCESS` item이라도 settlement recognition을 보장하지 않는다.
 - `reject_reason_code`는 participant-facing reason category로 노출할 수 있지만 `reject_memo`는 internal/private context이므로 응답에 포함하지 않는다.
@@ -1640,6 +1670,23 @@ Response `200 OK`:
   "crew_id": 42,
   "feed_items": [
     {
+      "mission_log_id": 9101,
+      "crew_participant_id": 101,
+      "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
+      "nickname": "돈독러",
+      "image_url": "https://cdn.example.com/mission/9101.jpg",
+      "caption": "오늘 미션 인증합니다",
+      "server_time": "2026-05-12T06:05:00+09:00",
+      "created_at": "2026-05-12T06:05:00+09:00",
+      "certification_status": "SUCCESS",
+      "reject_reason_code": null,
+      "reaction_counts": {
+        "👏": 2,
+        "🔥": 1
+      },
+      "my_reactions": ["👏"]
+    },
+    {
       "mission_log_id": 9003,
       "crew_participant_id": 101,
       "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
@@ -1673,16 +1720,13 @@ Response `200 OK`:
       "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
       "nickname": "돈독러",
       "image_url": "https://cdn.example.com/mission/9001.jpg",
-      "caption": "오늘도 미션 완료했습니다",
+      "caption": "첫 시도가 검토에서 반려되었습니다",
       "server_time": "2026-05-11T05:58:10+09:00",
       "created_at": "2026-05-11T05:58:10+09:00",
-      "certification_status": "SUCCESS",
-      "reject_reason_code": null,
-      "reaction_counts": {
-        "👏": 2,
-        "🔥": 1
-      },
-      "my_reactions": ["👏"]
+      "certification_status": "FAILED",
+      "reject_reason_code": "UNCLEAR",
+      "reaction_counts": {},
+      "my_reactions": []
     }
   ],
   "next_cursor": "2026-05-11T05:58:10+09:00_9001",
@@ -1694,8 +1738,8 @@ Response `200 OK`:
     },
     {
       "date": "2026-05-12",
-      "status": "NOT_SUBMITTED",
-      "representative_mission_log_id": null
+      "status": "SUCCESS",
+      "representative_mission_log_id": 9101
     }
   ],
   "participant_day_slots": [
@@ -1705,6 +1749,13 @@ Response `200 OK`:
       "date": "2026-05-11",
       "status": "PENDING_REVIEW",
       "representative_mission_log_id": 9003
+    },
+    {
+      "crew_participant_id": 101,
+      "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c907",
+      "date": "2026-05-12",
+      "status": "SUCCESS",
+      "representative_mission_log_id": 9101
     },
     {
       "crew_participant_id": 102,
@@ -1728,7 +1779,8 @@ Error:
 - Feed timeline은 실제 `mission_log` row가 있는 인증 활동을 history-preserving append-only stream으로 노출한다.
 - 기본 feed status set은 `PENDING_REVIEW`, `SUCCESS`, `FAILED`다. `status` query가 있으면 이 집합 안에서만 필터링한다.
 - `NOT_SUBMITTED`는 미제출 상태를 설명하는 synthetic day/member slot projection이며 `mission_log` row를 만들거나 feed item으로 반환하지 않는다.
-- 같은 참여자/같은 날짜/cadence slot에 재업로드나 상태 변화로 여러 로그가 생기면, 이전 `FAILED`/`PENDING_REVIEW` item도 일반 feed에서 visible item으로 유지할 수 있다. 삭제/숨김/overwrite로 정산 입력을 바꾸지 않는다.
+- 같은 참여자/같은 날짜/cadence slot에 여러 `mission_log` row가 생기는 경우는 `FAILED` 또는 `PENDING_REVIEW` 상태에서의 재업로드(`FAILED → PENDING_REVIEW`, `PENDING_REVIEW → PENDING_REVIEW` 등)와 host moderation을 통한 상태 전이로 한정된다. 이전 `FAILED`/`PENDING_REVIEW` item도 일반 feed에서 visible item으로 유지할 수 있으며, 삭제/숨김/overwrite로 정산 입력을 바꾸지 않는다.
+- 같은 slot에 이미 `certification_status = SUCCESS`인 `mission_log`가 존재하면 `POST /api/mission-logs`는 `MISSION_ALREADY_COMPLETED`로 거절되므로, 일반 제출 경로에서는 SUCCESS 이후 같은 slot에 새 `PENDING_REVIEW`/`FAILED` row가 생기지 않는다. feed append-only 원칙과 SUCCESS submission guard는 충돌하지 않는다: append-only는 `FAILED`/`PENDING_REVIEW` 재업로드 이력 보존에 적용된다.
 - 참여자/일자 summary 대표 규칙은 latest/effective 상태 하나를 선택한다. 정확한 tie-break는 구현 단계에서 deterministic하게 고정하되, feed item count나 reaction count를 정산 인정 횟수처럼 사용하면 안 된다.
 - feed item의 `server_time`과 `created_at`은 의미 axis가 다르다. `server_time`은 서버가 인증 요청을 수신한 시각으로 인증/정산 인정 timing anchor이고, `created_at`은 row 생성/feed 정렬/페이지네이션 보조 시각이다. MVP 예시에서는 동일 값으로 보일 수 있으나 두 값은 다른 목적의 컬럼이다.
 - `created_at`은 feed 정렬/슬라이스 cursor 보조 키로만 사용하며, settlement timing authority로 사용하지 않는다. 정산 인정 시각 기준은 항상 `MissionLog.server_time`이다.
@@ -1736,6 +1788,7 @@ Error:
 - `caption`은 feed item의 display/replay evidence로 포함될 수 있으며 단독 인증/정산 기준이 아니다.
 - `reject_reason_code`는 정책에 따라 participant-facing reason category로 노출할 수 있지만, internal memo text는 feed 응답에 포함하지 않는다.
 - reaction counts는 `mission_log_reaction`에서 파생한다. `mission_log`에 저장 카운터를 두거나 갱신하지 않는다. `reaction_counts`는 emoji token을 key로 하는 동적 map이다.
+- MVP에서 리액션은 `certification_status = SUCCESS`인 `mission_log`에만 허용한다. feed timeline에 `FAILED`/`PENDING_REVIEW` item도 visible할 수 있지만, 이 상태의 item에는 리액션 row를 생성하지 않으며 `reaction_counts`는 빈 map, `my_reactions`는 빈 list로 응답한다. 리액션은 SUCCESS item의 social interaction metadata일 뿐, settlement/projection authority도 아니고 SUCCESS submission guard와 동일 semantic axis도 아니다.
 - 이 API의 상태 projection은 정산 인정 횟수, 환급액, 포인트 잔액, AI 리포트 상태, lifecycle status의 source of truth가 아니다.
 
 ### `POST /api/mission-logs/{missionLogId}/reactions`
@@ -2772,10 +2825,12 @@ RUNNING
 - FE는 `certification_status`를 인증 요청의 resolved certification state로만 사용해야 하고, 최종 정산 인정 여부 판단 기준으로 사용하면 안 된다.
 - 피드 화면에서 `feed_items[]`는 실제 `mission_log` row가 있는 append-only 인증 활동 timeline이고, `day_statuses[]` / `participant_day_slots[]`는 latest/effective slot projection이다. `NOT_SUBMITTED`는 row 없는 synthetic slot이고 feed item이 아니다. 둘을 정산 결과나 포인트 원장으로 해석하면 안 된다.
 - 리액션은 `mission_log_reaction` 기반 social metadata이며, `reaction_counts`는 파생값이다. FE는 리액션이 인증 성공 여부, 정산 인정, 환급, 포인트, AI 리포트 상태를 바꾼다고 표시하면 안 된다.
+- FE는 `certification_status = SUCCESS`인 feed item에서만 리액션 UI를 활성화한다. `FAILED`/`PENDING_REVIEW` item은 재업로드 가능 상태일 수 있지만 리액션 대상이 아니며, `reaction_counts`/`my_reactions`가 빈 값으로 응답된다.
 - 인증 제출 직후에는 `certification_status`와 `failure_reason`만 신뢰한다. 최종 인정 횟수는 정산 전까지 확정되지 않는다.
 - 인증 직후에는 성공으로 표시할 수 있지만, 최종 결과 화면의 인정/미인정 표시는 정산 결과 기준으로 별도 표시해야 한다.
 - 인증 기록 화면과 정산 결과 화면은 서로 다른 기준을 사용해야 한다.
 - 인증 기록 화면은 `certification_status` 기준으로 `검토중/인정됨/인정되지 않음`처럼 중립적으로 표시한다.
+- 인증 제출 버튼은 같은 cadence slot의 latest/effective 상태에 따라 분기한다: `NOT_SUBMITTED` 또는 `PENDING_REVIEW`/`FAILED`이면 업로드/재업로드 가능, `SUCCESS`이면 업로드 버튼을 비활성화하거나 제출 불가 안내로 표시한다. UX copy는 “이미 인증 완료된 항목입니다”, “검토중/인정되지 않음 상태에서는 다시 제출할 수 있습니다” 정도로 중립적으로 표현한다. SUCCESS slot의 추가 제출이 시도되면 서버는 `MISSION_ALREADY_COMPLETED`로 거절한다.
 - 정산 결과 화면은 `settlement_item.calculation_reason` 기준으로 `최종 인정/미인정`을 표시한다.
 - 두 기준을 혼용하면 잘못된 UX가 발생하므로 반드시 분리해서 사용해야 한다.
 - 최종 정산 인정 시각 판단은 `server_time` 기준이며, `exif_taken_at`은 촬영 시각 검증용 보조 정보로만 사용해야 한다.
