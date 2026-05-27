@@ -51,7 +51,9 @@
 
 ### 3.1 시간 기준
 
-- MVP의 정산 기준 시간대는 `Asia/Seoul`로 고정한다.
+- MVP canonical server timezone authority는 `Asia/Seoul` (`KST`)로 고정한다.
+- lifecycle cutoff, certification window, cadence/day boundary, settlement timing, projection date interpretation, replay/reconstruction date interpretation은 모두 KST 기준으로 해석한다.
+- Client local timezone은 canonical lifecycle/settlement authority가 아니며, 표시용 local rendering과 canonical settlement semantics를 혼동하지 않는다.
 - 사용자에게 보이는 미션 종료 시점은 `종료일 23:59:59 KST`다.
 - `recruitment_deadline`은 신규 참여 마감 시각이며, activation eligibility에 들어갈 수 있는 participant 후보를 freeze하는 기준이다. 단, activation/settlement 실행 기준 시각 자체는 아니다.
 - `start_at`은 예정 시작 시각이자 MVP의 자동 activation anchor다.
@@ -106,6 +108,7 @@
 - 실시간 대시보드는 캐시나 역정규화 테이블을 사용해도 된다.
 - 그러나 `Settlement.status = SUCCEEDED` 전 최종 정산 금액 계산은 반드시 `MissionLog`, frozen participant baseline, resolved certification state를 다시 읽어서 수행한다.
 - Final settlement batch가 authoritative settlement snapshot을 만들며, dashboard/expected refund 값은 그 전까지 projection일 뿐 확정 환급금이 아니다. Projection은 현재 기준 예상/설명용이며 payout authority가 아니다.
+- Projection과 final settlement의 날짜 해석은 같은 KST authority를 사용하며, timezone ambiguity가 projection/final settlement drift를 만들면 안 된다.
 - Settlement input freeze 이후에는 frozen certification outcome과 authoritative daily/final result를 host/admin이 소급 변경하지 않는다.
 - Replay는 historical semantic truth reconstruction이다. Replay는 당시 algorithm semantics, cadence/timezone/cutoff interpretation, lifecycle cutoff semantics, effective moderation state, reason-code mapping을 설명 가능하게 복원하는 audit authority이며, current-engine reinterpretation이나 payout rewrite 권한이 아니다.
 - Host moderation은 certification input/state를 resolve하는 권한이며, settlement engine, refund amount, point ledger, final settlement snapshot을 직접 조작하는 권한이 아니다.

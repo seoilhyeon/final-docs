@@ -44,6 +44,12 @@
 - all-fail = equal principal refund.
 - `settlement_item` + `point_history` linkage가 final settlement와 refund authority다.
 
+### Canonical time authority
+
+- MVP canonical server timezone authority는 `Asia/Seoul` (`KST`)이다.
+- lifecycle cutoff, certification window, cadence/day boundary, settlement timing, projection date interpretation, replay/reconstruction date interpretation은 모두 KST 기준이다.
+- Client local timezone은 표시용 local rendering context일 뿐 canonical lifecycle/settlement authority가 아니며, timezone ambiguity가 projection/final settlement drift를 만들면 안 된다.
+
 ## 0.1 Greenfield schema-to-entity readiness
 
 - Backend persistence implementation is greenfield for MVP entities/enums/Flyway migrations. Do not assume existing entities are the authority or patch target; create entities, enums, and migrations from finalized docs.

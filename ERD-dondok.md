@@ -10,6 +10,8 @@
 
 이 ERD는 backend API authority 이후의 derived implementation doc다. ERD의 컬럼/관계/메모는 `backend/docs/api/*`에 없는 endpoint/status/feature를 active MVP surface로 승격하지 않으며, Deferred/Brownfield/Removed surface는 historical/reference only이고 active MVP implementation surface, future delivery commitment, implementation permission이 아니다.
 
+MVP canonical server timezone authority는 `Asia/Seoul` (`KST`)이다. Lifecycle/settlement/cadence/projection/replay 날짜 해석은 KST 기준이며 client local timezone은 canonical authority가 아니다.
+
 ## 1. ERD 설계 원칙
 
 ### 1.1 Aggregate / 도메인 경계
@@ -36,7 +38,7 @@
 - `NOTIFY-003`은 projection 기반 알림이며 final settlement guarantee가 아니다. ERD에서는 알림을 정산 source of truth로 모델링하지 않는다. 상세 event contract는 `API-spec`의 projection boundary를 따른다.
 - `point_history`는 authoritative append-only ledger이고, `point_account` balance cache는 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage와 함께 검증되는 projection/cache layer다. 불일치 시 이 근거들을 함께 대조해 원인을 조사하고 캐시를 보정한다.
 - 최소 인원 baseline, activation eligibility, frozen participant baseline에는 `LOCKED` participant만 포함한다. `PENDING`은 capacity reservation과 reserve balance projection에는 포함하지만 baseline/activation/settlement 대상이 아니다. `REJECTED`/`EXPIRED`는 terminal 상태다. `CANCELLED`는 baseline/settlement 대상이 아닌 pre-start exit 상태이며 RECRUITING phase 안에서 동일 사용자의 재신청 시 `CANCELLED -> PENDING`으로 in-place reopen될 수 있다(§참여 lifecycle 참조).
-- Scheduler/runtime 실행 지연은 audit/recovery fact이며 lifecycle authority가 아니다. `start_at`, crew timezone, daily cutoff, mission period end 같은 scheduled semantic anchor가 eligibility와 cutoff의 기준이다.
+- Scheduler/runtime 실행 지연은 audit/recovery fact이며 lifecycle authority가 아니다. `start_at`, canonical server timezone (`Asia/Seoul`/KST), daily cutoff, mission period end 같은 scheduled semantic anchor가 eligibility와 cutoff의 기준이다.
 - Authoritative moderation persistence는 effective state, transition, reason-code, actor, timestamp, append-only chain reference를 남기는 transition ledger 성격이다. Human memo/support note/UX wording/operational comment는 non-authoritative context로 분리한다.
 
 ### 1.4 논리 삭제 정책
