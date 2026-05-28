@@ -45,7 +45,7 @@ MVP canonical server timezone authority는 `Asia/Seoul` (`KST`)이다. Lifecycle
 
 - `crew_participant`는 물리 삭제하지 않고 participation lifecycle 상태로 관리한다. MVP 활성 기준에서는 `LOCKED`만 minimum baseline, activation eligibility, frozen participant baseline, settlement 대상 후보다. `PENDING`/`REJECTED`/`CANCELLED`/`EXPIRED`는 baseline/settlement 대상이 아니다. `CANCELLED` row는 RECRUITING phase 안에서 동일 사용자의 재신청 시 `CANCELLED -> PENDING`으로 reopen될 수 있는 reusable row이며, 신규 row 생성 없이 기존 row를 그대로 재사용한다. `REJECTED`/`EXPIRED`는 reopen 대상이 아니다. `WITHDRAWN`/active withdrawal/rejoin은 MVP active status가 아니고 Deferred/Brownfield/Removed historical/reference-only로만 남긴다.
 - `mission_log`, `settlement`, `settlement_item`, `point_history`는 감사 추적을 위해 append-only에 가깝게 다룬다.
-- `crew.settlement_status`는 저장 컬럼이 아니라 API/read-model projection이다. 원천 상태는 항상 `settlement.status`다.
+- API/read-model의 방 정산 상태는 Settlement-design §5.3의 projection 규칙을 따르며, 원천 상태는 항상 `settlement.status`다.
 
 ### 1.5 Unique 제약 원칙
 
@@ -463,7 +463,7 @@ Unique / Index:
 상태값 / Enum:
 
 - `status`: `RECRUITING`, `ACTIVE`, `CLOSED`, `CANCELLED`
-- `settlement_status`는 `crew` 저장 컬럼/DB enum이 아니다. API/read-model projection 값으로만 `NONE`, `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `RETRY_WAIT`를 노출할 수 있다.
+- 방 정산 상태 응답 값은 Settlement-design §5.3의 projection vocabulary를 따르며 `crew` 저장 컬럼/DB enum이 아니다.
 
 주의사항:
 
@@ -472,7 +472,7 @@ Unique / Index:
 - `start_at`은 예정 시작 시각이자 MVP system auto-activation 기준 시각이다. 실제 lifecycle/정산/log/projection anchor는 `activated_at`이며, MVP invariant는 `activated_at = start_at` 또는 system auto-activation timestamp다.
 - `activated_at`은 host command timestamp가 아니다. `ACTIVE`/`CLOSED` 방에서는 system authority에 의해 ACTIVE가 된 시각이어야 하며, host moderation authority와 settlement/activation authority를 혼동하지 않는다.
 - `end_at`은 계획된 미션 종료 cutoff이며 activation 지연으로 자동 이동하지 않는다.
-- `settlement_status`는 API/read-model projection이며 `crew` entity의 저장 컬럼이 아니다. 조회 대상 settlement row가 없으면 projection `NONE`, row가 있으면 해당 `Settlement.status`를 노출한다. `NONE`은 DB `settlement.status` enum에 저장하지 않고, `NULL`을 “정산 없음” 의미 상태로 사용하지 않는다.
+- 방 정산 상태 응답은 `Settlement.status`에서 파생한다. `crew` entity에는 대응 저장 컬럼을 두지 않으며, no-row/`NONE`/`NULL` 규칙은 Settlement-design §5.3을 따른다.
 - `deposit_amount`는 방 규칙의 기본 보증금이고, 실제 정산 원천 금액은 `crew_participant.deposit_amount`를 사용한다.
 - `category`는 생성 시 필수이며 catalog/enum 형태(고정 enum / managed catalog / free string)는 deferred decision이다. 현재 ERD는 컬럼 존재만 freeze하고 값 catalog는 freeze하지 않는다.
 - `host_agreement_snapshot`은 호스트 책임 동의서의 당시 표현을 audit-grade로 저장한다. payload shape는 deferred decision이고, 이 컬럼은 호스트 권한 확장 근거나 settlement authority가 아니다. `host_agreement_version`은 시점별 약관 표현 추적용 label, `host_agreed_at`은 동의 시각이다.
@@ -1005,7 +1005,7 @@ Unique / Index:
 주의사항:
 
 - `Settlement(PENDING)`는 종료/취소 감지 시 선생성하며, 아직 워커가 claim하지 않은 실행 전 상태다.
-- `Settlement.status`가 정산 상태의 원천이고, `crew.settlement_status`는 API/read-model projection only다. Host moderation authority는 settlement authority가 아니며, freeze 이후 정산/일별 결과 mutation은 금지된다.
+- `Settlement.status`가 정산 상태의 원천이다. Host moderation authority는 settlement authority가 아니며, freeze 이후 정산/일별 결과 mutation은 금지된다.
 - 같은 crew에는 MVP authoritative final settlement row를 하나만 허용한다. 정상 종료와 시작 전 취소는 lifecycle/reason input이지 별도 settlement type이 아니다.
 - `baseline_frozen_at`은 baseline selection 시점을 증명하는 persisted freeze evidence이며 retry/replay/recalculation/correction 권한이 아니다.
 - `total_participants`는 frozen participant baseline에 포함된 `LOCKED` participant 중 정산 대상 deposit이 존재하는 수다. `PENDING`/`REJECTED`/`CANCELLED`/`EXPIRED`는 정산 baseline에 포함하지 않는다. `WITHDRAWN`/active withdrawal 정산 포함 여부는 Deferred/Brownfield/Removed historical/reference-only semantics다.
@@ -1287,7 +1287,7 @@ erDiagram
         DATETIME created_at
         DATETIME updated_at
     }
-    %% CREW: nullable=image_s3_key, activated_at; enum status=RECRUITING|ACTIVE|CLOSED|CANCELLED. settlement_status is API/read-model projection only, not a stored CREW column.
+    %% CREW: nullable=image_s3_key, activated_at; enum status=RECRUITING|ACTIVE|CLOSED|CANCELLED. Settlement projection follows Settlement-design §5.3; no stored CREW settlement column.
     %% CREW constraints: IDX(host_member_id, created_at), IDX(status, recruitment_deadline), IDX(status, start_at, end_at), IDX(status, activated_at), CHECK(2 <= min_participants <= max_participants <= 15).
     %% CREW note: MVP has public crews only; image_s3_key is display metadata only and image_url is response-derived; start_at is the system activation anchor and activated_at is actual ACTIVE transition time. Host is not activation/settlement authority.
 
@@ -1439,7 +1439,7 @@ erDiagram
     }
     %% SETTLEMENT: baseline_frozen_at is persisted freeze evidence; nullable=batch_run_key, failure_code, failure_message, started_at, finished_at; UK(crew_id); IDX(status, retry_count, created_at).
     %% SETTLEMENT enums: status=PENDING|RUNNING|SUCCEEDED|FAILED|RETRY_WAIT; remainder_policy=HOST_REMAINDER (deterministic fixed host-recipient policy, not host authority); failure_code=INPUT_LOAD_FAILED|CALCULATION_FAILED|POINT_CREDIT_FAILED|DUPLICATE_SETTLEMENT|LOCK_ACQUIRE_FAILED|UNKNOWN.
-    %% SETTLEMENT note: one authoritative final row per crew; Settlement.status is source of truth, crew.settlement_status is API/read-model projection only and NONE is not stored in settlement.status.
+    %% SETTLEMENT note: one authoritative final row per crew; Settlement.status is source of truth. Crew-level settlement responses are derived per Settlement-design §5.3.
 
     SETTLEMENT_ITEM {
         BIGINT id PK

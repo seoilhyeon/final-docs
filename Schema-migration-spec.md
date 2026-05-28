@@ -356,7 +356,7 @@ Rules:
 
 ## 5. Implementation enum / column notes
 
-- `SettlementStatus.NONE` is API projection only and must not be stored as a DB settlement status.
+- `SettlementStatus.NONE` belongs to the API projection rules in Settlement-design §5.3 and must not be stored as `settlement.status`.
 - `ParticipantStatus` active persistence values are only `PENDING`, `LOCKED`, `REJECTED`, `CANCELLED`, `EXPIRED`.
 - `FrequencyType` active values are only `DAILY`, `SPECIFIC_DAYS`; `WEEKLY_N` is not active V1 cadence.
 - `MissionLogFailureReason` excludes `AFTER_WITHDRAWN` in MVP active persistence.

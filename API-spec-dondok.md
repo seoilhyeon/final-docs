@@ -197,7 +197,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax
 
 | 값           | 설명                                                     |
 | ------------ | -------------------------------------------------------- |
-| `NONE`       | Settlement row 없음 (API projection 전용, DB 저장 안 함) |
+| `NONE`       | Settlement row 없음 (projection-only)                    |
 | `PENDING`    | 생성됨, 실행 전                                          |
 | `RUNNING`    | 실행 중                                                  |
 | `SUCCEEDED`  | 완료                                                     |
@@ -685,7 +685,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 **정책**
 
 - `my_participation`은 참여 이력이 없으면 `null`이다.
-- `settlement_status`는 조회 편의용 API/read-model projection이며 `crew` 저장 컬럼이 아니다. 조회 대상 `Settlement` row가 없으면 `NONE`, row가 있으면 해당 `Settlement.status`를 노출한다. `NONE`은 API projection-only 값이며 DB `settlement.status` enum에 저장하지 않고, 정산 상태의 원천은 항상 `Settlement.status`다.
+- `settlement_status`는 Settlement-design §5.3의 crew settlement state projection이다. 정산 상태의 원천은 항상 `Settlement.status`다.
 
 ---
 
@@ -1925,7 +1925,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 - Dashboard는 `Settlement.status = SUCCEEDED` 전까지 최종 정산 결과가 아니며, 정산 source of truth가 아니다.
 - Dashboard projection과 최종 settlement 결과가 달라도 시스템 오류로 간주하지 않는다.
 - `projection_status`, `projection_notice`는 API 응답용 값이며 DB enum이나 도메인 상태 원천으로 저장하지 않는다.
-- `settlement_status`는 API/read-model projection이며 `crew` 저장 컬럼이 아니다. `settlement_status = NONE`은 해당 방의 `Settlement` row가 아직 없다는 뜻이고 DB `settlement.status` enum 값이 아니며, Dashboard projection을 계산할 수 없다는 의미가 아니다.
+- `settlement_status = NONE`은 해당 방의 `Settlement` row가 아직 없다는 뜻이며, Dashboard projection을 계산할 수 없다는 의미가 아니다. 저장/authority 규칙은 Settlement-design §5.3을 따른다.
 - `my_share_ratio_estimated`는 소수 오해 방지를 위해 string decimal로 반환한다.
 - 적용 불가 필드는 생략하지 않고 `null`로 반환한다.
 - Dashboard는 정산의 `remainder`, `remainder_policy`, deterministic remainder allocation, 1원 단위 잔액 처리를 계산하거나 반영하지 않는다. 해당 최종 지급 차이는 Settlement API에서만 확인한다.
@@ -1978,14 +1978,14 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 |------|------|
 | `settlement_id` | 정산 식별자. `Settlement` row가 없으면 `null` |
 | `settlement_type` | `NORMAL` (일반 정산) 또는 `CANCELLED_BEFORE_START` (시작 전 취소 정산). row가 없으면 `null` |
-| `status` | 정산 처리 상태. `NONE`은 API projection 전용이며 DB에는 저장하지 않는다 |
+| `status` | 정산 처리 상태. `NONE`은 Settlement row 없음 projection이다 |
 | `retry_count` | 재시도 횟수 |
 | `failure_code` | 실패 사유 코드. 실패하지 않았으면 `null`. 값 목록: `INPUT_LOAD_FAILED`, `CALCULATION_FAILED`, `POINT_CREDIT_FAILED`, `DUPLICATE_SETTLEMENT`, `LOCK_ACQUIRE_FAILED`, `UNKNOWN` |
 | `failure_message` | 실패 상세 메시지 (내부 로그용) |
 | `started_at` | 정산 실행 시작 시각 |
 | `finished_at` | 정산 성공/실패 종료 시각. 진행 중이면 `null` |
 
-- `NONE`은 API projection이며 `Settlement` row가 아직 없음을 뜻한다.
+- no row → `NONE`, row exists → corresponding `Settlement.status` (Settlement-design §5.3).
 - `PENDING → RUNNING → SUCCEEDED / RETRY_WAIT / FAILED`는 `Settlement.status` 원천 상태를 그대로 반영한다.
 - `started_at` / `finished_at`은 runtime execution fact다. lifecycle/cutoff authority는 `start_at`, crew timezone, daily cutoff 같은 scheduled semantic anchor에 남는다.
 

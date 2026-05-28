@@ -155,8 +155,7 @@
 
 - `MissionRoom.status`는 방의 상태를 말한다.
 - `Settlement.status`는 정산 처리 상태를 말한다.
-- `MissionRoom`/`crew`의 `settlement_status`는 저장 컬럼이 아니라 API/read-model projection이다.
-- 운영 판단, 재시도 가능 여부, 배치 대상 여부의 원천 상태는 항상 `Settlement.status`다.
+- API가 노출하는 방 정산 상태는 §5.3의 projection 규칙을 따르며, 운영 판단·재시도 가능 여부·배치 대상 여부의 원천은 항상 `Settlement.status`다.
 - 포인트 금액 판단의 원천은 `point_history`이고, `point_account.available_balance` / `reserved_balance` / `locked_balance`는 재계산 가능한 캐시다.
 - `member`는 사용자 식별·인증 책임만 가진다. `point_account` physical account shape는 `available_balance`, `reserved_balance`, `locked_balance` 세 컬럼으로 고정한다.
 
@@ -218,9 +217,11 @@ MissionRoom 종료/취소 감지
 - 일부 participant 지급만 완료됐거나 원장-FK 연결이 누락된 partial 상태는 복구 가능한 중간 상태이며, `SUCCEEDED`가 아니라 `RETRY_WAIT` 또는 `FAILED`로 남긴다.
 - `RETRY_WAIT`/`FAILED`에서 retry가 갖는 권한은 unfinished execution completion authority다. 이미 authoritative하게 append된 ledger/item/snapshot은 그대로 두고, 누락된 item completion 또는 FK linkage만 idempotent하게 완료한다.
 
-### 5.3 API/read-model `settlement_status` projection
+### 5.3 Crew settlement state projection
 
-`MissionRoom.settlement_status`/`crew.settlement_status`는 DB 저장 컬럼이 아니다. API와 read model은 조회 대상 방의 settlement row 존재 여부와 `Settlement.status`에서 아래 값을 파생할 수 있다.
+`Settlement.status` is the authoritative settlement state.
+
+Crew/MissionRoom settlement state exposed by APIs and read models is derived from the related `Settlement` row, rather than persisted on `crew`/`MissionRoom`.
 
 | Projection 값 | 파생 기준 |
 | -------------- | --------- |
@@ -233,11 +234,10 @@ MissionRoom 종료/취소 감지
 
 원칙:
 
-- `NONE`은 API projection-only 값이며 DB `settlement.status` enum에 저장하지 않는다.
+- `NONE`은 projection-only 값이며 `settlement.status`에 저장하지 않는다.
 - `NULL`을 “정산 없음” 의미 상태로 사용하지 않는다.
-- `crew`/`MissionRoom` entity에는 `settlement_status` 저장 컬럼을 두지 않는다.
-- 정산 처리의 조건 판단은 항상 `Settlement.status`를 기준으로 한다.
-- API/read-model projection과 `Settlement.status`가 어긋나면 `Settlement.status`를 신뢰한다.
+- projection은 조회 편의 값이며 최종 정산 결과가 아니다.
+- projection과 `Settlement.status`가 어긋나면 `Settlement.status`를 신뢰한다.
 
 ## 6. 정산 배치 처리 흐름
 
@@ -285,7 +285,7 @@ MissionRoom 상태가 RECRUITING -> CANCELLED
 - `retry_count < 3`
 - `finished_at is null` 또는 재시도 대상 상태
 
-배치는 더 이상 `MissionRoom.status + settlement_status projection` 조합을 원천 조건으로 사용하지 않는다. 방 상태는 검증용 컨텍스트일 뿐, 실제 실행 대상은 `Settlement` 행이다.
+배치는 방 상태 + API 정산 projection 조합을 원천 조건으로 사용하지 않는다. 방 상태는 검증용 컨텍스트일 뿐, 실제 실행 대상은 `Settlement` 행이다.
 
 ### 6.3 claim과 실행 순서
 
