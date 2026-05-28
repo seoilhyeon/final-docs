@@ -44,7 +44,7 @@
 - final settlement 이후 payout rewrite, hidden mutation, support/admin override workflow
 - MVP 범위를 넘어서는 분산 실행 조정 전략, batch infrastructure topology의 신규 결정
 - `point_account` physical balance shape(`available`, `locked`, `pending`, `total` 등) 재설계
-- Android-first FCM MVP를 넘어서는 notification transport architecture 결정(SSE/Web realtime reliability, campaign/broadcast 등). 이는 Deferred/Brownfield historical/reference only이며 active transport redesign permission이 아니다
+- FCM WEB/ANDROID MVP를 넘어서는 notification transport architecture 결정(SSE/Web realtime reliability, campaign/broadcast 등). 이는 Deferred/Brownfield historical/reference only이며 active transport redesign permission이 아니다
 - settlement amount unit 재검토 결정
 
 ## 3. 고정할 비즈니스 규칙
@@ -962,7 +962,7 @@ remainderPolicy
 
 정산 커밋 이후에만 아래 후속 작업을 수행한다.
 
-1. Android FCM/in-app notification hint 발송
+1. FCM push/in-app notification hint 발송
 2. 정산 완료 이메일
 3. AI 습관 리포트 생성(Deferred/Brownfield non-authoritative artifact; active settlement authority 아님)
 4. 운영 모니터링 지표 적재
@@ -972,7 +972,7 @@ remainderPolicy
 - 후속 작업 실패는 정산 성공을 되돌리지 않는다.
 - 따라서 정산 트랜잭션 밖에서 `SettlementCompleted` 이벤트를 소비하게 한다.
 - 정산 완료 이메일/FCM notification 실패는 `Settlement.status`, `settlement_item`, `point_history`, 결제 충전 원장을 수정하거나 롤백하지 않는다.
-- 이메일 발송은 SMTP 기반 best-effort 후속 작업이고, FCM 발송은 Android push transport 후속 작업이다.
+- 이메일 발송은 SMTP 기반 best-effort 후속 작업이고, FCM 발송은 push transport 후속 작업이다.
 - notification event/log, inbox/read, delivery attempt log는 UX/transport observability 후보로 둘 수 있지만 settlement evidence, audit-grade 정산 이력, outbox authority가 아니다. notification/inbox/read != canonical state.
 - notification retry는 FCM delivery attempt recovery로만 제한하고 settlement retry/replay/correction 또는 payout mutation으로 연결하지 않는다.
 - 이메일 실패는 structured log, bounded retry, 운영자 수동 재발송 대상으로만 다룬다. notification delivery attempt 실패는 token/device invalidation 또는 transport retry 판단에만 사용한다.

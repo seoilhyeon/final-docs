@@ -2144,10 +2144,10 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 - 추천 결과는 draft이며 자동 저장되지 않는다. 사용자 확인 후 `POST /api/crews`로 별도 저장한다.
 - AI 실패는 시스템 실패가 아니다. `AI_RECOMMENDATION_FAILED`는 정산, 포인트 원장, 크루 생성 흐름을 차단하지 않는다. FE는 기존 입력값을 유지하고 수동 생성 흐름을 제공해야 한다.
 
-## 5.9 알림 / Android FCM / Inbox
+## 5.9 알림 / FCM WEB·ANDROID / Inbox
 
 
-> FCM(Firebase Cloud Messaging)을 통한 Android-first 알림이 기준이다. 알림 서비스는 canonical state authority가 아닌 **best-effort re-entry hint** 역할만 한다. FE는 알림 payload의 값(display_text, resource_id 등)을 최종 상태로 신뢰하지 않아야 한다. 알림(push 또는 inbox item) 클릭 시 클라이언트는 `deep_link`로 이동 후 canonical REST API를 refetch해야 한다.
+> FCM(Firebase Cloud Messaging)을 통한 WEB·ANDROID 알림이 기준이다. 알림 서비스는 canonical state authority가 아닌 **best-effort re-entry hint** 역할만 한다. FE는 알림 payload의 값(display_text, resource_id 등)을 최종 상태로 신뢰하지 않아야 한다. 알림(push 또는 inbox item) 클릭 시 클라이언트는 `deep_link`로 이동 후 canonical REST API를 refetch해야 한다.
 
 ### `POST /api/notification-devices`
 
@@ -2157,7 +2157,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
-| `platform` | `string` | Y | `ANDROID` |
+| `platform` | `string` | Y | `ANDROID` 또는 `WEB` |
 | `fcm_token` | `string` | Y | FCM 토큰 |
 | `device_id` | `string` | Y | 클라이언트 기기 식별자 |
 | `app_version` | `string` | N | 앱 버전 |
@@ -2532,7 +2532,7 @@ NONE → PENDING → RUNNING → SUCCEEDED
 - Active withdrawal / rejoin: `POST /api/crews/{crewId}/withdraw`, `WITHDRAWN`, 중도탈퇴, 재참여 semantics는 MVP active lifecycle이 아니다. Frozen `LOCKED` baseline, final settlement, point ledger를 변경하는 근거로 쓰지 않는다.
 - Admin settlement surface: `GET /api/admin/settlements`, `POST /api/admin/settlements/{settlementId}/retry`, admin/manual settlement, correction API는 MVP active API가 아니다. Backend `settlement.md`도 Admin Settlement API를 deferred로 둔다.
 - AI habit report: `POST /api/crews/{crewId}/ai-habit-report`, `GET /api/crews/{crewId}/ai-habit-report/me`, `GET /api/ai-habit-reports/{reportId}`, 관련 habit report enum은 Phase 2 reference다. Settlement, `point_history`, mission certification, lifecycle authority가 아니다.
-- SSE realtime stream: `GET /api/notifications/stream`은 Phase 2/deferred realtime drift reference다. MVP active notification baseline은 Android-first FCM device lifecycle과 notification inbox/read REST API다.
+- SSE realtime stream: `GET /api/notifications/stream`은 Phase 2/deferred realtime drift reference다. MVP active notification baseline은 FCM WEB·ANDROID device lifecycle과 notification inbox/read REST API다.
 - `WEEKLY_N`, notification preference matrix, notification template CMS/table, delivery attempt observability, campaign/broadcast analytics, distributed replay engine, correction workflow, automatic replay recovery는 MVP active API contract가 아니다.
 
 ## 9. 구현 메모

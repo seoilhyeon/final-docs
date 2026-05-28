@@ -56,7 +56,7 @@ API authority propagation에서도 아래 semantic anchor는 유지한다.
 - role-based moderation history visibility matrix
 - post-final correction/support workflow 세부 운영
 - Redis/Redisson/distributed lock/concurrency control 전략
-- notification transport 중 active FCM device/inbox/read/unread UX와 Deferred/Removed SSE/stream 경계
+- notification transport 중 active FCM WEB/ANDROID device/inbox/read/unread UX와 Deferred/Removed SSE/stream 경계
 - `point_account`의 물리적 balance shape(`available`, `locked`, `pending`, `total` 등)와 cache/reconciliation 전략
 - settlement amount unit 재검토 후보와 기존 정수/절사 baseline 변경 여부
 
@@ -235,7 +235,7 @@ P1 이후 프로토타입 후보(비확정 / non-commitment boundary):
   `이번 미션에서는 인정된 성공 기록이 없어, 누군가의 실패가 다른 참여자의 추가 환급으로 이어지지 않도록 원금을 기준으로 정산되었습니다.`
 - 알림 UX에는 아래 문구를 적용한다.
   `알림은 놓치지 않도록 돕는 best-effort 안내이며, 인증 제출과 정산 기준은 앱 내 기록과 final batch를 따릅니다.`
-  Android-first MVP에서는 FCM을 background/off-app 재진입 transport로 사용한다. FCM payload, 알림 목록, 읽음 상태, 발송/수신/실패 상태는 canonical history나 audit source가 아니며, 알림 클릭 시 클라이언트는 `deep_link`로 이동한 뒤 관련 canonical API state를 다시 조회해야 한다.
+  MVP에서는 FCM WEB·ANDROID push를 background/off-app 재진입 transport로 사용한다. FCM payload, 알림 목록, 읽음 상태, 발송/수신/실패 상태는 canonical history나 audit source가 아니며, 알림 클릭 시 클라이언트는 `deep_link`로 이동한 뒤 관련 canonical API state를 다시 조회해야 한다.
 - 결과 카드/공유 UX에는 아래 문구 방향을 적용한다.
   `이번 크루에서 꾸준히 참여한 기록입니다. 함께 목표를 향해 버틴 과정을 확인해보세요.`
 
@@ -279,7 +279,7 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 | 실시간 현황 / 기여 visibility | 현재 기준 지분율, 상대적 위치, 예상 환급 흐름, 기여도를 보여준다. | Projection/current-basis UX다. final settlement, ledger, payout certainty가 아니다.       |
 | 운영 탭                      | 검토 대기/거절/누락 등 상태를 설명한다.                          | Contextual visibility, not ledger control.                                               |
 | 최종 결과 entry point        | final settlement 이후 완주 기록과 공동 성취를 다시 보게 한다.     | 결과 카드 intent는 유지하되 저장/공유 polish는 P1 가능. Projection 공유 카드는 금지한다. |
-| 알림                         | Android-first FCM, 인앱 토스트, 알림 목록/읽음 UX로 모집/인증/검토/정산 주의가 필요한 순간을 재진입시킨다. | Notification, inbox/read, delivery attempt는 UX/transport state이며 certification, moderation, settlement, ledger authority가 아니다. 클릭 시 canonical API refetch가 필수다. |
+| 알림                         | FCM WEB·ANDROID push, 인앱 토스트, 알림 목록/읽음 UX로 모집/인증/검토/정산 주의가 필요한 순간을 재진입시킨다. | Notification, inbox/read, delivery attempt는 UX/transport state이며 certification, moderation, settlement, ledger authority가 아니다. 클릭 시 canonical API refetch가 필수다. |
 | 반응형 UX                    | 모바일/데스크톱에서 핵심 trust loop를 수행할 수 있게 한다.       | Presentation requirement, not authority semantics.                                       |
 | Host badge/counter           | Host 역할과 검토 책임을 이해시킨다.                              | Host badge는 activation/settlement authority가 아니다.                                   |
 
@@ -297,7 +297,7 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 
 | 범위 | MVP 판단 | Boundary |
 | --- | --- | --- |
-| Android FCM push | 포함 | Background/off-app 재진입 transport. Delivery success/failure는 domain success/failure가 아니다. |
+| FCM WEB·ANDROID push | 포함 | Background/off-app 재진입 transport. Delivery success/failure는 domain success/failure가 아니다. |
 | FCM device lifecycle | 포함 | 활성 notification API surface다. Device token 등록/갱신/삭제는 알림 수신성 관리일 뿐 domain state authority가 아니다. |
 | 인앱 토스트 | 포함 | Foreground 즉시 피드백. Durable history나 canonical state가 아니다. |
 | 알림 목록/읽음/미읽음 | 포함 | Active MVP notification inbox/read/unread UX다. `read_at`/unread count는 UX hint이며 task workflow, audit history, certification history, settlement history, ledger history가 아니다. |
@@ -306,7 +306,7 @@ Engagement UX는 위험 문구를 제거한다는 이유로 실시간 가시성 
 | delivery attempt observability | Deferred/Brownfield | FCM 발송/실패/transport retry 관측은 후속 운영 hardening 후보일 뿐 MVP semantic freeze 요구사항이 아니다. Settlement retry/replay/correction과 분리한다. |
 | notification preference matrix | Deferred/Brownfield | OS permission 또는 최소 설정 이상은 후속 결정으로 둔다. |
 | notification template CMS/table | Deferred/Brownfield | MVP는 문서/코드 상수로 시작할 수 있으며 문구 안정화 전 table을 freeze하지 않는다. |
-| SSE/Web realtime reliability | Deferred/Removed | Active MVP API가 아니다. Android-first FCM + inbox/read UX를 역으로 결정하지 않으며, 기존 SSE/stream 문구는 historical/reference only로 containment한다. |
+| SSE/Web realtime reliability | Deferred/Removed | Active MVP API가 아니다. FCM WEB·ANDROID + inbox/read UX를 역으로 결정하지 않으며, 기존 SSE/stream 문구는 historical/reference only로 containment한다. |
 | campaign/broadcast/advanced analytics | Deferred/Brownfield | Trust-loop MVP 이후 검토 후보일 뿐 future delivery commitment나 implementation permission이 아니다. |
 
 Notification payload/list item은 refetch hint 중심으로 제한한다. `event_type`은 앱 라우팅 vocabulary 후보일 뿐 DB enum이나 audit event catalog freeze가 아니다. 최종 환급금, 인증 truth, ledger truth, settlement retry/replay 상태를 notification-owned truth로 싣지 않는다. Deep-link/refetch는 UX recovery semantics only이며 active API inventory나 transport topology를 PRD에서 새로 만들지 않는다.

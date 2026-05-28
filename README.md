@@ -15,7 +15,7 @@
 3. 계약: FE/BE가 어떤 인터페이스로 연결되는가
 4. 실행: 어떤 순서로 구현하고 검증하는가
 
-원본 기획안(`.docx`)은 출발점이자 제품/UX 배경 참고 자료다. 현재 활성 제품/UX 참고 문서는 `docs/Dondok_프로젝트기획안_v1.7.docx`이며, 구현과 운영 판단의 기준은 여전히 이 폴더의 Markdown 문서(`docs/*.md`)다. 제안서 표현이 Markdown 문서와 충돌하면 Markdown 문서가 우선한다.
+원본 기획안(`.docx`)은 출발점이자 제품/UX 배경 참고 자료다. 현재 활성 제품/UX 참고 문서는 `docs/Dondok_프로젝트기획안_v1.9.docx`이며, 구현과 운영 판단의 기준은 여전히 이 폴더의 Markdown 문서(`docs/*.md`)다. 제안서 표현이 Markdown 문서와 충돌하면 Markdown 문서가 우선한다.
 
 ## 2. 추천 읽기 순서
 
@@ -35,7 +35,7 @@
    API contract stabilization 이후 정렬되는 derived implementation docs로 읽는다. 데이터 구조, 마이그레이션, 정산 상세 구현 판단에는 여전히 각 문서의 도메인별 상세 규칙을 따른다.
 6. [Dondok_요구사항명세서_v0.9.xlsx](./Dondok_요구사항명세서_v0.9.xlsx), wireframe/QA 자료, [Dondok_WBS_v0.6.xlsx](./Dondok_WBS_v0.6.xlsx), 외부 WBS/GitHub Issues
    마지막으로 실행 계획과 검증 단위를 본다. 여기서는 무엇을 만들지 다시 정의하지 않고, 이미 결정된 범위를 어떤 단위로 구현하고 검증할지 확인한다.
-7. [Dondok_프로젝트기획안_v1.7.docx](./Dondok_프로젝트기획안_v1.7.docx)
+7. [Dondok_프로젝트기획안_v1.9.docx](./Dondok_프로젝트기획안_v1.9.docx)
    활성 제품/UX 참고 자료다. 배경, 화면 의도, 소셜 피드 표현을 확인할 때만 본다. 구현 판단은 Markdown source of truth 문서에 승격된 내용만 따른다.
 
 ### API contract lane와 semantic guardrail lane
@@ -59,7 +59,7 @@
 | [ERD-dondok.md](./ERD-dondok.md) | 핵심 테이블, 관계, 제약, 스냅샷 저장 구조를 정의한다. | DB 설계, 쿼리 설계, 영속성 모델 검토 시 | API 확정 후 정렬되는 데이터 구조와 DB 제약 |
 | [Schema-migration-spec.md](./Schema-migration-spec.md) | 스키마 마이그레이션 단위와 검증 기준을 정의한다. | DB 변경/마이그레이션 검토 시 | API 확정 후 정렬되는 migration detail |
 | [Dondok_요구사항명세서_v0.9.xlsx](./Dondok_요구사항명세서_v0.9.xlsx) | 상세 요구사항 참고 자료다. | 요구사항 세부 항목과 검증 단위를 확인할 때 | Downstream 요구사항 reference |
-| [Dondok_프로젝트기획안_v1.7.docx](./Dondok_프로젝트기획안_v1.7.docx) | 활성 제품/UX 참고 자료다. | 배경, UX 의도, 제안서 표현 확인이 필요할 때 | 현재 source of truth 아님. 참고용 입력 |
+| [Dondok_프로젝트기획안_v1.9.docx](./Dondok_프로젝트기획안_v1.9.docx) | 활성 제품/UX 참고 자료다. | 배경, UX 의도, 제안서 표현 확인이 필요할 때 | 현재 source of truth 아님. 참고용 입력 |
 | [Dondok_WBS_v0.6.xlsx](./Dondok_WBS_v0.6.xlsx) | MVP 일정/구현 범위 참고 자료다. | 실행 우선순위와 일정 확인이 필요할 때 | Downstream 실행 reference |
 
 문서 충돌 시에는 단일 선형 우선순위가 아니라 소유 영역별 authority를 따른다.
@@ -139,7 +139,7 @@ Execution:      요구사항 명세서 / wireframe / QA / 외부 WBS·GitHub Iss
 - 스키마 변경 단위와 마이그레이션 검증은 `Schema-migration-spec`에 둔다. 단, API contract stabilization 이후 정렬 대상으로 다룬다.
 - `Deferred`, `Brownfield`, `Removed`, `Contract Drift Notes`는 historical/reference only다. future delivery commitment, active feature approval, implementation permission으로 복제하지 않는다.
 - 실행 우선순위, 선행 의존성, 병렬 실행 순서는 요구사항 명세서, wireframe/QA 자료, 외부 WBS, GitHub Issues에서 추적하되 상위 제품/정산/API 의미를 재정의하지 않는다.
-- 활성 기획안(`docs/Dondok_프로젝트기획안_v1.7.docx`)의 표현이 현재 Markdown 문서와 다르면 docx를 직접 구현 기준으로 사용하지 않는다. 필요한 내용은 먼저 소유 Markdown source of truth 문서로 승격한 뒤 구현한다.
+- 활성 기획안(`docs/Dondok_프로젝트기획안_v1.9.docx`)의 표현이 현재 Markdown 문서와 다르면 docx를 직접 구현 기준으로 사용하지 않는다. 필요한 내용은 먼저 소유 Markdown source of truth 문서로 승격한 뒤 구현한다.
 - AI 비트랜잭션 경계는 `PRD`, `Usecase`, `backend/docs/api/*`, `API-spec`, `ERD`가 같은 정책을 유지해야 한다.
 - DB enum/constraint와 `member.uuid` identity persistence invariant의 source of truth는 `ERD`가 소유하고, `API-spec`은 FE/BE 계약에 필요한 consumer-facing enum, auth subject, 알림 recipient/transport contract만 반복한다.
 

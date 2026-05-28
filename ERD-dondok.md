@@ -98,7 +98,7 @@ MVP canonical server timezone authority는 `Asia/Seoul` (`KST`)이다. Lifecycle
 
 | 테이블명                | 역할                                           | 포함 판단 |
 | ----------------------- | ---------------------------------------------- | --------- |
-| `notification_device`   | Android-first FCM device/token lifecycle 최소 persistence | MVP active notification API의 device 등록/갱신/비활성화를 구현하기 위한 thin transport persistence다. crew lifecycle, 인증, 검수, 정산, 포인트 원장 상태를 변경하지 않는다. |
+| `notification_device`   | FCM WEB·ANDROID device/token lifecycle 최소 persistence | MVP active notification API의 device 등록/갱신/비활성화를 구현하기 위한 thin transport persistence다. crew lifecycle, 인증, 검수, 정산, 포인트 원장 상태를 변경하지 않는다. |
 | `notification`          | notification inbox/read/unread 최소 persistence | MVP active notification API의 inbox, unread count, mark-read/read-all을 구현하기 위한 UX/refetch hint row다. canonical history/audit truth가 아니다. |
 
 ### 2.3 Deferred notification hardening
@@ -114,7 +114,7 @@ MVP canonical server timezone authority는 `Asia/Seoul` (`KST`)이다. Lifecycle
 
 - backend active API는 FCM device lifecycle과 notification inbox/read/unread capability를 포함하므로 MVP는 최소 `notification_device`와 `notification` persistence shape를 freeze한다.
 - Notification persistence는 non-authoritative UX/refetch hint only다. notification/inbox/read state는 crew lifecycle, mission certification, moderation, settlement, point ledger, audit-grade history, unresolved task authority가 아니다.
-- `notification_device`는 authenticated member의 Android FCM device/token registration을 저장하기 위한 최소 table이다. Token refresh, invalid-token handling, provider retry/invalidation lifecycle, transport provider semantics는 이 ERD에서 freeze하지 않는다.
+- `notification_device`는 authenticated member의 FCM WEB·ANDROID device/token registration을 저장하기 위한 최소 table이다. Token refresh, invalid-token handling, provider retry/invalidation lifecycle, transport provider semantics는 이 ERD에서 freeze하지 않는다.
 - `notification`은 사용자가 놓친 알림을 다시 볼 수 있게 하는 inbox/read UX row다. `read_at` nullable timestamp만 read/unread state로 사용하며, notification status workflow/status machine은 만들지 않는다.
 - 알림 payload/list item에 필요한 canonical refetch metadata는 `event_type`, `resource_type`, `resource_id`, `deep_link`, `occurred_at`, `display_text`, `requires_refetch=true` 수준으로 제한한다. `event_type`은 앱 라우팅 vocabulary이며 DB enum이나 audit event catalog가 아니다. authoritative payout/certification/ledger snapshot은 포함하지 않는다.
 - Notification table은 thin UX persistence이므로 Core Mermaid에서 의도적으로 제외한다. Core Mermaid에 포함하면 canonical domain history/source of truth로 오해될 수 있다. 필요하면 별도 notification Mermaid block에서만 표현한다.
@@ -126,7 +126,7 @@ MVP canonical server timezone authority는 `Asia/Seoul` (`KST`)이다. Lifecycle
 
 역할:
 
-- authenticated member의 Android FCM device/token lifecycle을 저장한다.
+- authenticated member의 FCM WEB·ANDROID device/token lifecycle을 저장한다.
 - Active notification API의 등록/갱신/비활성화 구현을 위한 transport persistence다.
 - Device/token row는 알림 수신성 관리용이며 lifecycle, certification, settlement, point ledger authority가 아니다.
 
@@ -137,7 +137,7 @@ MVP canonical server timezone authority는 `Asia/Seoul` (`KST`)이다. Lifecycle
 | `id`          | `BIGINT`       | N        | device row PK |
 | `member_id`   | `BIGINT`       | N        | 회원 FK. JWT `sub = member.uuid`의 내부 member 매핑 |
 | `device_id`   | `VARCHAR(100)` | N        | 클라이언트 기기/설치 식별자. API path/request의 device identifier와 매핑 |
-| `platform`    | `VARCHAR(20)`  | N        | MVP active 값은 `ANDROID` |
+| `platform`    | `VARCHAR(20)`  | N        | MVP active 값은 `ANDROID` 또는 `WEB` |
 | `fcm_token`   | `VARCHAR(512)` | N        | FCM token. Token refresh policy 자체는 freeze하지 않음 |
 | `app_version` | `VARCHAR(50)`  | Y        | 앱 버전. transport/debug metadata |
 | `enabled`     | `BOOLEAN`      | N        | 알림 수신 활성 여부. 기본 `true` |

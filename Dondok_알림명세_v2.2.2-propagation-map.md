@@ -1,6 +1,6 @@
 # Dondok 알림명세 v2.2.2 Propagation Map
 
-이 파일은 `Dondok_알림명세_v2.2.2.xlsx`의 Android-first FCM propagation 검토용 companion mapping이다. 알림은 best-effort re-entry hint이며, inbox/read는 UX hint history일 뿐 canonical history/audit/source-of-truth가 아니다. 아래 `event_type`은 앱 라우팅 vocabulary 후보이며 DB enum, audit event catalog, API 구현 freeze가 아니다.
+이 파일은 `Dondok_알림명세_v2.2.2.xlsx`의 FCM WEB·ANDROID propagation 검토용 companion mapping이다. 알림은 best-effort re-entry hint이며, inbox/read는 UX hint history일 뿐 canonical history/audit/source-of-truth가 아니다. 아래 `event_type`은 앱 라우팅 vocabulary 후보이며 DB enum, audit event catalog, API 구현 freeze가 아니다.
 
 | ID | 알림명 | Propagation 분류 | Candidate `event_type` | Refetch target | Guardrail |
 | --- | --- | --- | --- | --- | --- |
@@ -30,7 +30,7 @@
 
 ## Deferred freeze questions
 
-- Final settlement email이 MVP mandatory인지 Phase 2 polish인지 별도 freeze 필요. 이 freeze에서는 email semantics를 다루지 않는다.
+- Final settlement email은 MVP required 후속 알림으로 freeze한다. 이메일 payload도 payout proof가 아니며 canonical settlement/ledger refetch를 보조하는 best-effort communication이다.
 - `최종 정산 완료`와 `환급 완료`는 통합 또는 strict sequencing 중 하나로 확정 필요. 어느 쪽이든 notification payload/list item은 payout proof가 아니며 canonical API refetch가 필요하다.
 - Preference/template/campaign/advanced analytics는 Phase 2로 유지.
 

@@ -157,7 +157,7 @@ Lifecycle 전이는 system rules가 소유한다. Host는 lifecycle authority가
 
 ### 2.8 Notification non-authority
 
-Notification은 canonical state가 아니라 hint/deep-link다. 사용자는 알림을 통해 진입할 수 있지만 최종 상태는 canonical API response와 authoritative records가 결정한다. Active notification semantics는 FCM device lifecycle, inbox/read/unread, deep-link 후 canonical refetch UX에 한정하며, SSE/stream은 Deferred/Removed historical/reference only다.
+Notification은 canonical state가 아니라 hint/deep-link다. 사용자는 알림을 통해 진입할 수 있지만 최종 상태는 canonical API response와 authoritative records가 결정한다. Active notification semantics는 FCM WEB/ANDROID device lifecycle, inbox/read/unread, deep-link 후 canonical refetch UX에 한정하며, SSE/stream은 Deferred/Removed historical/reference only다.
 
 ### 2.9 Emotional trust semantics
 
@@ -472,14 +472,14 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 
 - **Actors**: Participant, system, client
 - **Classification**: cross-cutting non-authoritative semantics (notification = hint only; canonical state is refetched from API)
-- **Preconditions**: Active notification UX exists through FCM device lifecycle, notification inbox/read/unread, and deep-link refetch behavior. SSE/stream is Deferred/Removed historical/reference only unless backend API docs promote it.
+- **Preconditions**: Active notification UX exists through FCM WEB/ANDROID device lifecycle, notification inbox/read/unread, and deep-link refetch behavior. SSE/stream is Deferred/Removed historical/reference only unless backend API docs promote it.
 - **Main Flow**: Notification arrives as a best-effort re-entry hint; the client follows `deep_link` and refetches canonical API state before rendering current truth. Deep-link/refetch is UX recovery semantics only and does not introduce endpoint names, event catalog enums, transport topology, delivery attempt schema, or canonical state authority.
 - **Failure Flow**: Late, missed, duplicate, or out-of-order notification contradicts current canonical state; canonical API state wins and notification failure does **not** trigger domain retry.
 - **Authority Boundary**: Notification, FCM delivery state, inbox/read/unread state, and any delivery attempt state are non-authoritative UX/transport surfaces. They do not own crew lifecycle, certification, moderation, settlement, or point ledger truth.
 - **Projection Impact**: UI may refresh estimates or final state after canonical refetch; notification payload/list text is not a projection or final settlement snapshot.
 - **Settlement Impact**: None; notification failure cannot rollback settlement and notification retry is transport retry, not settlement retry/replay/correction.
 - **UX Risk**: User thinks no notification means no payout, stale success means final state, unread means unresolved certification/settlement work, or inbox history is an audit ledger.
-- **Related Domain Objects**: active notification inbox/read state as UX hint only, FCM device registration surface, deferred notification delivery attempt candidate, canonical API response. Event catalog names are app routing vocabulary candidates, not DB enum or audit authority.
+- **Related Domain Objects**: active notification inbox/read state as UX hint only, FCM WEB/ANDROID device registration surface, deferred notification delivery attempt candidate, canonical API response. Event catalog names are app routing vocabulary candidates, not DB enum or audit authority.
 
 ### UC-A20 — Support Explanation by Lifecycle State
 

@@ -392,7 +392,7 @@ The active notification API requires minimal server-side persistence for FCM dev
 
 #### Table purpose
 
-Authenticated member Android FCM device/token registration for active device register/update/delete API.
+Authenticated member FCM WEB/ANDROID device/token registration for active device register/update/delete API.
 
 #### Columns
 
@@ -401,7 +401,7 @@ Authenticated member Android FCM device/token registration for active device reg
 | `id` | `BIGINT` | N | auto increment | Primary key. |
 | `member_id` | `BIGINT` | N | none | FK to `member.id`. |
 | `device_id` | `VARCHAR(100)` | N | none | Client device/installation identifier. |
-| `platform` | `VARCHAR(20)` | N | `ANDROID` | MVP active platform value is `ANDROID`. |
+| `platform` | `VARCHAR(20)` | N | `ANDROID` | MVP active platform value is `ANDROID` or `WEB`. |
 | `fcm_token` | `VARCHAR(512)` | N | none | Current FCM token for the member/device. |
 | `app_version` | `VARCHAR(50)` | Y | `NULL` | Optional app version metadata. |
 | `enabled` | `BOOLEAN` | N | `TRUE` | Whether this registration is active for sending. |

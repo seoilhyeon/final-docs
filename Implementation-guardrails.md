@@ -62,7 +62,7 @@
 
 Allowed MVP notification persistence is limited to:
 
-- `notification_device`: authenticated member Android FCM device/token registration lifecycle for active device register/update/delete API.
+- `notification_device`: authenticated member FCM WEB/ANDROID device/token registration lifecycle for active device register/update/delete API.
 - `notification`: minimal inbox/read/unread row for active notification list, unread count, mark-read, and read-all API.
 - `notification.read_at`: nullable timestamp; `NULL` means unread.
 
