@@ -277,7 +277,7 @@ Participant-level settlement calculation snapshot and refund ledger linkage row.
 | `excluded_success_count` | `INT` | N | `0` | Excluded success count. |
 | `period_start_at` | `DATETIME(6)` | N | none | Calculation period start. |
 | `period_end_at` | `DATETIME(6)` | N | none | Calculation period end. |
-| `share_ratio` | `DECIMAL(18,8)` | N | none | Calculation share ratio. |
+| `share_ratio` | `DECIMAL(10,6)` | N | none | Calculation share ratio. |
 | `base_refund_amount` | `BIGINT` | N | `0` | FLOOR-applied base refund amount before remainder bonus. Explanation column, not payout authority. |
 | `remainder_bonus_amount` | `BIGINT` | N | `0` | Deterministic HOST_REMAINDER host-item remainder allocation snapshot. Explanation column, not payout authority. |
 | `refund_amount` | `BIGINT` | N | `0` | Final credited/refunded amount. Persisted per-item payout source of truth. API response `final_amount` is a read-only alias for this column. Invariant: `refund_amount = base_refund_amount + remainder_bonus_amount`. |

@@ -243,7 +243,6 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax
 | Enum                         | 값                                                                                                                         |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `FrequencyType`              | `DAILY`, `SPECIFIC_DAYS`                                                                                                   |
-| `SettlementType`             | `NORMAL`, `CANCELLED_BEFORE_START`                                                                                         |
 | `PointTransactionType`       | `POINT_CHARGE`, `CREW_DEPOSIT_RESERVE`, `CREW_RESERVE_RELEASE`, `CREW_SETTLEMENT_REFUND`                                   |
 | `DailySettlementType`        | `A` (인증마감 09:00 / 정산 12:00), `B` (인증마감 21:00 / 정산 00:00), `C` (인증마감 23:59 / 정산 익일 12:00)               |
 | `MissionLogDecisionType`     | `MANUAL_APPROVE`, `MANUAL_REJECT`, `AUTO_APPROVE`, `AUTO_REJECT`                                                           |
@@ -1946,7 +1945,6 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 {
   "crew_id": 42,
   "settlement_id": null,
-  "settlement_type": null,
   "status": "NONE",
   "retry_count": 0,
   "failure_code": null,
@@ -1962,7 +1960,6 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 {
   "crew_id": 42,
   "settlement_id": 501,
-  "settlement_type": "NORMAL",
   "status": "RUNNING",
   "retry_count": 1,
   "failure_code": null,
@@ -1977,7 +1974,6 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 | 필드 | 설명 |
 |------|------|
 | `settlement_id` | 정산 식별자. `Settlement` row가 없으면 `null` |
-| `settlement_type` | `NORMAL` (일반 정산) 또는 `CANCELLED_BEFORE_START` (시작 전 취소 정산). row가 없으면 `null` |
 | `status` | 정산 처리 상태. `NONE`은 Settlement row 없음 projection이다 |
 | `retry_count` | 재시도 횟수 |
 | `failure_code` | 실패 사유 코드. 실패하지 않았으면 `null`. 값 목록: `INPUT_LOAD_FAILED`, `CALCULATION_FAILED`, `POINT_CREDIT_FAILED`, `DUPLICATE_SETTLEMENT`, `LOCK_ACQUIRE_FAILED`, `UNKNOWN` |
@@ -2005,7 +2001,6 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 {
   "settlement_id": 501,
   "crew_id": 42,
-  "settlement_type": "NORMAL",
   "status": "SUCCEEDED",
   "retry_count": 1,
   "total_participants": 5,
@@ -2014,7 +2009,6 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
   "total_base_refund_amount": 499996,
   "total_remainder_amount": 4,
   "remainder_policy": "HOST_REMAINDER",
-  "remainder_winner_crew_participant_id": 101,
   "failure_code": null,
   "failure_message": null,
   "started_at": "2026-06-01T13:12:10+09:00",
@@ -2056,14 +2050,12 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 
 | 필드 | 설명 |
 | --- | --- |
-| `settlement_type` | `NORMAL` (일반 정산) 또는 `CANCELLED_BEFORE_START` (시작 전 취소 정산) |
 | `total_participants` | 정산 대상 frozen `LOCKED` participant 수 |
 | `total_locked_amount` | 정산 시점의 `crew_participant.deposit_amount` 합계 스냅샷. `point_account`/`point_history`를 재합산하지 않는다 |
 | `total_recognized_success` | 전체 참여자의 인정 성공 수 합계 |
 | `total_base_refund_amount` | floor 연산 후 전체 기본 환급 합계 |
 | `total_remainder_amount` | floor 연산 후 남은 잔액 |
-| `remainder_policy` | 잔액 처리 정책. MVP active 값은 `HOST_REMAINDER`이며 의미는 “절사 후 남은 1~14원 수준의 remainder를 host의 `crew_participant`에 deterministic하게 배정하는 fixed policy”다. 이는 host discretion, random winner, payout mutation authority, settlement/ledger authority가 아니다 |
-| `remainder_winner_crew_participant_id` | `HOST_REMAINDER` fixed policy에 따라 remainder가 배정된 host `crew_participant_id`를 read-only로 노출하는 convenience field. `winner`라는 필드명은 host가 수령자를 선택하거나 payout을 조작할 권한을 뜻하지 않으며, 최종 지급 권한은 각 item의 persisted `refund_amount`와 연결된 `point_history`에 있다. all-fail 또는 잔액 없음이면 `null`일 수 있다 |
+| `remainder_policy` | 잔액 처리 정책. MVP active 값은 `HOST_REMAINDER`이며 의미는 “절사 후 남은 1~14원 수준의 remainder를 host의 `crew_participant`에 deterministic하게 배정하는 fixed policy”다. 이는 host discretion, random winner, payout mutation authority, settlement/ledger authority가 아니다. host item의 remainder bonus 금액은 해당 `settlement_item.remainder_bonus_amount`로만 확인하며, persisted payout authority는 `settlement_item.refund_amount`와 연결된 `point_history`다 |
 
 **정산 항목(item) 필드 정책**
 
@@ -2467,6 +2459,12 @@ GET /api/points/history?limit=20&cursor=2026-05-07T09:30:00+09:00_3001
 - `limit`이 `1` 미만이거나 `100`을 초과하면 `INVALID_LIMIT`를 반환한다.
 - `cursor` 형식이 잘못되었거나 해석할 수 없으면 `INVALID_CURSOR`를 반환한다.
 
+**`balance_after` 필드 매핑**
+
+- API 응답의 `balance_after`는 `point_history.available_after`의 read-only projection/alias다. 별도 persisted column이 아니다.
+- `point_history.reserved_after`, `point_history.locked_after`는 reconciliation/debug snapshot이며 API 응답에 노출하지 않는다. 필요 시 운영/감사 채널로만 확인한다.
+- `balance_after`는 convenience field이며, append-only ledger의 authoritative ordering/idempotency authority는 `point_history` row 자체다.
+
 **`reference_type` / `reference_id` / `idempotency_key` 매핑**
 
 | 도메인 동작 | `transaction_type` | `reference_type` | `reference_id` | `idempotency_key` |
@@ -2513,16 +2511,17 @@ NONE → PENDING → RUNNING → SUCCEEDED
 
 이 절은 backend active API와 PRD/Usecase semantic guardrail 사이에서 오해될 수 있는 host authority leakage를 containment한다. 이 절은 새 settlement policy를 설계하거나 backend active response shape를 임의 삭제하지 않는다.
 
-### HOST_REMAINDER / remainder_winner_crew_participant_id
+### HOST_REMAINDER
 
-`backend/docs/api/settlement.md`의 active settlement response는 `remainder_policy = HOST_REMAINDER`와 `remainder_winner_crew_participant_id`를 노출할 수 있다. PRD/Usecase/Settlement/ERD 계열 guardrail은 이를 host lifecycle/settlement/ledger authority나 host discretionary payout privilege로 해석하지 말 것을 요구한다.
+`backend/docs/api/settlement.md`의 active settlement response는 `remainder_policy = HOST_REMAINDER`를 노출한다. PRD/Usecase/Settlement/ERD 계열 guardrail은 이를 host lifecycle/settlement/ledger authority나 host discretionary payout privilege로 해석하지 말 것을 요구한다.
 
 이 migration에서는 backend 문서의 현재 active API response shape를 삭제하지 않고, 다음 해석을 고정한다.
 
 - `HOST_REMAINDER`는 MVP active deterministic fixed policy다. 절사 후 남는 1~14원 수준의 remainder recipient를 host `crew_participant`로 고정한다.
 - `HOST_REMAINDER`는 host discretion, random winner, lottery, payout mutation authority, ledger correction authority, lifecycle transition authority를 뜻하지 않는다.
-- `remainder_winner_crew_participant_id`는 fixed policy 실행 결과로 선택된 host participant pointer다. 이 값은 host가 수령자를 선택했다는 뜻이 아니며, 최종 지급/환급 권한은 `settlement_item.refund_amount`와 연결된 `point_history`에 있다.
-- clients/FE/support 문구는 `HOST_REMAINDER`나 `winner`라는 이름을 “방장이 임의로 가져감/정함”으로 설명하지 않고, deterministic fixed policy로 설명한다.
+- host item에 배정된 remainder 금액은 해당 `settlement_item.remainder_bonus_amount` 스냅샷으로만 확인한다. 별도 `remainder_winner_*` persisted column이나 active response field는 두지 않는다.
+- persisted payout/refund authority는 각 `settlement_item.refund_amount`와 연결된 `point_history`다.
+- clients/FE/support 문구는 `HOST_REMAINDER`라는 이름을 “방장이 임의로 가져감/정함”으로 설명하지 않고, deterministic fixed policy로 설명한다.
 - all-fail equal principal refund에서는 추가 remainder 지급이 발생하지 않는다.
 
 ## 8. Deferred / Brownfield / Removed Surfaces

@@ -1011,7 +1011,7 @@ Unique / Index:
 - `total_participants`는 frozen participant baseline에 포함된 `LOCKED` participant 중 정산 대상 deposit이 존재하는 수다. `PENDING`/`REJECTED`/`CANCELLED`/`EXPIRED`는 정산 baseline에 포함하지 않는다. `WITHDRAWN`/active withdrawal 정산 포함 여부는 Deferred/Brownfield/Removed historical/reference-only semantics다.
 - `total_locked_amount`는 정산 실행 시점에 정산 대상 participant `crew_participant.deposit_amount` 합계를 스냅샷으로 고정한 값이다.
 - `total_locked_amount`는 `point_history`나 `point_account`를 다시 합산해 계산하지 않는다.
-- 일반 정산에서 절사 후 남은 잔액은 `HOST_REMAINDER` deterministic fixed policy로 처리한다. API convenience pointer(`remainder_winner_crew_participant_id`)는 host recipient 결과를 read-only로 설명할 뿐 지급액 결정 authority가 아니며, host discretion이나 random payout을 허용하지 않는다.
+- 일반 정산에서 절사 후 남은 잔액은 `HOST_REMAINDER` deterministic fixed policy로 처리한다. host item에 배정된 remainder 금액은 `settlement_item.remainder_bonus_amount` 스냅샷으로 설명하며, persisted payout authority는 `settlement_item.refund_amount`와 연결된 `point_history`다. 별도 `remainder_winner_*` persisted column이나 active response field를 두지 않으며, host discretion이나 random payout을 허용하지 않는다.
 - 일부 participant 지급만 완료된 partial 상태는 `RETRY_WAIT` 또는 `FAILED`로 남으며, 모든 `settlement_item.point_history_id` 연결과 대응 `point_history` 존재가 검증된 경우에만 `SUCCEEDED`가 된다.
 - MVP에서는 별도 `total_active_participants` 컬럼을 두지 않는다.
 - `algorithm_version`과 `rule_context_snapshot`은 versioned semantic replay를 위한 context다. v2 runtime이 v1 settlement를 해석할 수 있게 하는 장치이지 v1 결과를 현재 규칙으로 덮어쓰는 migration-forward reinterpretation hook이 아니다.
@@ -1040,7 +1040,7 @@ Unique / Index:
 | `excluded_success_count`        | `INT`           | N        | 제외된 성공 수                                                                                   |
 | `period_start_at`               | `DATETIME(6)`   | N        | 계산 시작                                                                                        |
 | `period_end_at`                 | `DATETIME(6)`   | N        | 계산 종료                                                                                        |
-| `share_ratio`                   | `DECIMAL(18,8)` | N        | 지분율                                                                                           |
+| `share_ratio`                   | `DECIMAL(10,6)` | N        | 지분율                                                                                           |
 | `base_refund_amount`            | `BIGINT`        | N        | FLOOR 적용 후, remainder 합산 전 기본 환급액 스냅샷. settlement 시점 설명용 컬럼이며 payout authority는 아니다 |
 | `remainder_bonus_amount`        | `BIGINT`        | N        | `HOST_REMAINDER` fixed policy에 따라 host item에 deterministic하게 배정된 절사 잔액 스냅샷. payout authority는 `refund_amount`다 |
 | `refund_amount`                 | `BIGINT`        | N        | 최종 지급/환급 총액의 persisted source of truth. 항상 `base_refund_amount + remainder_bonus_amount`이며 API 응답의 `final_amount`는 본 컬럼의 alias projection이다 |
@@ -1084,7 +1084,7 @@ Unique / Index:
 - `calculation_reason` 값 공간은 정산 스냅샷의 설명/QA 검색성을 위한 vocabulary이며, DB 제약이나 API 응답 enum으로 승격하지 않는다.
 - `calculation_reason`은 reason-code mapping version과 함께 해석한다. 과거 정산 설명은 현재 UX wording이 아니라 당시 vocabulary 기준으로 reconstruction되어야 한다.
 - `settlement_item`은 참여자별 deterministic 계산 snapshot이고, `point_history`는 그 결과를 실제 잔액에 반영하는 authoritative append-only ledger다. `Settlement.status = SUCCEEDED` 이후에는 frozen snapshot과 연결된 `point_history`가 운영/분쟁/조회 기준이며 post-freeze mutation은 금지된다.
-- `refund_amount`는 per-item 최종 환급 총액의 persisted source of truth다. `base_refund_amount`는 FLOOR 적용 후, remainder 합산 전 기본 환급액이고, `remainder_bonus_amount`는 `HOST_REMAINDER` fixed policy에 따라 host item에 deterministic하게 배정된 절사 잔액이다. settlement 트랜잭션은 항상 `refund_amount = base_refund_amount + remainder_bonus_amount` invariant를 만족하도록 기록한다. payout mutation authority는 `refund_amount`와 연결된 `point_history`다. API 응답에서 `final_amount`나 `remainder_winner_crew_participant_id`를 노출하는 경우 read-only projection/convenience로 해석하며, `HOST_REMAINDER` fixed policy의 host recipient를 설명할 뿐 `refund_amount`/`point_history` 권한을 대체하지 않는다.
+- `refund_amount`는 per-item 최종 환급 총액의 persisted source of truth다. `base_refund_amount`는 FLOOR 적용 후, remainder 합산 전 기본 환급액이고, `remainder_bonus_amount`는 `HOST_REMAINDER` fixed policy에 따라 host item에 deterministic하게 배정된 절사 잔액이다. settlement 트랜잭션은 항상 `refund_amount = base_refund_amount + remainder_bonus_amount` invariant를 만족하도록 기록한다. payout mutation authority는 `refund_amount`와 연결된 `point_history`다. API 응답에서 `final_amount` 같은 값을 노출하는 경우 read-only projection/convenience로 해석하며, `refund_amount`/`point_history` 권한을 대체하지 않는다. 별도 `remainder_winner_*` persisted column이나 active response field를 두지 않는다.
 - `effective_moderation_snapshot`, `moderation_chain_ref`, `withdrawn_at_snapshot`은 정산 시점 컨텍스트를 설명하기 위한 read-only audit/replay context이며 현재 엔진으로의 reinterpretation, recalculation, payout rewrite authority가 아니다. settlement input freeze 이후에 `moderation_history`에 새 row가 append되어도 본 snapshot 컬럼을 mutate하지 않는다.
 - `withdrawn_at_snapshot`은 Deferred/Brownfield historical/reference-only withdrawal reference로만 사용한다. MVP active settlement에서는 frozen `LOCKED` baseline을 사용하므로 항상 `null`이며, 이 값이 채워져 있어도 frozen baseline이나 `refund_amount`를 소급 변경하는 근거가 되지 않는다.
 - 정산 실행에서는 `settlement_item`을 먼저 생성해 계산 결과를 고정하고, 이후 `point_history`를 생성한 뒤 `point_history_id`를 연결한다.
@@ -1467,7 +1467,7 @@ erDiagram
         DATETIME updated_at
     }
     %% SETTLEMENT_ITEM: nullable=effective_moderation_snapshot, moderation_chain_ref, draw_key_snapshot, tie_break_rank, point_history_id; UK(settlement_id, crew_participant_id); nullable UK(point_history_id); IDX(member_id).
-    %% SETTLEMENT_ITEM note: participant snapshot; refund_amount is the persisted per-item payout source of truth and API final_amount/remainder_winner_crew_participant_id are read-only projection/convenience fields, not payout authority; remainder_winner_crew_participant_id points to the fixed HOST_REMAINDER host recipient. base_refund_amount is the FLOOR-applied base refund before remainder bonus; remainder_bonus_amount is the deterministic HOST_REMAINDER host-item remainder; invariant: refund_amount = base_refund_amount + remainder_bonus_amount. draw_key_snapshot is non-payout ordering context only. effective_moderation_snapshot/moderation_chain_ref are read-only audit/replay context, not payout/recalculation authority.
+    %% SETTLEMENT_ITEM note: participant snapshot; refund_amount is the persisted per-item payout source of truth and API final_amount is a read-only projection/convenience field, not payout authority. base_refund_amount is the FLOOR-applied base refund before remainder bonus; remainder_bonus_amount is the deterministic HOST_REMAINDER host-item remainder snapshot (no separate remainder_winner persisted column or active response field); invariant: refund_amount = base_refund_amount + remainder_bonus_amount. draw_key_snapshot is non-payout ordering context only. effective_moderation_snapshot/moderation_chain_ref are read-only audit/replay context, not payout/recalculation authority.
     %% SETTLEMENT_ITEM enum: participant_status_snapshot is frozen LOCKED for MVP active settlement.
 
     MEMBER ||--o{ MEMBER_REFRESH_TOKEN : has

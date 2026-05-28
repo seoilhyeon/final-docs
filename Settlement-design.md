@@ -400,7 +400,7 @@ where id = :settlementId
 - `total_locked_amount`는 `point_history`나 `point_account`를 다시 합산해 계산하지 않는다.
 - MVP에서는 별도 `total_active_participants` 컬럼을 두지 않고, 필요 시 조회/분석용 후속 검토 항목으로 남긴다.
 - `algorithm_version`과 rule interpretation snapshot은 versioned semantic replay를 위한 설명/감사 context다. 이 값들은 historical semantics를 reconstruct하기 위한 기준이며, succeeded settlement를 현재 엔진 기준으로 다시 쓰는 migration hook이 아니다.
-- `remainder_policy`는 all-fail/remainder policy snapshot 역할도 수행한다. MVP concrete value `HOST_REMAINDER`는 deterministic host remainder recipient policy이며, host/winner/draw payout authority를 부활시키지 않는다. `remainder_winner_crew_participant_id` 같은 response convenience pointer는 fixed policy 결과를 설명하는 read-only surface일 뿐, host가 금액·수령자·원장을 결정했다는 뜻이 아니다.
+- `remainder_policy`는 all-fail/remainder policy snapshot 역할도 수행한다. MVP concrete value `HOST_REMAINDER`는 deterministic host remainder recipient policy이며, host/winner/draw payout authority를 부활시키지 않는다. host item에 배정된 remainder 금액은 `settlement_item.remainder_bonus_amount` 스냅샷으로만 확인하며, persisted payout authority는 `settlement_item.refund_amount`와 연결된 `point_history`다. 별도 `remainder_winner_*` persisted column이나 active response field를 두지 않는다.
 
 ### 7.2 `settlement_item`
 
