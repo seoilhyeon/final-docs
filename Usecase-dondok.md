@@ -217,8 +217,8 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 - **Actors**: Host, system
 - **Classification**: actor-performed usecase (Host setup action; no lifecycle/settlement authority granted)
 - **Preconditions**: Host authenticated; mission/deposit/recruitment inputs valid.
-- **Main Flow**: Host creates a crew with mission rules, deposit amount, schedule, recruitment window, participant limits, and visibility. The same transaction auto-creates the host's own `crew_participant` row as `LOCKED` and reserves/locks the host's deposit identically to a regular participant; the host does not go through the join-request/approval flow.
-- **Failure Flow**: Invalid dates, invalid deposit, contradictory participant limits, or insufficient host balance for the host's own deposit reserve prevent creation; partial commits are not allowed.
+- **Main Flow**: Host creates a crew with mission rules, deposit amount, schedule, recruitment window, participant limits, and visibility. The same transaction auto-creates the host's own `crew_participant` row as `LOCKED` and locks the host deposit directly into the locked bucket; the host does not go through the join-request/approval flow or a `PENDING` reserve state.
+- **Failure Flow**: Invalid dates, invalid deposit, contradictory participant limits, or insufficient host balance for the host's own deposit lock prevent creation; partial commits are not allowed.
 - **Authority Boundary**: Host configures initial context and is simultaneously a participant under the same `crew_participant` model, but does not gain lifecycle, settlement, ledger, or remainder authority from being host. Host auto-participation is a UX shortcut, not a privilege.
 - **Projection Impact**: No performance projection yet; only setup/recruitment state can be displayed.
 - **Settlement Impact**: The host's auto-created `LOCKED` participant is a baseline candidate identical to other `LOCKED` participants; the host is also a final settlement target.

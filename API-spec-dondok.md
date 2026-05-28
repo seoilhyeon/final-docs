@@ -633,9 +633,10 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 - `start_date`, `end_date`는 서버에서 `Asia/Seoul` 기준 `start_at`, `end_at`으로 변환한다.
 - `RECRUITING → ACTIVE` 전환은 `start_at`에 시스템이 자동으로 수행한다. host/admin manual 전환은 없다.
 - 크루 생성 트랜잭션은 `crew` row insert와 함께 호스트용 `crew_participant` row를 `status=LOCKED`로 자동 생성하고, `CREW_DEPOSIT_RESERVE point_history` row를 함께 insert한다. 호스트는 별도 `POST /api/crews/{crewId}/participants` 신청 + 방장 승인 흐름을 거치지 않는다.
-- 호스트 잔액이 `crew.deposit_amount` 미만이면 reserve가 실패하므로 크루 생성 자체를 `INSUFFICIENT_BALANCE`로 거절한다. 호스트에게 별도 보증금 면제/예외는 없다.
+- host auto-created `LOCKED` participant의 보증금은 생성 트랜잭션에서 `point_account.available_balance -= crew.deposit_amount` / `locked_balance += crew.deposit_amount`로 직접 반영한다. host는 처음부터 `LOCKED`이므로 `PENDING` reserve bucket을 거치지 않는다.
+- 호스트 잔액이 `crew.deposit_amount` 미만이면 lock 처리가 실패하므로 크루 생성 자체를 `INSUFFICIENT_BALANCE`로 거절한다. 호스트에게 별도 보증금 면제/예외는 없다.
 - 호스트 auto-created `LOCKED` participant는 일반 `LOCKED` 참여자와 동일하게 capacity, `min_participants` baseline, activation eligibility, frozen participant baseline, settlement eligibility에 포함되며 최종 정산 대상이다.
-- 호스트의 `CREW_DEPOSIT_RESERVE` 원장은 일반 신청 reserve와 동일한 `transaction_type`을 사용하며 별도 `HOST_*` enum/type을 만들지 않는다.
+- 호스트의 `CREW_DEPOSIT_RESERVE` 원장은 일반 신청 reserve와 동일한 `transaction_type`을 사용하지만 bucket destination은 `locked_balance`다. 별도 `HOST_*` enum/type을 만들지 않는다.
 - 응답의 `my_participation`은 호스트 본인의 auto-created `LOCKED` participant snapshot이다.
 
 ---
@@ -684,7 +685,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 **정책**
 
 - `my_participation`은 참여 이력이 없으면 `null`이다.
-- `settlement_status`는 조회 편의용 projection이며, 정산 상태의 원천은 `Settlement.status`다.
+- `settlement_status`는 조회 편의용 API/read-model projection이며 `crew` 저장 컬럼이 아니다. 조회 대상 `Settlement` row가 없으면 `NONE`, row가 있으면 해당 `Settlement.status`를 노출한다. `NONE`은 API projection-only 값이며 DB `settlement.status` enum에 저장하지 않고, 정산 상태의 원천은 항상 `Settlement.status`다.
 
 ---
 
@@ -721,7 +722,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 **정책**
 
 - `RECRUITING` 상태이고 `recruitment_deadline` 이전일 때만 신청 가능하다.
-- 신청 시 `deposit_amount`만큼 잔액을 reserve한다.
+- 일반 참여 신청 시 `deposit_amount`만큼 `available_balance`를 차감해 `reserved_balance`로 reserve한다.
 - `PENDING` 상태는 capacity에 포함하나 정산 대상은 아니다.
 - `CANCELLED` 상태(자진 취소)에서는 재신청이 허용된다. 재신청 조건은 일반 신청과 동일하다: `crew.status = RECRUITING` + 서버 시간이 `recruitment_deadline` 전 + capacity 가능(`PENDING + LOCKED < max_participants`) + reserve 가능(`available_balance >= crew.deposit_amount`). 재신청 시 새 row를 생성하지 않고 기존 `crew_participant` row를 `CANCELLED → PENDING`으로 reopen한다(row resurrection / in-place reopen semantics). `unique(crew_id, member_id)` 제약은 그대로 유지되며 soft delete나 제약 완화 없이 기존 row를 그대로 재사용한다. reopen 시 `released_point_history_id`를 `null`로 reset하고 `pending_at`을 현재 시각으로 갱신한다. 보증금 reserve는 `point_history` append-only 방식으로 새 cycle을 추가하며, idempotency key는 `crew:{crewId}:participant:{participantId}:reserve:{cycle}` 형식으로 cycle별 구분한다.
 - `REJECTED`, `EXPIRED` 상태에서 재신청은 `APPLICATION_NOT_ALLOWED`로 거절한다. MVP에서는 이 두 상태에서 재참여/row 재사용/status 되돌리기를 허용하지 않는다.
@@ -922,7 +923,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 
 | 단계 | 처리 |
 | --- | --- |
-| 크루 생성 (`POST /api/crews`) | host auto-created `LOCKED` participant 생성 + `CREW_DEPOSIT_RESERVE` point_history insert를 같은 트랜잭션에서 처리 |
+| 크루 생성 (`POST /api/crews`) | host auto-created `LOCKED` participant 생성 + `available_balance → locked_balance` bucket update + `CREW_DEPOSIT_RESERVE` point_history insert를 같은 트랜잭션에서 처리 |
 | 일반 참여 신청 (`POST participants`) | `PENDING` row 생성과 함께 `deposit_amount` reserve (`available_balance → reserved_balance`) |
 | 승인 (`approve`) | 추가 잔액 차감 없이 기존 reserve를 `LOCKED`로 확정 (`reserved_balance → locked_balance` bucket transition만 수행, 새 `point_history` row 생성 안 함) |
 | 취소 / 거절 / 만료 | `CREW_RESERVE_RELEASE` point_history로 잔액 복구 (`reserved_balance → available_balance`)를 같은 트랜잭션에서 처리 |
@@ -1924,7 +1925,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 - Dashboard는 `Settlement.status = SUCCEEDED` 전까지 최종 정산 결과가 아니며, 정산 source of truth가 아니다.
 - Dashboard projection과 최종 settlement 결과가 달라도 시스템 오류로 간주하지 않는다.
 - `projection_status`, `projection_notice`는 API 응답용 값이며 DB enum이나 도메인 상태 원천으로 저장하지 않는다.
-- `settlement_status = NONE`은 해당 방의 `Settlement` row가 아직 없다는 뜻이며, Dashboard projection을 계산할 수 없다는 의미가 아니다.
+- `settlement_status`는 API/read-model projection이며 `crew` 저장 컬럼이 아니다. `settlement_status = NONE`은 해당 방의 `Settlement` row가 아직 없다는 뜻이고 DB `settlement.status` enum 값이 아니며, Dashboard projection을 계산할 수 없다는 의미가 아니다.
 - `my_share_ratio_estimated`는 소수 오해 방지를 위해 string decimal로 반환한다.
 - 적용 불가 필드는 생략하지 않고 `null`로 반환한다.
 - Dashboard는 정산의 `remainder`, `remainder_policy`, deterministic remainder allocation, 1원 단위 잔액 처리를 계산하거나 반영하지 않는다. 해당 최종 지급 차이는 Settlement API에서만 확인한다.
@@ -2471,11 +2472,11 @@ GET /api/points/history?limit=20&cursor=2026-05-07T09:30:00+09:00_3001
 | 도메인 동작 | `transaction_type` | `reference_type` | `reference_id` | `idempotency_key` |
 |---|---|---|---|---|
 | 포인트 충전 | `POINT_CHARGE` | `POINT_CHARGE` | 생성된 `point_history.id` | `charge:{paymentKey}` |
-| 크루 참여 보증금 reserve | `CREW_DEPOSIT_RESERVE` | `CREW_PARTICIPANT` | `crew_participant.id` | `crew:{crewId}:participant:{participantId}:reserve:{cycle}` |
+| 크루 참여 보증금 reserve/lock event | `CREW_DEPOSIT_RESERVE` | `CREW_PARTICIPANT` | `crew_participant.id` | `crew:{crewId}:participant:{participantId}:reserve:{cycle}` |
 | PENDING reserve 반환 | `CREW_RESERVE_RELEASE` | `CREW_PARTICIPANT` | `crew_participant.id` | `crew:{crewId}:participant:{participantId}:reserve-release:{cycle}` |
 | 일반 정산 환급 | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM` | `settlement_item.id` | `crew:{crewId}:participant:{participantId}:settlement-refund:{settlementId}` |
 
-- `CREW_DEPOSIT_RESERVE`는 자산 이동이 아니라 reserve lock 이벤트다(`available_balance -= deposit_amount` / `reserved_balance += deposit_amount`). 일반 참여자의 `PENDING` 신청과 호스트 auto-participation reserve가 같은 `transaction_type`을 사용한다.
+- `CREW_DEPOSIT_RESERVE`는 자산 이동이 아니라 보증금 reserve/lock 이벤트다. 일반 참여자의 `PENDING` 신청은 `available_balance -= deposit_amount` / `reserved_balance += deposit_amount`이고, host auto-created `LOCKED` 참여는 `available_balance -= deposit_amount` / `locked_balance += deposit_amount`다. 두 경우 모두 같은 `transaction_type`을 사용하며 별도 host 전용 transaction type을 만들지 않는다.
 - 승인 시점 `PENDING → LOCKED` 전이는 `reserved_balance → locked_balance` bucket transition만 수행하며 새 `point_history` row를 만들지 않는다.
 - `{cycle}`은 `CANCELLED → PENDING` reopen 시 증가하여 이전 사이클과 중복 처리를 방지한다. 최초 생성은 cycle `1`이며, 사이클 numbering은 implementation detail이다.
 

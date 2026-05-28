@@ -85,7 +85,7 @@
 - `ACTIVE` 이후 신규 참여와 baseline 변경은 허용하지 않는다.
 - ACTIVE 이후 탈퇴/재참여 및 중도 탈퇴 정산은 MVP active semantics가 아니라 Deferred/Brownfield historical/reference-only 영역으로 남긴다. 기존 문서/구현 흔적이 있더라도 `LOCKED` frozen baseline을 바꾸는 권한으로 해석하지 않는다.
 - frozen participant baseline은 `start_at` 자동 activation 시점에 `LOCKED`인 participant 집합이다. 이 baseline은 final settlement input으로 사용되며 post-freeze에 host/admin이 소급 변경하지 않는다.
-- 크루 생성 시점에 호스트 본인도 같은 transaction에서 `crew_participant` row를 `LOCKED`로 자동 생성하고 `crew.deposit_amount`만큼 reserve/lock한다. 호스트 auto-created `LOCKED` row는 일반 `LOCKED` 참여자와 동일하게 frozen participant baseline에 포함되며 `deposit_amount` snapshot과 `settlement_item` 대상이 된다. 호스트라는 사실은 moderation/operation role anchor이며, MVP `HOST_REMAINDER` fixed policy의 deterministic recipient reference가 될 수는 있지만 settlement amount privilege / discretionary remainder authority / ledger authority가 아니다. 호스트도 일반 참여자와 동일한 정산 규칙으로 환급/소실을 산정한다.
+- 크루 생성 시점에 호스트 본인도 같은 transaction에서 `crew_participant` row를 `LOCKED`로 자동 생성하고 `crew.deposit_amount`만큼 `available_balance -> locked_balance`로 직접 lock한다. 호스트 auto-created `LOCKED` row는 일반 `LOCKED` 참여자와 동일하게 frozen participant baseline에 포함되며 `deposit_amount` snapshot과 `settlement_item` 대상이 된다. 호스트라는 사실은 moderation/operation role anchor이며, MVP `HOST_REMAINDER` fixed policy의 deterministic recipient reference가 될 수는 있지만 settlement amount privilege / discretionary remainder authority / ledger authority가 아니다. 호스트도 일반 참여자와 동일한 정산 규칙으로 환급/소실을 산정한다.
 
 ### 3.3 `min_participants` 정책
 
@@ -155,7 +155,7 @@
 
 - `MissionRoom.status`는 방의 상태를 말한다.
 - `Settlement.status`는 정산 처리 상태를 말한다.
-- `MissionRoom.settlement_status`가 필요하다면 조회 최적화용 비정규화 필드로만 둔다.
+- `MissionRoom`/`crew`의 `settlement_status`는 저장 컬럼이 아니라 API/read-model projection이다.
 - 운영 판단, 재시도 가능 여부, 배치 대상 여부의 원천 상태는 항상 `Settlement.status`다.
 - 포인트 금액 판단의 원천은 `point_history`이고, `point_account.available_balance` / `reserved_balance` / `locked_balance`는 재계산 가능한 캐시다.
 - `member`는 사용자 식별·인증 책임만 가진다. `point_account` physical account shape는 `available_balance`, `reserved_balance`, `locked_balance` 세 컬럼으로 고정한다.
@@ -218,24 +218,26 @@ MissionRoom 종료/취소 감지
 - 일부 participant 지급만 완료됐거나 원장-FK 연결이 누락된 partial 상태는 복구 가능한 중간 상태이며, `SUCCEEDED`가 아니라 `RETRY_WAIT` 또는 `FAILED`로 남긴다.
 - `RETRY_WAIT`/`FAILED`에서 retry가 갖는 권한은 unfinished execution completion authority다. 이미 authoritative하게 append된 ledger/item/snapshot은 그대로 두고, 누락된 item completion 또는 FK linkage만 idempotent하게 완료한다.
 
-### 5.3 비정규화된 `MissionRoom.settlement_status`
+### 5.3 API/read-model `settlement_status` projection
 
-필요하다면 `MissionRoom`에 아래 값을 둘 수 있다.
+`MissionRoom.settlement_status`/`crew.settlement_status`는 DB 저장 컬럼이 아니다. API와 read model은 조회 대상 방의 settlement row 존재 여부와 `Settlement.status`에서 아래 값을 파생할 수 있다.
 
-| 값           | 설명                     |
-| ------------ | ------------------------ |
-| `NONE`       | 아직 정산 없음           |
-| `PENDING`    | 조회 최적화용 projection |
-| `RUNNING`    | 조회 최적화용 projection |
-| `SUCCEEDED`  | 조회 최적화용 projection |
-| `FAILED`     | 조회 최적화용 projection |
-| `RETRY_WAIT` | 조회 최적화용 projection |
+| Projection 값 | 파생 기준 |
+| -------------- | --------- |
+| `NONE`         | 조회 대상 settlement row가 없음 |
+| `PENDING`      | 조회 대상 `Settlement.status = PENDING` |
+| `RUNNING`      | 조회 대상 `Settlement.status = RUNNING` |
+| `SUCCEEDED`    | 조회 대상 `Settlement.status = SUCCEEDED` |
+| `FAILED`       | 조회 대상 `Settlement.status = FAILED` |
+| `RETRY_WAIT`   | 조회 대상 `Settlement.status = RETRY_WAIT` |
 
-단, 이 필드는 아래 원칙을 따른다.
+원칙:
 
-- 조회와 목록 필터 성능을 위한 캐시성 필드다.
+- `NONE`은 API projection-only 값이며 DB `settlement.status` enum에 저장하지 않는다.
+- `NULL`을 “정산 없음” 의미 상태로 사용하지 않는다.
+- `crew`/`MissionRoom` entity에는 `settlement_status` 저장 컬럼을 두지 않는다.
 - 정산 처리의 조건 판단은 항상 `Settlement.status`를 기준으로 한다.
-- `MissionRoom.settlement_status`와 `Settlement.status`가 어긋나면 `Settlement.status`를 신뢰한다.
+- API/read-model projection과 `Settlement.status`가 어긋나면 `Settlement.status`를 신뢰한다.
 
 ## 6. 정산 배치 처리 흐름
 
@@ -283,7 +285,7 @@ MissionRoom 상태가 RECRUITING -> CANCELLED
 - `retry_count < 3`
 - `finished_at is null` 또는 재시도 대상 상태
 
-배치는 더 이상 `MissionRoom.status + settlement_status` 조합을 원천 조건으로 사용하지 않는다. 방 상태는 검증용 컨텍스트일 뿐, 실제 실행 대상은 `Settlement` 행이다.
+배치는 더 이상 `MissionRoom.status + settlement_status projection` 조합을 원천 조건으로 사용하지 않는다. 방 상태는 검증용 컨텍스트일 뿐, 실제 실행 대상은 `Settlement` 행이다.
 
 ### 6.3 claim과 실행 순서
 
@@ -531,8 +533,9 @@ MVP `calculation_reason` vocabulary:
 - `PointAccount` 또는 `MemberPoint` 같은 현재 잔액 테이블이 있다면, 이 값은 항상 `사용 가능한 포인트 잔액`만 나타내는 재계산 가능한 캐시다.
 - MVP balance model은 `available_balance`(즉시 사용 가능), `reserved_balance`(`PENDING` 신청 reserve), `locked_balance`(`LOCKED` 크루 보증금)로 노출한다. `settlement_pending_amount`는 종료 후 최종 정산 전 `LOCKED` 금액을 보여주는 wallet/projection 응답 필드이며 DB/account column이 아니다. 별도 `settlement_pending_balance` persisted column은 두지 않는다.
 - 현재 잔액 캐시와 운영 검증 결과가 다르면 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage, `point_account` cached balances를 함께 대조해 원인을 조사하고 잔액 캐시를 보정하거나 재생성한다. 승인 bucket transition은 ledger row 없이 처리된다.
-- 보증금 reserve는 `point_account.available_balance`에서 차감되고 `reserved_balance`에 반영되며, 승인 시 `locked_balance` bucket으로 전이된다.
-- `CREW_DEPOSIT_RESERVE`는 `PENDING` 신청 reserve 생성 이벤트다. 승인은 bucket/state transition이며 새 원장 이벤트를 만들지 않는다.
+- 일반 참여자의 `PENDING` 신청 reserve는 `point_account.available_balance`에서 차감되고 `reserved_balance`에 반영되며, 승인 시 `reserved_balance -> locked_balance` bucket으로 전이된다.
+- `POST /api/crews` 시점의 host auto-created `LOCKED` participant 보증금은 `PENDING` reserve bucket을 거치지 않고 `point_account.available_balance`에서 차감되어 `locked_balance`에 직접 반영된다.
+- `CREW_DEPOSIT_RESERVE`는 일반 `PENDING` 신청 reserve와 host auto-lock deposit event를 모두 기록하는 transaction type이다. bucket destination은 participant 생성/전이 상태에 따라 일반 `PENDING`은 `reserved_balance`, host auto-created `LOCKED`는 `locked_balance`다. 승인은 bucket/state transition이며 새 원장 이벤트를 만들지 않는다.
 - 정산 또는 취소 시점에만 해당 잠금 금액이 환급되며, 환급은 `point_history`를 통해 `member` 계정 잔액에 다시 반영된다.
 - `point_history` insert와 `point_account` balance bucket 갱신은 동일 트랜잭션에서 처리한다.
 - 정산 지급의 `reference_type + reference_id`는 어느 `settlement_item`에서 발생했는지 추적 가능해야 한다.
@@ -560,17 +563,18 @@ MVP `calculation_reason` vocabulary:
 - 포인트 충전은 `point_account.available_balance`를 증가시키는 일반 잔액 충전으로 처리한다.
 - Implementation policy: `point_account`는 `available_balance`, `reserved_balance`, `locked_balance`를 persisted cache/source로 둔다. `settlement_pending_amount`는 projection-only이며 `settlement_pending_balance` 컬럼은 두지 않는다.
 - `point_account`는 `member`와 분리해 사용자 식별·인증 책임과 포인트 잔액 bucket 갱신 책임을 나눈다.
-- 크루 참여 시 보증금은 별도 자산으로 이동하지 않고, `available_balance`에서 차감되어 `reserved_balance`와 해당 `crew_participant.deposit_amount`에 participant 단위 reserve 금액으로 기록된다.
+- 일반 참여 신청 시 보증금은 별도 자산으로 이동하지 않고, `available_balance`에서 차감되어 `reserved_balance`와 해당 `crew_participant.deposit_amount`에 participant 단위 reserve 금액으로 기록된다. host auto-created `LOCKED` participant는 신청/승인 플로우를 거치지 않으므로 `available_balance -> locked_balance`로 직접 반영된다.
 - 보증금 잠금 상태는 `point_account.locked_balance` persisted cache/source와 `crew_participant.deposit_amount` 기록으로 표현한다.
 - 사용자에게 보여줄 `GET /api/points.locked_balance`는 persisted `point_account.locked_balance`를 기준으로 하며, `active_locked_amount`와 `settlement_pending_amount`는 projection-only split field다. `active_locked_amount`는 모집/진행 중 crew의 `LOCKED` 금액, `settlement_pending_amount`는 종료 후 최종 정산 전 crew의 `LOCKED` 금액이다.
 - 이 projection은 UX 표시용이며 정산 계산, 포인트 원장, 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단의 source of truth가 아니다.
 - MVP projection은 `crew_participant.deposit_amount`와 `crew.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')`를 기준으로 시작하며, settlement 조인을 강제하지 않는다.
 - `CLOSED` 포함은 post-mission pre-settlement 금액을 `settlement_pending_amount`로 보여주되 `locked_balance` 안에 남기기 위한 근사값이다. `Settlement.status = SUCCEEDED` 이후 lock 해제 여부를 더 정확히 제외하는 조건은 Settlement 조회/정산 구현 단계에서 보강할 수 있다.
 - 정산 계산의 입력 금액은 여전히 정산 대상 participant의 `crew_participant.deposit_amount` 합계다.
-- 보증금 reserve는 `point_account`에 대한 조건부 update로 수행한다. 즉, `WHERE available_balance >= deposit_amount` 조건을 포함해 사용 가능 잔액이 충분할 때만 `available_balance`를 차감하고 `reserved_balance`를 증가시킨다.
+- 일반 `PENDING` 보증금 reserve는 `point_account`에 대한 조건부 update로 수행한다. 즉, `WHERE available_balance >= deposit_amount` 조건을 포함해 사용 가능 잔액이 충분할 때만 `available_balance`를 차감하고 `reserved_balance`를 증가시킨다.
+- host auto-created `LOCKED` participant 보증금 처리는 같은 잔액 충분성 조건을 적용하되 `reserved_balance`가 아니라 `locked_balance`를 증가시킨다.
 - 이 update의 row count가 `1`일 때만 잠금 성공으로 간주하고, `0`이면 동시 요청 또는 잔액 부족으로 보고 참여를 실패 처리한다.
-- 보증금 reserve 처리, `crew_participant` 생성, `CREW_DEPOSIT_RESERVE` 원장 생성은 반드시 하나의 트랜잭션으로 처리한다.
-- 권장 순서는 `point_account.available_balance` 조건부 차감 및 `reserved_balance` 증가 -> `crew_participant` 생성 및 `deposit_amount` 반영 -> `CREW_DEPOSIT_RESERVE point_history` 생성이다.
+- 보증금 reserve/lock 처리, `crew_participant` 생성, `CREW_DEPOSIT_RESERVE` 원장 생성은 반드시 하나의 트랜잭션으로 처리한다.
+- 일반 `PENDING` 신청의 권장 순서는 `point_account.available_balance` 조건부 차감 및 `reserved_balance` 증가 -> `crew_participant` 생성 및 `deposit_amount` 반영 -> `CREW_DEPOSIT_RESERVE point_history` 생성이다. host auto-created `LOCKED` 생성은 `reserved_balance` 증가 대신 `locked_balance` 증가를 같은 트랜잭션에서 수행한다.
 - 위 세 단계 중 하나라도 실패하면 전체 롤백한다. 잔액만 차감되고 participant가 생성되지 않거나, participant만 생기고 원장이 누락되는 상태를 허용하지 않는다.
 - `PENDING -> CANCELLED/REJECTED/EXPIRED` 전이와 reserve release는 같은 transaction에서 처리한다. reserve release는 `crew_participant.id`의 현재 사이클당 한 번만 허용하며, 구현은 `released_point_history_id`를 현재 사이클의 reserve-release ledger evidence로 사용한다. `CANCELLED -> PENDING` reopen 시 같은 transaction에서 `released_point_history_id`를 `null`로 reset하고 새 `CREW_DEPOSIT_RESERVE point_history` row를 append-only로 추가해 다음 사이클을 시작한다. 직전 `CREW_RESERVE_RELEASE` row는 audit으로 유지된다.
 - ACTIVE withdrawal은 MVP active semantics가 아니라 Deferred/Brownfield historical/reference-only다. 향후 재도입하더라도 `deposit_amount` 즉시 환급이나 frozen settlement input 변경으로 해석하지 않는다.

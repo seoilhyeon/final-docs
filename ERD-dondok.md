@@ -45,7 +45,7 @@ MVP canonical server timezone authority는 `Asia/Seoul` (`KST`)이다. Lifecycle
 
 - `crew_participant`는 물리 삭제하지 않고 participation lifecycle 상태로 관리한다. MVP 활성 기준에서는 `LOCKED`만 minimum baseline, activation eligibility, frozen participant baseline, settlement 대상 후보다. `PENDING`/`REJECTED`/`CANCELLED`/`EXPIRED`는 baseline/settlement 대상이 아니다. `CANCELLED` row는 RECRUITING phase 안에서 동일 사용자의 재신청 시 `CANCELLED -> PENDING`으로 reopen될 수 있는 reusable row이며, 신규 row 생성 없이 기존 row를 그대로 재사용한다. `REJECTED`/`EXPIRED`는 reopen 대상이 아니다. `WITHDRAWN`/active withdrawal/rejoin은 MVP active status가 아니고 Deferred/Brownfield/Removed historical/reference-only로만 남긴다.
 - `mission_log`, `settlement`, `settlement_item`, `point_history`는 감사 추적을 위해 append-only에 가깝게 다룬다.
-- `crew.settlement_status`는 필요 시 조회 최적화용 비정규화 필드로 둘 수 있지만, 원천 상태는 항상 `settlement.status`다.
+- `crew.settlement_status`는 저장 컬럼이 아니라 API/read-model projection이다. 원천 상태는 항상 `settlement.status`다.
 
 ### 1.5 Unique 제약 원칙
 
@@ -338,7 +338,7 @@ Unique / Index:
 
 주의사항:
 
-- reserve 생성은 `available_balance -= deposit_amount`, `reserved_balance += deposit_amount`로 처리한다.
+- 일반 `PENDING` reserve 생성은 `available_balance -= deposit_amount`, `reserved_balance += deposit_amount`로 처리한다. host auto-created `LOCKED` 보증금은 `available_balance -= deposit_amount`, `locked_balance += deposit_amount`로 직접 처리한다.
 - 승인(`PENDING -> LOCKED`)은 `reserved_balance -= deposit_amount`, `locked_balance += deposit_amount` bucket/state transition이다. 승인 시 새 `point_history` transaction type을 만들지 않는다.
 - reserve release는 terminal 전이와 같은 transaction에서 `reserved_balance -= deposit_amount`, `available_balance += deposit_amount`로 처리한다.
 - final settlement refund는 `locked_balance -= deposit_amount`와 환급 결과에 따른 `available_balance` 증가를 `point_history`와 같은 transaction에서 처리한다.
@@ -394,14 +394,14 @@ Unique / Index:
 | 도메인 동작             | `transaction_type`       | `reference_type`   | `reference_id` 규칙                                                                                                                             |
 | ------------------------ | ------------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | 포인트 충전              | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. |
-| 신청 reserve             | `CREW_DEPOSIT_RESERVE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
+| 보증금 reserve/lock event | `CREW_DEPOSIT_RESERVE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
 | PENDING reserve release  | `CREW_RESERVE_RELEASE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
 | 일반 정산 환급           | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                                            |
 
 주의사항:
 
 - 모든 포인트 변경은 항상 `member_id` 기준으로 기록한다.
-- `CREW_DEPOSIT_RESERVE`는 `PENDING` 신청 reserve 생성 이벤트다.
+- `CREW_DEPOSIT_RESERVE`는 일반 참여자의 `PENDING` 신청 reserve와 host auto-created `LOCKED` 보증금 lock event를 모두 기록한다. bucket destination은 participant status에 따라 일반 `PENDING`은 `reserved_balance`, host auto-created `LOCKED`는 `locked_balance`다.
 - `CREW_RESERVE_RELEASE`는 `PENDING -> REJECTED/CANCELLED/EXPIRED` 전이와 같은 transaction에서 reserve를 반환하는 이벤트다. `CANCELLED` row가 이후 reopen되어 새 `CREW_DEPOSIT_RESERVE`가 발행되어도 직전 `CREW_RESERVE_RELEASE` row는 append-only audit으로 유지되며, 매 사이클마다 별도 `point_history` row가 추가된다.
 - `CREW_SETTLEMENT_REFUND`는 일반 정산 환급 이벤트다.
 - `available_after`, `reserved_after`, `locked_after`는 reconciliation/debugging snapshot이며, append-only ledger ordering과 idempotency보다 우선하는 source of truth가 아니다.
@@ -441,7 +441,6 @@ Unique / Index:
 | `start_at`                | `DATETIME(6)`  | N        | 예정 시작 시각 / system auto-activation 기준 시각               |
 | `activated_at`            | `DATETIME(6)`  | Y        | 실제 ACTIVE 전이 시각                                           |
 | `end_at`                  | `DATETIME(6)`  | N        | 계획된 미션 종료 cutoff                                         |
-| `settlement_status`       | `VARCHAR(20)`  | Y        | 조회 최적화용 비정규화 필드                                     |
 | `created_at`              | `DATETIME(6)`  | N        | 생성 시각                                                       |
 | `updated_at`              | `DATETIME(6)`  | N        | 수정 시각                                                       |
 
@@ -464,7 +463,7 @@ Unique / Index:
 상태값 / Enum:
 
 - `status`: `RECRUITING`, `ACTIVE`, `CLOSED`, `CANCELLED`
-- `settlement_status`: `NONE`, `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `RETRY_WAIT`
+- `settlement_status`는 `crew` 저장 컬럼/DB enum이 아니다. API/read-model projection 값으로만 `NONE`, `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `RETRY_WAIT`를 노출할 수 있다.
 
 주의사항:
 
@@ -473,7 +472,7 @@ Unique / Index:
 - `start_at`은 예정 시작 시각이자 MVP system auto-activation 기준 시각이다. 실제 lifecycle/정산/log/projection anchor는 `activated_at`이며, MVP invariant는 `activated_at = start_at` 또는 system auto-activation timestamp다.
 - `activated_at`은 host command timestamp가 아니다. `ACTIVE`/`CLOSED` 방에서는 system authority에 의해 ACTIVE가 된 시각이어야 하며, host moderation authority와 settlement/activation authority를 혼동하지 않는다.
 - `end_at`은 계획된 미션 종료 cutoff이며 activation 지연으로 자동 이동하지 않는다.
-- `settlement_status`는 있더라도 조회 최적화용이다. 정산 처리 원천 상태는 `settlement.status`다.
+- `settlement_status`는 API/read-model projection이며 `crew` entity의 저장 컬럼이 아니다. 조회 대상 settlement row가 없으면 projection `NONE`, row가 있으면 해당 `Settlement.status`를 노출한다. `NONE`은 DB `settlement.status` enum에 저장하지 않고, `NULL`을 “정산 없음” 의미 상태로 사용하지 않는다.
 - `deposit_amount`는 방 규칙의 기본 보증금이고, 실제 정산 원천 금액은 `crew_participant.deposit_amount`를 사용한다.
 - `category`는 생성 시 필수이며 catalog/enum 형태(고정 enum / managed catalog / free string)는 deferred decision이다. 현재 ERD는 컬럼 존재만 freeze하고 값 catalog는 freeze하지 않는다.
 - `host_agreement_snapshot`은 호스트 책임 동의서의 당시 표현을 audit-grade로 저장한다. payload shape는 deferred decision이고, 이 컬럼은 호스트 권한 확장 근거나 settlement authority가 아니다. `host_agreement_version`은 시점별 약관 표현 추적용 label, `host_agreed_at`은 동의 시각이다.
@@ -666,7 +665,7 @@ Unique / Index:
 - `REJECTED`, `EXPIRED`는 terminal 상태다. 동일 `member`가 같은 `crew`에 재신청을 시도하면 status guard로 차단되며 API는 `APPLICATION_NOT_ALLOWED`로 reject한다. `REJECTED`/`EXPIRED` row의 status 되돌리기/row 재사용은 MVP에서 허용하지 않는다.
 - `CANCELLED`는 reopen 가능한 pre-start exit 상태다. 동일 `member`가 같은 `crew`에 재신청을 시도하면 `crew.status = RECRUITING` + 서버 시간이 `recruitment_deadline` 전 + capacity 가능 + reserve 가능일 때 기존 row를 `CANCELLED -> PENDING`으로 in-place transition한다. 새 row를 생성하지 않으며 `unique(crew_id, member_id)`를 유지한다. host auto-created `LOCKED` row는 reopen 경로에 포함되지 않는다.
 - `PENDING`은 신청 제출 + 예치금 reserve 상태다. capacity reservation에는 포함하지만 최소 인원 baseline, activation eligibility, frozen participant baseline, settlement 대상에는 포함하지 않는다.
-- `LOCKED`는 방장 승인으로 reserve가 참여 확정된 상태다. 최소 인원 baseline, activation eligibility, frozen participant baseline, settlement 대상에는 `LOCKED`만 포함한다.
+- `LOCKED`는 방장 승인 또는 host auto-created 참여로 보증금이 locked bucket에 확정된 상태다. 최소 인원 baseline, activation eligibility, frozen participant baseline, settlement 대상에는 `LOCKED`만 포함한다.
 - `REJECTED`는 방장이 신청을 거절한 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
 - `CANCELLED`는 사용자가 승인 전 `PENDING` 상태에서 신청을 취소한 pre-start exit 상태다. 기존 reserve는 취소 환급 원장으로 반환한다. `CANCELLED`는 reopen 가능 상태이며, 같은 사용자가 같은 크루에 재신청 시 `CANCELLED -> PENDING`으로 in-place 전이되어 row가 재사용된다. reopen 시 새 `CREW_DEPOSIT_RESERVE point_history` row가 append-only로 추가되고, `crew_participant.released_point_history_id`는 다시 `null`로 reset되어 다음 사이클 release를 받을 수 있는 상태가 된다. `pending_at`은 reopen 시각으로 갱신되며, 직전 `cancelled_at`은 in-place 전이 시 audit 용도로 그대로 둘지 갱신할지에 대한 latest-effective overwrite 규칙은 구현 단계에서 정한다(컨벤션: 최신 effective transition 시각만 유지하는 latest-effective overwrite 채택).
 - `EXPIRED`는 시작 전까지 처리되지 않아 자동 만료된 terminal 상태다. 기존 reserve는 취소 환급 원장으로 반환한다.
@@ -674,11 +673,11 @@ Unique / Index:
 - `approved_at` 컬럼은 만들지 않는다. 승인 evidence는 `LOCKED` status와 `locked_at`이다.
 - 승인 후 lock 대기 상태(`APPROVED_LOCK_PENDING`)는 두지 않는다. 방장 승인은 `PENDING -> LOCKED` 상태 전이이며 추가 잔액 차감을 수행하지 않는다.
 - `WITHDRAWN`/active withdrawal/rejoin/`withdrawn_at`은 MVP active status/column requirement가 아니다. 기존 row 재사용/withdrawal 재도입은 Deferred/Brownfield/Removed historical/reference only다.
-- 보증금은 별도 계좌로 이동하지 않으며, `point_account.available_balance`에서 차감되고 append-only `CREW_DEPOSIT_RESERVE point_history`가 원장 이벤트로 남은 뒤 `crew_participant.deposit_amount`로 reserve/locked 상태를 표현한다.
+- 보증금은 별도 계좌로 이동하지 않으며, `point_account.available_balance`에서 차감되고 append-only `CREW_DEPOSIT_RESERVE point_history`가 원장 이벤트로 남은 뒤 participant status에 따라 `reserved_balance` 또는 `locked_balance`와 `crew_participant.deposit_amount`로 상태를 표현한다.
 - `deposit_amount`는 participant 단위 예치금 snapshot의 source of truth다. `PENDING` 생성 시 `crew.deposit_amount`를 snapshot으로 복사 저장하고, `LOCKED` 전이 후에도 같은 값을 유지한다.
 - 신청 생성 트랜잭션은 capacity 확인(`PENDING + LOCKED < max_participants`) → `point_account.available_balance >= crew.deposit_amount` 조건부 차감 및 `reserved_balance` 증가 → `CREW_DEPOSIT_RESERVE point_history` insert → `crew_participant.deposit_amount` snapshot → `status = PENDING` 기록을 하나의 트랜잭션으로 함께 성공 또는 함께 롤백한다.
-- 방장 승인 트랜잭션은 기존 `PENDING` row를 `LOCKED`로 전이하고 `locked_at`을 기록한다. 추가 잔액 차감, host settlement authority, 중간 상태는 만들지 않는다.
-- 크루 생성 트랜잭션은 같은 transaction에서 호스트 본인의 `crew_participant` row를 `status=LOCKED`로 자동 생성하고 `crew.deposit_amount`를 `crew_participant.deposit_amount` snapshot으로 복사한다. 같은 transaction에서 `point_account.available_balance -= crew.deposit_amount` / `reserved_balance += crew.deposit_amount` bucket transition과 `CREW_DEPOSIT_RESERVE point_history` insert를 함께 수행한다. 호스트 잔액이 부족하면 reserve 실패로 크루 생성 자체가 롤백된다. host auto-created row는 `unique(crew_id, member_id)` 제약을 일반 참여자와 동일하게 따르며, 호스트의 추가 신청은 같은 제약으로 차단된다.
+- 방장 승인 트랜잭션은 기존 `PENDING` row를 `LOCKED`로 전이하고 `locked_at`을 기록한다. 추가 잔액 차감 없이 `reserved_balance -> locked_balance` bucket transition만 수행하며, 새 `point_history` row, host settlement authority, 중간 상태는 만들지 않는다.
+- 크루 생성 트랜잭션은 같은 transaction에서 호스트 본인의 `crew_participant` row를 `status=LOCKED`로 자동 생성하고 `crew.deposit_amount`를 `crew_participant.deposit_amount` snapshot으로 복사한다. 같은 transaction에서 `point_account.available_balance -= crew.deposit_amount` / `locked_balance += crew.deposit_amount` bucket transition과 `CREW_DEPOSIT_RESERVE point_history` insert를 함께 수행한다. host는 처음부터 `LOCKED`이므로 `PENDING`/`reserved_balance` bucket을 거치지 않는다. 호스트 잔액이 부족하면 lock 실패로 크루 생성 자체가 롤백된다. host auto-created row는 `unique(crew_id, member_id)` 제약을 일반 참여자와 동일하게 따르며, 호스트의 추가 신청은 같은 제약으로 차단된다.
 - host auto-created `LOCKED` row는 일반 `LOCKED` 참여자와 동일하게 capacity, `min_participants` baseline, activation eligibility, frozen participant baseline, settlement eligibility에 포함되고 최종 정산 대상이다. 호스트라는 사실은 moderation/operation role anchor이며 MVP `HOST_REMAINDER` fixed policy의 deterministic recipient reference가 될 수는 있지만 settlement privilege / discretionary remainder authority / ledger authority가 아니다. 별도 `HOST_LOCKED` / `HOST_PARTICIPANT` 상태나 host 전용 테이블을 만들지 않는다.
 
 ### `mission_rule`
@@ -1006,7 +1005,7 @@ Unique / Index:
 주의사항:
 
 - `Settlement(PENDING)`는 종료/취소 감지 시 선생성하며, 아직 워커가 claim하지 않은 실행 전 상태다.
-- `Settlement.status`가 정산 상태의 원천이고, `crew.settlement_status`는 projection이다. Host moderation authority는 settlement authority가 아니며, freeze 이후 정산/일별 결과 mutation은 금지된다.
+- `Settlement.status`가 정산 상태의 원천이고, `crew.settlement_status`는 API/read-model projection only다. Host moderation authority는 settlement authority가 아니며, freeze 이후 정산/일별 결과 mutation은 금지된다.
 - 같은 crew에는 MVP authoritative final settlement row를 하나만 허용한다. 정상 종료와 시작 전 취소는 lifecycle/reason input이지 별도 settlement type이 아니다.
 - `baseline_frozen_at`은 baseline selection 시점을 증명하는 persisted freeze evidence이며 retry/replay/recalculation/correction 권한이 아니다.
 - `total_participants`는 frozen participant baseline에 포함된 `LOCKED` participant 중 정산 대상 deposit이 존재하는 수다. `PENDING`/`REJECTED`/`CANCELLED`/`EXPIRED`는 정산 baseline에 포함하지 않는다. `WITHDRAWN`/active withdrawal 정산 포함 여부는 Deferred/Brownfield/Removed historical/reference-only semantics다.
@@ -1278,11 +1277,10 @@ erDiagram
         DATETIME start_at
         DATETIME activated_at
         DATETIME end_at
-        VARCHAR settlement_status
         DATETIME created_at
         DATETIME updated_at
     }
-    %% CREW: nullable=image_s3_key, activated_at, settlement_status; enum status=RECRUITING|ACTIVE|CLOSED|CANCELLED; settlement_status=NONE|PENDING|RUNNING|SUCCEEDED|FAILED|RETRY_WAIT.
+    %% CREW: nullable=image_s3_key, activated_at; enum status=RECRUITING|ACTIVE|CLOSED|CANCELLED. settlement_status is API/read-model projection only, not a stored CREW column.
     %% CREW constraints: IDX(host_member_id, created_at), IDX(status, recruitment_deadline), IDX(status, start_at, end_at), IDX(status, activated_at), CHECK(2 <= min_participants <= max_participants <= 15).
     %% CREW note: MVP has public crews only; image_s3_key is display metadata only and image_url is response-derived; start_at is the system activation anchor and activated_at is actual ACTIVE transition time. Host is not activation/settlement authority.
 
@@ -1435,7 +1433,7 @@ erDiagram
     }
     %% SETTLEMENT: baseline_frozen_at is persisted freeze evidence; nullable=batch_run_key, failure_code, failure_message, started_at, finished_at; UK(crew_id); IDX(status, retry_count, created_at).
     %% SETTLEMENT enums: status=PENDING|RUNNING|SUCCEEDED|FAILED|RETRY_WAIT; remainder_policy=HOST_REMAINDER (deterministic fixed host-recipient policy, not host authority); failure_code=INPUT_LOAD_FAILED|CALCULATION_FAILED|POINT_CREDIT_FAILED|DUPLICATE_SETTLEMENT|LOCK_ACQUIRE_FAILED|UNKNOWN.
-    %% SETTLEMENT note: one authoritative final row per crew; Settlement.status is source of truth, crew.settlement_status is projection.
+    %% SETTLEMENT note: one authoritative final row per crew; Settlement.status is source of truth, crew.settlement_status is API/read-model projection only and NONE is not stored in settlement.status.
 
     SETTLEMENT_ITEM {
         BIGINT id PK
