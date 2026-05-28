@@ -284,8 +284,6 @@ Participant-level settlement calculation snapshot and refund ledger linkage row.
 | `withdrawn_at_snapshot` | `DATETIME(6)` | Y | `NULL` | Settlement-time `crew_participant.withdrawn_at` snapshot. Deferred/Brownfield historical/reference-only; always `NULL`/ignored in MVP active settlement. |
 | `effective_moderation_snapshot` | `JSON` | Y | `NULL` | Settlement-time latest-effective moderation state snapshot. Read-only audit/replay context. |
 | `moderation_chain_ref` | `JSON` | Y | `NULL` | Settlement-time `moderation_history` chain reference (e.g. `{"latest_id":..., "count":...}`). Audit linkage, not payout authority. |
-| `draw_key_snapshot` | `CHAR(64)` | Y | `NULL` | Non-payout display/explanation ordering key. |
-| `tie_break_rank` | `INT` | Y | `NULL` | Non-payout display/explanation rank. |
 | `calculation_reason` | `JSON` | N | none | Minimal opaque inclusion/exclusion reason context required for MVP explanation/replay. Do not model it as query-heavy JPA subgraphs. |
 | `point_history_id` | `BIGINT` | Y | `NULL` | FK to refund ledger row; nullable until payout link completes. |
 | `created_at` | `DATETIME(6)` | N | current timestamp | Audit create time. |

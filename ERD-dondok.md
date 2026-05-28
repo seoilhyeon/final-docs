@@ -1047,8 +1047,6 @@ Unique / Index:
 | `withdrawn_at_snapshot`         | `DATETIME(6)`   | Y        | 정산 시점 `crew_participant.withdrawn_at` snapshot. Deferred/Brownfield historical/reference-only이며 MVP active settlement에서는 항상 `null`이다 |
 | `effective_moderation_snapshot` | `JSON`          | Y        | 정산 시점 latest-effective moderation state snapshot. read-only audit/replay context이며 payout/recalculation authority가 아니다 |
 | `moderation_chain_ref`          | `JSON`          | Y        | 정산 시점 `moderation_history` chain reference (예: `{"latest_id":..., "count":...}`). audit linkage이며 payout authority가 아니다 |
-| `draw_key_snapshot`             | `CHAR(64)`      | Y        | non-payout 표시/설명 ordering key. remainder winner/draw/payout authority가 아니다                |
-| `tie_break_rank`                | `INT`           | Y        | non-payout 표시/설명 순위                                                                        |
 | `calculation_reason`            | `JSON`          | N        | MVP 설명/검증에 필요한 최소 opaque 포함/제외 근거                                                 |
 | `point_history_id`              | `BIGINT`        | Y        | 환급 원장 FK                                                                                     |
 | `created_at`                    | `DATETIME(6)`   | N        | 생성 시각                                                                                        |
@@ -1135,9 +1133,8 @@ Unique / Index:
 
 정산 계산 관련 입력 원칙:
 
-- `draw_key = SHA-256(crew_id + ":" + member_id)`은 non-payout 표시/설명 ordering 전용이다.
 - `point_history.idempotency_key`는 이벤트별 고정 규칙을 따른다. 예: `charge:{paymentKey}`, `crew:{crewId}:participant:{participantId}:reserve`, `crew:{crewId}:participant:{participantId}:reserve-release`, `crew:{crewId}:participant:{participantId}:settlement-refund`
-- `draw_key`와 `idempotency_key` 모두 런타임 PK가 아니라 입력 기반 식별자를 사용한다.
+- `point_history.idempotency_key`는 런타임 PK가 아니라 입력 기반 식별자를 사용한다.
 - `point_history.idempotency_key`는 `NOT NULL`, `UNIQUE`, 권장 `VARCHAR(160)`이며, 이벤트 종류마다 재현 가능한 규칙으로 생성한다.
 - 동일 키 + 동일 canonical input은 기존 원장 재사용/연결 대상이고, 동일 키 + 다른 canonical input은 멱등성 충돌로 저장하지 않는다. `payload_hash` 저장이나 payload consistency framework는 MVP 필수 요건이 아니다.
 - `settlement.algorithm_version`과 `rule_context_snapshot`은 historical semantic replay context이며 current-engine reinterpretation이나 payout mutation에 사용하지 않는다. Runtime-generated `settlement.id`는 linkage metadata이며 refund idempotency identity가 아니다.
@@ -1160,7 +1157,7 @@ projection 예시(이름은 logical view label이며 실제 DB 오브젝트가 �
 | `member_profile_view`    | `is_host_ever`, `hosted_crew_count`                                                                        | `crew.host_member_id` 이력                                               | 호스트 권한/뱃지/카운터 source-of-truth 아님                                                                         |
 | `crew_daily_status_view` | `success_member_count`, `failed_member_count`, `pending_member_count`, `not_submitted_member_count`, `success_members`, `failed_members` | latest/effective `mission_log.certification_status`, `crew_participant`  | 일자별 slot/dashboard 표시용. `NOT_SUBMITTED`는 row 없는 synthetic projection이며 정산 인정 횟수와 동일 의미 axis 아님 |
 | `crew_projection_view`   | `current_success_count`, `current_share_ratio`, `expected_refund_amount`, `current_rank`                   | `mission_log`, `crew_participant.deposit_amount`, `crew`, `mission_rule` | 정산 전 UX 표시용 estimate. 현재 환급 가능 금액/분쟁 처리 기준 아님                                                  |
-| `settlement_result_view` | `final_rank`                                                                                               | `settlement_item`                                                        | non-payout 표시/설명 순위. `tie_break_rank`/`draw_key_snapshot` 기반 logical projection이며 지급 금액 authority 아님 |
+| `settlement_result_view` | `final_rank`                                                                                               | `settlement_item`                                                        | non-payout 표시/설명 순위. `refund_amount`, `recognized_success_count`, `member_id` 등 기반 read-time projection이며 지급 금액 authority 아님. 표시 ordering은 non-authoritative API/read-model 관심사이며 payout calculation에 영향을 주지 않는다 |
 
 projection 운영 원칙:
 
@@ -1459,15 +1456,13 @@ erDiagram
         BIGINT refund_amount
         JSON effective_moderation_snapshot
         JSON moderation_chain_ref
-        CHAR draw_key_snapshot
-        INT tie_break_rank
         JSON calculation_reason
         BIGINT point_history_id FK, UK
         DATETIME created_at
         DATETIME updated_at
     }
-    %% SETTLEMENT_ITEM: nullable=effective_moderation_snapshot, moderation_chain_ref, draw_key_snapshot, tie_break_rank, point_history_id; UK(settlement_id, crew_participant_id); nullable UK(point_history_id); IDX(member_id).
-    %% SETTLEMENT_ITEM note: participant snapshot; refund_amount is the persisted per-item payout source of truth and API final_amount is a read-only projection/convenience field, not payout authority. base_refund_amount is the FLOOR-applied base refund before remainder bonus; remainder_bonus_amount is the deterministic HOST_REMAINDER host-item remainder snapshot (no separate remainder_winner persisted column or active response field); invariant: refund_amount = base_refund_amount + remainder_bonus_amount. draw_key_snapshot is non-payout ordering context only. effective_moderation_snapshot/moderation_chain_ref are read-only audit/replay context, not payout/recalculation authority.
+    %% SETTLEMENT_ITEM: nullable=effective_moderation_snapshot, moderation_chain_ref, point_history_id; UK(settlement_id, crew_participant_id); nullable UK(point_history_id); IDX(member_id).
+    %% SETTLEMENT_ITEM note: participant snapshot; refund_amount is the persisted per-item payout source of truth and API final_amount is a read-only projection/convenience field, not payout authority. base_refund_amount is the FLOOR-applied base refund before remainder bonus; remainder_bonus_amount is the deterministic HOST_REMAINDER host-item remainder snapshot (no separate remainder_winner persisted column or active response field); invariant: refund_amount = base_refund_amount + remainder_bonus_amount. effective_moderation_snapshot/moderation_chain_ref are read-only audit/replay context, not payout/recalculation authority. Final result display ordering is a non-authoritative API/read-model concern derived at query time (e.g. refund_amount, recognized_success_count, member_id) and must not affect payout calculation.
     %% SETTLEMENT_ITEM enum: participant_status_snapshot is frozen LOCKED for MVP active settlement.
 
     MEMBER ||--o{ MEMBER_REFRESH_TOKEN : has
