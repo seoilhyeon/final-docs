@@ -21,7 +21,8 @@ ERD/Schema/Settlement/Test 문서는 API contract stabilization 이후 이 PRD s
 - 정산은 deterministic, explainable, replayable 해야 한다.
 - 전체 인정 성공 기록이 없는 all-fail 상황에서는 누군가의 실패가 다른 참여자의 추가 환급으로 이어지지 않도록 equal principal refund를 적용한다.
 - 사용자 화면에서 도딘(Dodin)은 보증금·환급 UX를 표현하는 user-facing app-money branding이며, authoritative accounting은 point ledger/history가 담당한다. 도딘은 별도 coin, 외부 현금, 인출 가능 자산, 또는 별도 ledger가 아니다.
-- 원단위 절사 잔액은 deterministic/replayable calculation rule로 처리한다. 이는 host reward, host authority, 또는 host privilege가 아니다.
+- 원단위 절사 잔액은 MVP에서 host `crew_participant`에 deterministic하게 배정하는 fixed policy로 처리한다. 이는 host discretion, random winner, payout mutation authority, lifecycle/settlement/ledger authority가 아니다.
+- 원문 기획안/legacy 문서의 “절사 후 남은 금액은 방장에게 귀속” 류 표현은 “host가 임의로 가져간다”가 아니라 “정책으로 고정된 deterministic host remainder allocation”으로 해석한다. 최종 환급 권한은 settlement snapshot과 point ledger/history에 있다.
 - 모집 마감까지 최소 인원 충족 + 승인 + 예치 Lock 완료 + host disband 없음이면 미션은 start_at 기준 자동 ACTIVE가 되며, MVP에서 activated_at = start_at이다. Host는 activation authority가 아니다.
 - 인증 검증은 layered trust model을 따른다: `server_time`은 timing 기준, EXIF/hash는 fraud/risk signal, moderation은 contextual review, final batch는 authoritative settlement snapshot이다.
 - 방장은 인증 moderation authority를 가지며 이 결정은 정산 입력에 영향을 줄 수 있다. 단, 방장은 정산 엔진, 정산 금액, 포인트 원장을 직접 조작할 수 없다.
@@ -364,7 +365,8 @@ Dashboard는 운영 중 사용자에게 예상 상태와 그 이유를 설명하
 - Projection은 final settlement batch 전까지 항상 현재 기준 예상이며, batch 이후 authoritative 값은 settlement snapshot과 point_history에서만 확인한다.
 - 단순 성공 횟수만으로 고정 환급금을 배분하지 않는다. 전체 상대 성공률/지분율 기반으로 정산한다.
 - 전체 인정 성공 기록이 없으면 누군가의 실패가 다른 참여자의 추가 환급으로 이어지지 않도록 equal principal refund를 적용한다.
-- 정산 중 소수점/절사 잔액은 deterministic/replayable calculation rule로 처리한다. 이는 host reward, host authority, 또는 host privilege가 아니다.
+- 정산 중 소수점/절사 잔액은 MVP에서 host `crew_participant`에 deterministic하게 배정하는 fixed policy로 처리한다. 이는 host discretion, random winner, payout mutation authority, lifecycle/settlement/ledger authority가 아니다.
+- API/Settlement/ERD의 `HOST_REMAINDER`나 `remainder_winner_crew_participant_id`는 deterministic host remainder recipient를 설명할 수 있지만, 사용자-facing 문구에서 “방장이 임의로 가져감/정함” 또는 payout authority처럼 읽히면 안 된다.
 - 최대 15명 기준에서 remainder 설명은 1~14원 범위를 초과하지 않도록 유지한다.
 
 #### 인증 검증 / Moderation
@@ -549,7 +551,7 @@ Deferred/Brownfield 후보는 아래와 같다. 이 목록은 historical/referen
 | EXIF signal                              | 사진 메타데이터 참고 정보                      | fraud/risk signal                                                                                                    | 최종 판정 아님                                                     | extracted metadata signal                          | layered trust            |
 | hash signal                              | 동일 파일 재사용 탐지 신호                     | duplicate/risk signal                                                                                                | 단독 실패 판정 아님                                                | file hash signal                                   | layered trust            |
 | moderation                               | 방장이 인증이 규칙에 맞는지 확인하는 과정      | certification input/state에 영향을 주는 contextual review action                                                     | settlement/ledger authority 또는 중앙 운영자 판결 아님             | moderation history                                 | host authority           |
-| 방장 moderation authority                | 방장이 인증을 판단할 수 있음                   | settlement input에 영향 가능                                                                                         | ledger 수정 권한 아님                                              | moderation decision                                | host boundary            |
+| 방장 moderation authority                | 방장이 인증을 판단할 수 있음                   | freeze 전 certification input에 영향 가능                                                                             | settlement amount, remainder allocation, ledger 수정 권한 아님       | moderation decision                                | host boundary            |
 | moderation history                       | 승인/반려/예외 승인 이력                       | append-only audit trail                                                                                              | 삭제 가능한 임시 로그 아님                                         | moderation history                                 | auditability             |
 | override                                 | signal 이상이나 예외를 승인하는 결정           | moderation action의 한 종류                                                                                          | 운영자 임의 정산 수정 아님                                         | moderation history                                 | contextual review        |
 | grace period / 유예기간                  | 인증 상태 불확실성을 흡수하는 안정화 구간      | 일반 인증 주기 72시간 지연 허용 window                                                                               | 마지막 3일은 grace 없이 terminal 처리, batch 이후 무제한 수정 아님 | PRD lifecycle                                      | layered trust            |
@@ -631,7 +633,7 @@ Deferred/Brownfield 후보는 아래와 같다. 이 목록은 historical/referen
 | Layered trust        | signal/state 분리 필요           | 인증 상태와 signal 응답 구분  | resolved state 입력     | EXIF/hash override case                       |
 | Moderation authority | moderation history 필요          | approve/reject/override 계약  | moderation 결과 반영    | audit/history tests                           |
 | Projection boundary  | projection 저장/계산 정책 검토   | dashboard disclaimer/status   | final과 독립            | projection != final tests                     |
-| Deterministic remainder | settlement snapshot 설명 필요 | settlement detail reason | replayable remainder calculation, not host reward/authority | deterministic remainder tests |
+| Deterministic host remainder | settlement snapshot 설명 필요 | settlement detail reason | fixed host-recipient remainder calculation, not host discretion/authority | deterministic remainder tests |
 | P0 trust loop        | authority scope 확인             | endpoint priority             | batch/replay priority   | E2E trust-loop tests                          |
 | Activation lifecycle | participant baseline 필요        | 모집/자동 시작 상태 응답 검토 | baseline freeze input   | auto-start/cancel race tests                  |
 | Cadence A/B/C        | cadence 설정/일일 정산 기준 검토 | cadence display/validation    | daily settlement anchor | A/B/C timing tests                            |

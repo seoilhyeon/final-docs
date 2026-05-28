@@ -432,11 +432,11 @@ The following inventory consolidates the raw usecase corpus into normalized beha
 ### UC-A16 — All-Fail Settlement and Deterministic Remainder
 
 - **Actors**: System, participants, host
-- **Classification**: variant / exceptional branch of UC-A15 (all-fail = equal principal refund; remainder = deterministic replayable calculation rule, not host authority/reward)
+- **Classification**: variant / exceptional branch of UC-A15 (all-fail = equal principal refund; MVP remainder = deterministic fixed host-recipient calculation rule, not host authority/discretion)
 - **Preconditions**: Settlement input has no recognized successes, or rounding/remainder exists.
-- **Main Flow**: All-fail settles by equal principal refund so that nobody's failure becomes another participant's profit. Any separate rounding/remainder rule must be deterministic, replayable, and not host-discretionary.
+- **Main Flow**: All-fail settles by equal principal refund so that nobody's failure becomes another participant's profit. In normal settlement, any rounding/remainder rule must be deterministic and replayable; MVP uses a fixed host-recipient remainder policy, not host-discretionary selection.
 - **Failure Flow**: “전원 0원 환급”, “환급 없음”, house-edge wording, or host discretionary remainder wording conflicts with canonical settlement semantics.
-- **Authority Boundary**: Remainder calculation is deterministic metadata, not host authority/reward/privilege.
+- **Authority Boundary**: Remainder calculation may designate host as the fixed deterministic recipient in MVP, but that designation is calculation metadata, not host authority/discretion/payout mutation privilege.
 - **Projection Impact**: Estimate must not imply discretionary host benefit, punitive pool loss, or failure-profit upside.
 - **Settlement Impact**: All-fail equal principal refund is canonical; prior zero-refund wording remains brownfield drift only.
 - **UX Risk**: Users see unfair host favoritism or gambling-like pool behavior.
@@ -590,7 +590,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 | PF-014 | Correction as hidden history mutation | Users believe history can be edited | Do not design here; preserve unresolved hard blocker, separate support semantics, and append-only prohibition | PRD, ERD, Settlement |
 | PF-015 | Live rank toxicity | Users hope others fail | Prefer contribution/progress/share framing over adversarial leaderboard or “1위 수익자” framing | PRD, Wireframe |
 | PF-016 | Failure visibility shame | Accountability becomes humiliation | Avoid public shame mechanics and “실패자” labels; use supportive/private-to-user cues | Wireframe, QA |
-| PF-017 | All-fail / tie / remainder fairness | Deterministic can still feel unfair or house-like | All-fail = equal principal refund; remainder must be replayable rule, not host discretion | Settlement detail, Support |
+| PF-017 | All-fail / tie / remainder fairness | Deterministic host-recipient remainder can still feel unfair or house-like | All-fail = equal principal refund; MVP remainder is fixed host-recipient replayable rule, not host discretion | Settlement detail, Support |
 | PF-018 | Brownfield host-start drift | Host lifecycle authority contradicts canonical model | Label/remove/reframe as Drift Candidate | PRD, API, Settlement, QA |
 | PF-019 | Support source confusion | Support answers become semantic authority drift | Lifecycle-specific support source hierarchy | Runbook, Support QA |
 | PF-020 | Engagement over-hardening | Rank, projection, result card, feed, reaction, and notification are reduced to risk-only surfaces | Preserve mechanic visibility with cooperative wording; harden copy, not the underlying UX intent | PRD, Wireframe, QA |
@@ -683,7 +683,7 @@ Settlement input freeze는 본 inventory의 가장 critical한 boundary다. Free
 | Replay/version snapshot requirements | Hard Blocker | Minimum data for settlement-time replay not fully frozen | Replay can become current-rule recalculation | Audit reproduction can differ | ERD/Settlement cannot prove replayability |
 | Post-success correction lifecycle | Hard Blocker / Deferred Semantic | Formal correction/dispute workflow is not MVP-frozen | Hidden mutation or admin payout editing risk | Final settlement could be overwritten without append-only model | Do not design in API/ERD until L1 freezes it |
 | All-fail refund mismatch | Resolved upstream / Brownfield Conflict | PRD now requires all-fail equal principal refund, but prior docs may still say all fail => 0 refund | Settlement constitution conflict if old wording propagates | Direct payout difference | Settlement/ERD/API/requirements/QA must remove or label zero-refund wording before propagation |
-| Deterministic remainder | Hard Blocker / UX Warning | Remainder is replayable calculation metadata, not host reward/privilege | Host authority leakage | Remainder replay rule misunderstood as host privilege | PRD/Settlement/API/Support wording drift |
+| Deterministic remainder | Hard Blocker / UX Warning | MVP remainder recipient is host by fixed replayable policy, not host reward/discretion/privilege | Host authority leakage | Remainder replay rule misunderstood as host privilege | PRD/Settlement/API/Support wording drift |
 | Host manual start / `/start` | Brownfield Conflict | Existing docs/API may imply host lifecycle authority | Host becomes activation authority | Eligibility and projection anchors drift | Must be removed, deferred, or labeled before propagation |
 | Moderation timeout / inactive host | Propagation Warning, possibly blocker if it affects freeze | What happens when host does not moderate before freeze? | Participant may feel hostage to host | If unresolved input affects final settlement, can become hard blocker | PRD/API/QA need label; no invented workflow here |
 | Moderation visibility scope | Propagation Warning | Who sees full history vs latest effective result? | Append-only guarantee may be invisible | No direct payout change | Wireframe/API/support drift |

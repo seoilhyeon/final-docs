@@ -85,7 +85,7 @@
 - `ACTIVE` 이후 신규 참여와 baseline 변경은 허용하지 않는다.
 - ACTIVE 이후 탈퇴/재참여 및 중도 탈퇴 정산은 MVP active semantics가 아니라 Deferred/Brownfield historical/reference-only 영역으로 남긴다. 기존 문서/구현 흔적이 있더라도 `LOCKED` frozen baseline을 바꾸는 권한으로 해석하지 않는다.
 - frozen participant baseline은 `start_at` 자동 activation 시점에 `LOCKED`인 participant 집합이다. 이 baseline은 final settlement input으로 사용되며 post-freeze에 host/admin이 소급 변경하지 않는다.
-- 크루 생성 시점에 호스트 본인도 같은 transaction에서 `crew_participant` row를 `LOCKED`로 자동 생성하고 `crew.deposit_amount`만큼 reserve/lock한다. 호스트 auto-created `LOCKED` row는 일반 `LOCKED` 참여자와 동일하게 frozen participant baseline에 포함되며 `deposit_amount` snapshot과 `settlement_item` 대상이 된다. 호스트라는 사실은 moderation/operation role anchor일 뿐 settlement amount privilege / remainder winner / ledger authority가 아니며, 호스트도 일반 참여자와 동일한 정산 규칙으로 환급/소실을 산정한다.
+- 크루 생성 시점에 호스트 본인도 같은 transaction에서 `crew_participant` row를 `LOCKED`로 자동 생성하고 `crew.deposit_amount`만큼 reserve/lock한다. 호스트 auto-created `LOCKED` row는 일반 `LOCKED` 참여자와 동일하게 frozen participant baseline에 포함되며 `deposit_amount` snapshot과 `settlement_item` 대상이 된다. 호스트라는 사실은 moderation/operation role anchor이며, MVP `HOST_REMAINDER` fixed policy의 deterministic recipient reference가 될 수는 있지만 settlement amount privilege / discretionary remainder authority / ledger authority가 아니다. 호스트도 일반 참여자와 동일한 정산 규칙으로 환급/소실을 산정한다.
 
 ### 3.3 `min_participants` 정책
 
@@ -376,7 +376,7 @@ where id = :settlementId
 | `total_recognized_success`        | 전체 인정 성공 횟수                                                           |
 | `total_base_refund_amount`        | 절사 전 잔액 배분 전 합계                                                     |
 | `total_remainder_amount`          | 잔액 총액                                                                     |
-| `remainder_policy`                | `DETERMINISTIC_REMAINDER_ALLOCATION`; brownfield `HOST_REMAINDER`는 legacy alias일 뿐 host reward/authority/discretion이 아님 |
+| `remainder_policy`                | `HOST_REMAINDER`; MVP active deterministic fixed policy. 절사 후 잔액 recipient를 host `crew_participant`로 고정하지만 host reward/authority/discretion은 아님 |
 | `failure_code`                    | 표준 실패 코드                                                                |
 | `failure_message`                 | 최근 실패 원인 요약                                                           |
 | `algorithm_version`               | 정산 semantic version (historical replay context)                              |
@@ -398,7 +398,7 @@ where id = :settlementId
 - `total_locked_amount`는 `point_history`나 `point_account`를 다시 합산해 계산하지 않는다.
 - MVP에서는 별도 `total_active_participants` 컬럼을 두지 않고, 필요 시 조회/분석용 후속 검토 항목으로 남긴다.
 - `algorithm_version`과 rule interpretation snapshot은 versioned semantic replay를 위한 설명/감사 context다. 이 값들은 historical semantics를 reconstruct하기 위한 기준이며, succeeded settlement를 현재 엔진 기준으로 다시 쓰는 migration hook이 아니다.
-- `remainder_policy`는 all-fail/remainder policy snapshot 역할도 수행한다. Legacy/brownfield alias가 남아 있어도 host/winner/draw payout authority를 부활시키지 않는다.
+- `remainder_policy`는 all-fail/remainder policy snapshot 역할도 수행한다. MVP concrete value `HOST_REMAINDER`는 deterministic host remainder recipient policy이며, host/winner/draw payout authority를 부활시키지 않는다. `remainder_winner_crew_participant_id` 같은 response convenience pointer는 fixed policy 결과를 설명하는 read-only surface일 뿐, host가 금액·수령자·원장을 결정했다는 뜻이 아니다.
 
 ### 7.2 `settlement_item`
 
@@ -432,13 +432,13 @@ where id = :settlementId
 | `period_end_at`               | 계산 기간 종료                                                        |
 | `share_ratio`                 | 최종 지분율                                                           |
 | `base_refund_amount`          | 절사 전 base refund 스냅샷. 설명용이며 payout authority가 아님         |
-| `remainder_bonus_amount`      | deterministic remainder allocation으로 분배된 잔액 스냅샷. payout authority가 아님 |
+| `remainder_bonus_amount`      | MVP `HOST_REMAINDER` fixed policy로 host item에 배정된 잔액 스냅샷. payout authority가 아님 |
 | `reward_amount`               | base + remainder bonus 합산 보상 스냅샷. payout authority가 아님       |
 | `refund_amount`               | 최종 지급/환급 총액의 persisted source of truth. `reward_amount = base_refund_amount + remainder_bonus_amount`, `refund_amount = reward_amount` invariant를 만족한다. API 응답의 `final_amount`는 본 컬럼의 read-only alias projection이다 |
 | `withdrawn_at_snapshot`       | 정산 시점 `crew_participant.withdrawn_at` snapshot. Deferred/Brownfield historical/reference only이며 MVP active settlement에서는 `null`/ignored |
 | `effective_moderation_snapshot` | 정산 시점 latest-effective moderation state JSON snapshot. read-only audit/replay context |
 | `moderation_chain_ref`        | 정산 시점 `moderation_history` chain reference. audit linkage이며 payout authority가 아님 |
-| `draw_key_snapshot`           | non-payout 표시/설명 ordering에 사용한 키. 지급액 결정 권한 아님       |
+| `draw_key_snapshot`           | non-payout 표시/설명 ordering에 사용한 키. remainder winner/draw/payout authority가 아니며 지급액 결정 권한 아님 |
 | `tie_break_rank`              | non-payout 표시/설명 정렬 순위                                        |
 | `calculation_reason`          | MVP 설명/검증에 필요한 최소 opaque 포함/제외 근거 JSON 또는 TEXT      |
 | `point_history_id`            | 환급 원장 FK                                                          |
@@ -669,7 +669,7 @@ refund_amount = base_refund + per-item deterministic remainder allocation
 3. 각 참여자의 raw refund를 `DECIMAL128`로 계산한다.
 4. 각 참여자의 base refund에 `FLOOR`를 적용한다.
 5. 남은 `remainder`를 계산한다.
-6. 일반 정산에서 절사 후 남은 잔액은 deterministic remainder allocation rule로 처리한다. MVP brownfield alias가 `HOST_REMAINDER`로 남아 있더라도 의미는 replayable floor-remainder calculation metadata이며 host reward/authority/privilege가 아니다.
+6. 일반 정산에서 절사 후 남은 잔액은 MVP `HOST_REMAINDER` fixed policy로 처리한다. 즉, host `crew_participant`가 deterministic remainder recipient가 되며, 이는 replayable floor-remainder calculation metadata이지 host discretion/authority/privilege가 아니다.
 7. 이 remainder 처리는 host가 settlement authority를 가진다는 뜻이 아니며, host가 금액·원장·최종 정산을 선택하거나 override할 수 없다.
 
 참고:
@@ -700,11 +700,11 @@ total_remainder_amount = 0
 
 - 일반/비례 정산에서 참여자 수가 `n`명일 때 절사 후 잔액은 항상 `0 <= remainder < n`이다. all-fail equal-principal refund에서는 각자 원금 전액 환급이므로 `total_remainder_amount = 0`이어야 한다.
 - PRD synthesis의 MVP 최대 인원 `15명` 기준으로 남는 잔액은 `최대 14원`이다.
-- 원문 기획안/legacy 기획서의 `1~10원`은 설명용 legacy 표현으로 보고, 구현 기준은 위 수학적 상한으로 고정한다.
+- 원문 기획안/legacy 기획서의 `1~10원`이나 “남은 금액은 방장 귀속” 류 표현은 host가 임의로 가져가는 권한이 아니라 MVP `HOST_REMAINDER` fixed policy로 containment한다. 구현 기준은 위 수학적 상한과 deterministic host remainder allocation이며 host 재량 지급을 부활시키지 않는다.
 
 ### 9.5 tie / representative ordering 규칙
 
-MVP payout remainder는 draw/winner가 아니라 deterministic remainder allocation rule을 사용한다. Brownfield `HOST_REMAINDER` 명칭이 남아 있더라도 host reward, privilege, or discretionary payout을 뜻하지 않는다. 따라서 draw/tie ordering은 최종 지급액을 바꾸는 권한이 아니다.
+MVP payout remainder는 random draw/winner가 아니라 `HOST_REMAINDER` deterministic fixed policy를 사용한다. Host가 remainder recipient로 고정되지만, 이는 host reward, privilege, or discretionary payout을 뜻하지 않는다. 따라서 draw/tie ordering은 최종 지급액을 바꾸는 권한이 아니다.
 
 필요한 경우 대표 성공 로그, 동일 점수 표시 순서, 설명용 tie-break 같은 비금액성 UX에는 아래처럼 재현 가능한 ordering을 사용할 수 있다.
 
@@ -929,7 +929,7 @@ remainderPolicy
 
 원칙:
 
-- `remainderPolicy`는 deterministic allocation metadata이며 host/winner authority가 아니다.
+- `remainderPolicy`는 MVP `HOST_REMAINDER` deterministic fixed host-recipient metadata이며 host/winner authority가 아니다.
 - `SettlementResult`는 historical semantic truth reconstruction에 필요한 snapshot/version context를 보존해야 하지만, replay 결과가 final payout을 변경하는 authority가 되면 안 된다.
 
 ## 14. API / Recovery Boundary
@@ -999,7 +999,7 @@ A base = 115384
 나머지 4명 base = 96153
 base 합계 = 115384 + 96153×4 = 499996
 remainder = 4
-deterministic remainder allocation rule에 따라 replayable calculation context에 remainder 4원이 설명상 배정됨. 이는 host reward/authority/privilege나 winner payout이 아님
+MVP `HOST_REMAINDER` deterministic fixed policy에 따라 replayable calculation context에서 host item에 remainder 4원이 배정됨. 이는 host discretion/authority/privilege나 winner payout이 아님
 ```
 
 최종:
@@ -1045,7 +1045,7 @@ total_remainder_amount = 0
 결정:
 
 - A와 B가 동일 성공 수라도 payout remainder recipient는 동점자 중 draw/winner/top contributor로 결정하지 않는다.
-- 원단위 절사 잔액은 deterministic remainder allocation rule로 처리한다.
+- 원단위 절사 잔액은 MVP `HOST_REMAINDER` fixed policy로 host item에 deterministic하게 배정한다.
 - 동점자 표시나 대표 로그 설명 순서가 필요하면 payout과 분리된 stable ordering을 사용한다.
 
 ## 17. 대안 비교
@@ -1153,7 +1153,7 @@ total_remainder_amount = 0
 - `TS-11C` `total_locked_amount`가 participant 잠금 스냅샷 기준으로 계산되는지
   기대 결과: 정산 실행 시점의 정산 대상 participant `deposit_amount` 합계가 그대로 `total_locked_amount`에 저장되고, `point_history`나 `point_account` 재합산값은 사용되지 않는다.
 - `TS-12` 일반 정산 로직이 영향받지 않았는지
-  기대 결과: `전체 인정 성공 횟수 > 0`인 경우 지분율 기반 정산은 유지되고 원단위 절사 잔액은 deterministic remainder allocation rule로 처리된다. 이는 host discretion이나 winner payout이 아니다.
+  기대 결과: `전체 인정 성공 횟수 > 0`인 경우 지분율 기반 정산은 유지되고 원단위 절사 잔액은 MVP `HOST_REMAINDER` deterministic fixed policy로 host item에 배정된다. 이는 host discretion이나 winner payout이 아니다.
 - `TS-13` non-payout ordering 재현성
   기대 결과: 같은 stable input 집합이면 대표/동점 표시 순서는 재실행해도 동일하지만, 이 ordering은 지급액을 변경하지 않는다.
 
