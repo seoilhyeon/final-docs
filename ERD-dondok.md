@@ -1213,9 +1213,12 @@ erDiagram
         VARCHAR device_id
         VARCHAR platform
         VARCHAR fcm_token
+        VARCHAR app_version
         BOOLEAN enabled
+        DATETIME created_at
+        DATETIME updated_at
     }
-    %% NOTIFICATION_DEVICE: UK(member_id, device_id); re-register upserts in place (refresh fcm_token, enabled=true). DELETE may soft-disable or physical delete. Transport persistence only; no domain/lifecycle/settlement authority.
+    %% NOTIFICATION_DEVICE: nullable=app_version; UK(member_id, device_id); IDX(member_id, enabled); re-register upserts in place (refresh fcm_token, enabled=true). DELETE may soft-disable or physical delete. Transport persistence only; no domain/lifecycle/settlement authority.
 
     NOTIFICATION {
         BIGINT id PK
@@ -1225,10 +1228,14 @@ erDiagram
         VARCHAR resource_type
         VARCHAR resource_id
         VARCHAR deep_link
+        VARCHAR display_text
+        BOOLEAN requires_refetch
         DATETIME occurred_at
         DATETIME read_at
+        DATETIME created_at
+        DATETIME updated_at
     }
-    %% NOTIFICATION: nullable=read_at; UK(uuid); IDX(member_id, occurred_at, id), IDX(member_id, read_at). read_at IS NULL is sole unread rule; no status enum/workflow. Thin non-authoritative UX hint; not canonical audit history. No notification_delivery_attempt/template/preference/SSE/campaign.
+    %% NOTIFICATION: nullable=read_at; UK(uuid); IDX(member_id, occurred_at, id), IDX(member_id, read_at). read_at IS NULL is sole unread rule; no status enum/workflow. requires_refetch is always true in MVP. Thin non-authoritative UX hint; not canonical audit history. No notification_delivery_attempt/template/preference/SSE/campaign.
 
     POINT_ACCOUNT {
         BIGINT id PK
@@ -1344,12 +1351,11 @@ erDiagram
         BIGINT id PK
         BIGINT crew_id FK, UK
         VARCHAR frequency_type
-        INT frequency_count
         CHAR daily_settlement_type
         DATETIME created_at
         DATETIME updated_at
     }
-    %% MISSION_RULE: nullable=frequency_count; UK(crew_id); frequency_type MVP=DAILY|SPECIFIC_DAYS, WEEKLY_N Deferred/Brownfield historical/reference-only; daily_settlement_type=A|B|C.
+    %% MISSION_RULE: UK(crew_id); frequency_type MVP=DAILY|SPECIFIC_DAYS, WEEKLY_N Deferred/Brownfield historical/reference-only; daily_settlement_type=A|B|C.
 
     MISSION_SCHEDULE_DAY {
         BIGINT id PK
@@ -1453,7 +1459,6 @@ erDiagram
         BIGINT remainder_bonus_amount
         BIGINT reward_amount
         BIGINT refund_amount
-        DATETIME withdrawn_at_snapshot
         JSON effective_moderation_snapshot
         JSON moderation_chain_ref
         CHAR draw_key_snapshot
@@ -1463,9 +1468,9 @@ erDiagram
         DATETIME created_at
         DATETIME updated_at
     }
-    %% SETTLEMENT_ITEM: nullable=withdrawn_at_snapshot, effective_moderation_snapshot, moderation_chain_ref, draw_key_snapshot, tie_break_rank, point_history_id; UK(settlement_id, crew_participant_id); nullable UK(point_history_id); IDX(member_id).
-    %% SETTLEMENT_ITEM note: participant snapshot; refund_amount is the persisted per-item payout source of truth and API final_amount/remainder_winner_crew_participant_id are read-only projection/convenience fields, not payout authority; remainder_winner_crew_participant_id points to the fixed HOST_REMAINDER host recipient. base_refund_amount + remainder_bonus_amount + reward_amount are deterministic explanation snapshots (reward_amount = base + bonus; refund_amount = reward_amount). draw_key_snapshot is non-payout ordering context only. effective_moderation_snapshot/moderation_chain_ref/withdrawn_at_snapshot are read-only audit/replay context, not payout/recalculation authority.
-    %% SETTLEMENT_ITEM enum: participant_status_snapshot is frozen LOCKED for MVP active settlement; WITHDRAWN/withdrawn_at_snapshot are Deferred/Brownfield historical/reference only and null/ignored in MVP active settlement.
+    %% SETTLEMENT_ITEM: nullable=effective_moderation_snapshot, moderation_chain_ref, draw_key_snapshot, tie_break_rank, point_history_id; UK(settlement_id, crew_participant_id); nullable UK(point_history_id); IDX(member_id).
+    %% SETTLEMENT_ITEM note: participant snapshot; refund_amount is the persisted per-item payout source of truth and API final_amount/remainder_winner_crew_participant_id are read-only projection/convenience fields, not payout authority; remainder_winner_crew_participant_id points to the fixed HOST_REMAINDER host recipient. base_refund_amount + remainder_bonus_amount + reward_amount are deterministic explanation snapshots (reward_amount = base + bonus; refund_amount = reward_amount). draw_key_snapshot is non-payout ordering context only. effective_moderation_snapshot/moderation_chain_ref are read-only audit/replay context, not payout/recalculation authority.
+    %% SETTLEMENT_ITEM enum: participant_status_snapshot is frozen LOCKED for MVP active settlement.
 
     MEMBER ||--o{ MEMBER_REFRESH_TOKEN : has
     MEMBER ||--o{ NOTIFICATION_DEVICE : registers
