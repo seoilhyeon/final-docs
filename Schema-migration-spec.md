@@ -278,10 +278,9 @@ Participant-level settlement calculation snapshot and refund ledger linkage row.
 | `period_start_at` | `DATETIME(6)` | N | none | Calculation period start. |
 | `period_end_at` | `DATETIME(6)` | N | none | Calculation period end. |
 | `share_ratio` | `DECIMAL(18,8)` | N | none | Calculation share ratio. |
-| `base_refund_amount` | `BIGINT` | N | `0` | Pre-remainder base refund snapshot. Explanation column, not payout authority. |
-| `remainder_bonus_amount` | `BIGINT` | N | `0` | Deterministic remainder allocation share snapshot. Explanation column, not payout authority. |
-| `reward_amount` | `BIGINT` | N | `0` | `base_refund_amount + remainder_bonus_amount` snapshot. Explanation column, not payout authority. |
-| `refund_amount` | `BIGINT` | N | `0` | Final credited/refunded amount. Persisted per-item payout source of truth. API response `final_amount` is a read-only alias for this column. Invariant: `refund_amount = reward_amount = base_refund_amount + remainder_bonus_amount`. |
+| `base_refund_amount` | `BIGINT` | N | `0` | FLOOR-applied base refund amount before remainder bonus. Explanation column, not payout authority. |
+| `remainder_bonus_amount` | `BIGINT` | N | `0` | Deterministic HOST_REMAINDER host-item remainder allocation snapshot. Explanation column, not payout authority. |
+| `refund_amount` | `BIGINT` | N | `0` | Final credited/refunded amount. Persisted per-item payout source of truth. API response `final_amount` is a read-only alias for this column. Invariant: `refund_amount = base_refund_amount + remainder_bonus_amount`. |
 | `withdrawn_at_snapshot` | `DATETIME(6)` | Y | `NULL` | Settlement-time `crew_participant.withdrawn_at` snapshot. Deferred/Brownfield historical/reference-only; always `NULL`/ignored in MVP active settlement. |
 | `effective_moderation_snapshot` | `JSON` | Y | `NULL` | Settlement-time latest-effective moderation state snapshot. Read-only audit/replay context. |
 | `moderation_chain_ref` | `JSON` | Y | `NULL` | Settlement-time `moderation_history` chain reference (e.g. `{"latest_id":..., "count":...}`). Audit linkage, not payout authority. |

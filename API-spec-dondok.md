@@ -2076,9 +2076,9 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 | `recognized_dates_count` | 인정된 날짜 수 |
 | `excluded_success_count` | 중복 등 제외된 성공 수 (`success_count_raw - recognized_success_count`) |
 | `share_ratio` | 전체 인정 성공 중 해당 참여자 비율. 소수점 정밀도 오해 방지를 위해 string decimal로 반환 |
-| `base_refund_amount` | `FLOOR(total_locked_amount × share_ratio)` |
-| `remainder_bonus_amount` | `HOST_REMAINDER` fixed policy에 따라 host item에 deterministic하게 배정된 잔액 스냅샷. host discretion/authority가 아니며 payout authority는 `refund_amount`와 연결된 `point_history`다 |
-| `refund_amount` | 실제 환급된 금액 (`base_refund_amount + remainder_bonus_amount`). **persisted 최종 환급 source of truth** |
+| `base_refund_amount` | `FLOOR(total_locked_amount × share_ratio)`. FLOOR 적용 후, `remainder_bonus_amount` 합산 전 기본 환급액 |
+| `remainder_bonus_amount` | `HOST_REMAINDER` fixed policy에 따라 host item에 deterministic하게 배정된 절사 잔액 스냅샷. host discretion/authority가 아니며 payout authority는 `refund_amount`와 연결된 `point_history`다 |
+| `refund_amount` | 실제 환급된 금액 (`base_refund_amount + remainder_bonus_amount`). **persisted 최종 환급 source of truth**이며 연결된 `point_history`와 함께 payout authority다 |
 | `point_history_id` | 연결된 포인트 원장 ID. `null`이면 아직 지급 미완료 상태 |
 | `calculation_reason` | 정산 포함/제외 근거. `includedDates`(인정된 날짜 목록)와 `excludedLogs`(제외된 로그의 `serverTime` + 제외 `code`) |
 

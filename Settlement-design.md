@@ -433,10 +433,9 @@ where id = :settlementId
 | `period_start_at`             | 계산 기간 시작                                                        |
 | `period_end_at`               | 계산 기간 종료                                                        |
 | `share_ratio`                 | 최종 지분율                                                           |
-| `base_refund_amount`          | 절사 전 base refund 스냅샷. 설명용이며 payout authority가 아님         |
-| `remainder_bonus_amount`      | MVP `HOST_REMAINDER` fixed policy로 host item에 배정된 잔액 스냅샷. payout authority가 아님 |
-| `reward_amount`               | base + remainder bonus 합산 보상 스냅샷. payout authority가 아님       |
-| `refund_amount`               | 최종 지급/환급 총액의 persisted source of truth. `reward_amount = base_refund_amount + remainder_bonus_amount`, `refund_amount = reward_amount` invariant를 만족한다. API 응답의 `final_amount`는 본 컬럼의 read-only alias projection이다 |
+| `base_refund_amount`          | FLOOR 적용 후, remainder 합산 전 기본 환급액 스냅샷. 설명용이며 payout authority가 아님 |
+| `remainder_bonus_amount`      | MVP `HOST_REMAINDER` fixed policy로 host item에 배정된 절사 잔액 스냅샷. payout authority가 아님 |
+| `refund_amount`               | 최종 지급/환급 총액의 persisted source of truth. `refund_amount = base_refund_amount + remainder_bonus_amount` invariant를 만족한다. API 응답의 `final_amount`는 본 컬럼의 read-only alias projection이다 |
 | `withdrawn_at_snapshot`       | 정산 시점 `crew_participant.withdrawn_at` snapshot. Deferred/Brownfield historical/reference only이며 MVP active settlement에서는 `null`/ignored |
 | `effective_moderation_snapshot` | 정산 시점 latest-effective moderation state JSON snapshot. read-only audit/replay context |
 | `moderation_chain_ref`        | 정산 시점 `moderation_history` chain reference. audit linkage이며 payout authority가 아님 |
@@ -659,9 +658,9 @@ MVP `calculation_reason` vocabulary:
 ```text
 지분율 = 참여자 인정 성공 횟수 / 전체 참여자 인정 성공 횟수 합계
 raw_refund = total_locked_amount × 지분율
-base_refund = FLOOR(raw_refund)
-remainder = total_locked_amount - SUM(base_refund)
-refund_amount = base_refund + per-item deterministic remainder allocation
+base_refund_amount = FLOOR(raw_refund)
+remainder_bonus_amount = per-item deterministic HOST_REMAINDER allocation
+refund_amount = base_refund_amount + remainder_bonus_amount
 ```
 
 ### 9.2 일반 정산
