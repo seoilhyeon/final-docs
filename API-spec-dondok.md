@@ -264,7 +264,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax
 | 인증/회원   | `POST`   | `/api/auth/logout`                                             | 로그아웃                          |
 | 인증/회원   | `GET`    | `/api/me`                                                      | 내 계정/프로필 조회               |
 | 인증/회원   | `PATCH`  | `/api/me/profile`                                              | 내 프로필 수정                    |
-| 크루/참여   | `GET`    | `/api/crews`                                                   | 크루 목록 조회                    |
+| 크루/참여   | `GET`    | `/api/crews`                                                   | 크루 목록/검색 조회               |
 | 크루/참여   | `POST`   | `/api/crews`                                                   | 크루 생성                         |
 | 크루/참여   | `GET`    | `/api/crews/{crewId}`                                          | 크루 상세 조회                    |
 | 크루/참여   | `POST`   | `/api/crews/{crewId}/participants`                             | 크루 가입 신청                    |
@@ -520,15 +520,17 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 
 ### `GET /api/crews`
 
-> 크루 목록을 상태 필터로 조회한다.
+> 크루 목록을 상태/카테고리 필터와 키워드로 조회한다.
 
 **Query**
 
-| 필드     | 타입      | 필수 | 설명                |
-| -------- | --------- | ---- | ------------------- |
-| `status` | `string`  | N    | 기본값 `RECRUITING` |
-| `cursor` | `string`  | N    | 이전 응답의 `next_cursor`로 다음 slice를 조회한다. |
-| `limit`  | `integer` | N    | 기본 20, 최대 100. |
+| 필드       | 타입      | 필수 | 설명 |
+| ---------- | --------- | ---- | ---- |
+| `status`   | `string`  | N    | 기본값 `RECRUITING` |
+| `category` | `string`  | N    | 크루 카테고리 정확 일치 필터. 생략하면 카테고리로 제한하지 않는다. 값 catalog/enum 형태는 아직 고정하지 않는다. |
+| `keyword`  | `string`  | N    | 크루 탐색 키워드. 서버 trim 후 공백 문자열이면 생략과 동일하게 처리한다. 검색 대상은 `title`, `description` 표시 텍스트다. |
+| `cursor`   | `string`  | N    | 이전 응답의 `next_cursor`로 다음 slice를 조회한다. |
+| `limit`    | `integer` | N    | 기본 20, 최대 100. |
 
 **Response** `200 OK`
 
@@ -539,6 +541,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
       "crew_id": 42,
       "title": "새벽 기상 챌린지",
       "image_url": null,
+      "category": "EXERCISE",
       "status": "RECRUITING",
       "deposit_amount": 100000,
       "min_participants": 2,
@@ -558,6 +561,8 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 **정책**
 
 - `next_cursor`는 다음 slice가 존재할 때만 응답에 포함하며, 없거나 `null`이면 더 조회할 slice가 없다.
+- `category`는 탐색 필터/표시용 metadata다. lifecycle, moderation, settlement, ranking authority가 아니다.
+- `keyword` 검색은 공개 크루 탐색 보조 기능이다. 결과 정렬/커서 안정성을 해치지 않도록 서버는 동일 조건에서 결정적 정렬을 유지해야 한다.
 
 ---
 
@@ -1842,7 +1847,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
   "my_success_count": 5,
   "my_recognized_success_count_estimated": 4,
   "total_recognized_success_count_estimated": 31,
-  "my_share_ratio_estimated": "0.12903200",
+  "my_share_ratio_estimated": "0.129032",
   "my_expected_refund_amount": 103226,
   "my_expected_refund_delta_amount": 3226,
   "rank_estimated": 3,
@@ -1896,7 +1901,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 | `my_success_count` | latest/effective slot summary 기준의 현재 성공 표시 수. 일반 feed item 수나 정산 인정 성공 수가 아니다 |
 | `my_recognized_success_count_estimated` | 현재 시점에서 정산 규칙을 가능한 범위로 반영한 추정 인정 성공 수 |
 | `total_recognized_success_count_estimated` | 참여자별 추정 인정 성공 수 합계 |
-| `my_share_ratio_estimated` | 전체 인정 성공 중 내 비율. 소수점 정밀도 오해 방지를 위해 string decimal로 반환 |
+| `my_share_ratio_estimated` | 전체 인정 성공 중 내 비율. `DECIMAL(10,6)` 기준 소수 6자리 string decimal로 반환 |
 | `my_expected_refund_amount` | `total_recognized_success_count_estimated > 0`이면 `FLOOR(total_locked_amount × my_share_ratio_estimated)`. 0인 경우 all-fail equal-principal refund로 `my_deposit_amount` 반환 |
 | `my_expected_refund_delta_amount` | `my_expected_refund_amount - my_deposit_amount`. 수익 확정값이 아닌 현재 기준 설명용 차이값 |
 | `rank_estimated` | 추정 수행/참여도 표시 순서. `recognized_success_count_estimated DESC`, 동률이면 `crew_participant_id ASC` 기준 |
@@ -2023,7 +2028,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
       "recognized_success_count": 90,
       "recognized_dates_count": 30,
       "excluded_success_count": 2,
-      "share_ratio": "0.23076923",
+      "share_ratio": "0.230769",
       "base_refund_amount": 115384,
       "remainder_bonus_amount": 4,
       "refund_amount": 115388,
@@ -2067,7 +2072,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 | `recognized_success_count` | 중복·비유효 제외 후 정산에서 실제 인정된 성공 수 |
 | `recognized_dates_count` | 인정된 날짜 수 |
 | `excluded_success_count` | 중복 등 제외된 성공 수 (`success_count_raw - recognized_success_count`) |
-| `share_ratio` | 전체 인정 성공 중 해당 참여자 비율. 소수점 정밀도 오해 방지를 위해 string decimal로 반환 |
+| `share_ratio` | 전체 인정 성공 중 해당 참여자 비율. `DECIMAL(10,6)` 기준 소수 6자리 string decimal로 반환 |
 | `base_refund_amount` | `FLOOR(total_locked_amount × share_ratio)`. FLOOR 적용 후, `remainder_bonus_amount` 합산 전 기본 환급액 |
 | `remainder_bonus_amount` | `HOST_REMAINDER` fixed policy에 따라 host item에 deterministic하게 배정된 절사 잔액 스냅샷. host discretion/authority가 아니며 payout authority는 `refund_amount`와 연결된 `point_history`다 |
 | `refund_amount` | 실제 환급된 금액 (`base_refund_amount + remainder_bonus_amount`). **persisted 최종 환급 source of truth**이며 연결된 `point_history`와 함께 payout authority다 |
