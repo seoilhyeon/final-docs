@@ -109,7 +109,7 @@ MVP active status는 아래 다섯 개만 사용한다.
 - `LOCKED`는 승인 완료 + reserved deposit이 locked deposit으로 확정된 상태다.
 - activation eligibility, frozen participant baseline, settlement baseline에는 `LOCKED`만 포함한다.
 - 승인은 `reserved_balance -> locked_balance` bucket/state transition이다.
-- 승인 시 새로운 `point_history` transaction type을 만들지 않는다.
+- 승인 시 해당 상태 전환은 `CREW_DEPOSIT_LOCK` 거래 유형으로 기록한다.
 
 ### Terminal state preservation
 
@@ -159,7 +159,7 @@ locked_balance == active_locked_amount + settlement_pending_amount
 - `point_history` row를 수정/삭제해 결과를 맞추지 않는다.
 - `point_history.idempotency_key`는 `UNIQUE`이며 권장 길이는 `VARCHAR(160)` 또는 동등한 안전 canonical size다.
 - `payload_hash` 저장과 payload consistency framework는 MVP에서 명시적으로 deferred이며 필수 구현 요건이 아니다.
-- 잔액/버킷 reconciliation은 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage, `point_account` cached balances를 함께 사용한다. 승인(`PENDING -> LOCKED`)은 원장 row 없이 bucket transition으로 처리된다.
+- 잔액/버킷 reconciliation은 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage, `point_account` cached balances를 함께 사용한다.
 
 ### Balance-after snapshots
 
@@ -174,37 +174,44 @@ MVP 구현에서 이 guardrail 범위의 canonical transaction type은 아래와
 | Flow | Transaction type | Meaning |
 | --- | --- | --- |
 | Point charge | `POINT_CHARGE` | 결제 승인 후 포인트 충전 반영 |
-| Apply reserve | `CREW_DEPOSIT_RESERVE` | `PENDING` 신청 reserve 생성 |
+| Apply reserve / host lock | `CREW_DEPOSIT_RESERVE` | 일반 참여자 `PENDING` 신청 reserve 생성 또는 host auto-created `LOCKED` 보증금 lock event |
+| Approval / lock confirm | `CREW_DEPOSIT_LOCK` | `PENDING` 승인 시 reserve를 locked로 확정 |
 | Reserve release | `CREW_RESERVE_RELEASE` | `PENDING` reserve를 terminal 전이와 함께 반환 |
 | Settlement refund | `CREW_SETTLEMENT_REFUND` | final settlement item 환급 반영 |
 
-### Approval is not a new ledger event
+### Approval is an explicit ledger event
 
-- 승인(`PENDING -> LOCKED`)은 reserve를 locked deposit으로 확정하는 bucket/state transition이다.
-- 승인 시 `CREW_DEPOSIT_LOCK` 같은 새 원장 이벤트를 만들지 않는다.
-- 승인 이력은 `crew_participant.status=LOCKED`, `locked_at`, account bucket delta, 기존 reserve ledger link로 설명한다.
+- 승인(`PENDING -> LOCKED`)은 reserve-to-lock 확정 이벤트다.
+- `CREW_DEPOSIT_LOCK` `point_history` row를 append/reuse하며 승인 시 보증금 이동을 불변 로그로 남긴다.
+- 승인 이력은 `crew_participant.status=LOCKED`, `locked_at`, account bucket delta, 승인 ledger 연계로 설명한다.
 
 ## 4. Idempotency rules
 
 ### Canonical idempotency key formats
 
-- Apply reserve: `crew:{crewId}:participant:{participantId}:reserve`
-- Reserve release: `crew:{crewId}:participant:{participantId}:reserve-release`
-- Settlement refund: `crew:{crewId}:participant:{participantId}:settlement-refund`
+- Apply reserve: `crew:{crewId}:participant:{participantId}:reserve:{cycle}`
+- Reserve lock / approval: `crew:{crewId}:participant:{participantId}:reserve-lock:{cycle}`
+- Reserve release: `crew:{crewId}:participant:{participantId}:reserve-release:{cycle}`
+- Settlement refund: `crew:{crewId}:participant:{participantId}:settlement-refund:final`
 
-### Reserve release once per participant
+### Reserve release once per current reserve cycle
 
-- reserve release는 `crew_participant.id` 기준으로 한 번만 허용한다.
-- terminal transition과 reserve release ledger creation은 같은 transaction 안에서 처리한다.
-- 구현은 `released_point_history_id`를 둔다. 이 값은 authoritative reserve-release ledger evidence이며, `reserve_released_at`만으로 release 완료를 증명하지 않는다.
+- reserve release는 같은 `crew_participant.id`의 현재 reserve cycle 기준으로 한 번만 허용한다.
+- `{cycle}`은 최초 `1`이며, 새 reserve cycle은 해당 participant의 누적 `CREW_RESERVE_RELEASE` 원장 수 + 1로 계산한다. reserve 원장 수를 기준으로 cycle을 증가시키면 duplicate reserve retry가 cycle을 밀 수 있으므로 사용하지 않는다.
+- terminal transition과 reserve release ledger creation/reuse는 같은 transaction 안에서 처리한다.
+- 구현은 `released_point_history_id`를 둔다. 이 값은 현재 cycle의 authoritative reserve-release ledger evidence이며, `reserve_released_at`만으로 release 완료를 증명하지 않는다.
 - `released_point_history_id`는 nullable unique로 강제한다. 여러 row가 `NULL`일 수는 있지만, 하나의 reserve-release `point_history` row를 여러 `crew_participant`가 공유할 수 없다.
+- `CANCELLED -> PENDING` reopen 시 같은 transaction에서 `released_point_history_id`를 `NULL`로 reset하고 새 `CREW_DEPOSIT_RESERVE`를 append해 다음 cycle을 시작한다.
 
 ### Settlement refund once per settlement item
 
-- settlement refund는 `settlement_item` 기준으로 한 번만 반영한다.
+- settlement refund는 crew participant의 최종 정산 환급 기준으로 한 번만 반영한다.
 - `settlement_item.point_history_id`는 최종 환급 ledger row와 연결되어야 한다.
 - `settlement.status = SUCCEEDED` 전 모든 `settlement_item`이 point history link를 가져야 한다.
-- MVP 정산 환급 idempotency identity는 crew/participant 단위 자연키다. Runtime-generated `settlement.id`는 `settlement_item`/`point_history` linkage metadata이며 idempotency key 구성값으로 사용하지 않는다.
+- MVP 정산 환급 idempotency identity는 `crew:{crewId}:participant:{participantId}:settlement-refund:final`이다. Runtime-generated `settlement.id`는 idempotency key 구성값으로 사용하지 않는다.
+- `settlement_item.id`는 지급 근거 스냅샷 추적용 linkage metadata이며 `point_history.reference_id`와 `settlement_item.point_history_id`로 연결한다.
+- 동일 `settlement-refund:final` key에 대해 `settlement_item.id`, 환급 금액, 정산 algorithm version, 인정 성공 수 등 canonical payout input이 다르면 idempotency conflict로 실패해야 한다.
+- 재정산/보정 지급은 `final` key를 재사용하지 않고 별도 transaction type/key로 분리한다.
 
 ### One final settlement per crew
 
@@ -313,7 +320,7 @@ MVP 구현에서 이 guardrail 범위의 canonical transaction type은 아래와
 
 - Failure mode: reject/cancel/expire가 중복 실행되어 reserve가 두 번 반환됨.
 - Guardrail: `released_point_history_id IS NULL` guard, reserve-release idempotency key unique.
-- Expected behavior: release는 participant당 한 번만 성공한다.
+- Expected behavior: release는 현재 reserve cycle당 한 번만 성공한다. 이미 `released_point_history_id`가 연결된 동일 cycle 중복 요청은 기존 release 원장 재사용 또는 invalid transition으로 수렴한다.
 
 ### Settlement retry duplication
 

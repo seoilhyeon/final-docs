@@ -517,7 +517,7 @@ MVP `calculation_reason` vocabulary:
 | `available_after`  | 반영 후 available balance snapshot                                                       |
 | `reserved_after`   | 반영 후 reserved balance snapshot                                                        |
 | `locked_after`     | 반영 후 locked balance snapshot                                                          |
-| `transaction_type` | `POINT_CHARGE`, `CREW_DEPOSIT_RESERVE`, `CREW_RESERVE_RELEASE`, `CREW_SETTLEMENT_REFUND` |
+| `transaction_type` | `POINT_CHARGE`, `CREW_DEPOSIT_RESERVE`, `CREW_DEPOSIT_LOCK`, `CREW_RESERVE_RELEASE`, `CREW_SETTLEMENT_REFUND` |
 | `reference_type`   | 예: `SETTLEMENT_ITEM`                                                                  |
 | `reference_id`     | 참조 엔티티 PK                                                                         |
 | `idempotency_key`  | 중복 반영 방지 키, 항상 `NOT NULL`                                                     |
@@ -532,21 +532,27 @@ MVP `calculation_reason` vocabulary:
 - 현재 잔액 캐시와 운영 검증 결과가 다르면 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage, `point_account` cached balances를 함께 대조해 원인을 조사하고 잔액 캐시를 보정하거나 재생성한다. 승인 bucket transition은 ledger row 없이 처리된다.
 - 일반 참여자의 `PENDING` 신청 reserve는 `point_account.available_balance`에서 차감되고 `reserved_balance`에 반영되며, 승인 시 `reserved_balance -> locked_balance` bucket으로 전이된다.
 - `POST /api/crews` 시점의 host auto-created `LOCKED` participant 보증금은 `PENDING` reserve bucket을 거치지 않고 `point_account.available_balance`에서 차감되어 `locked_balance`에 직접 반영된다.
-- `CREW_DEPOSIT_RESERVE`는 일반 `PENDING` 신청 reserve와 host auto-lock deposit event를 모두 기록하는 transaction type이다. bucket destination은 participant 생성/전이 상태에 따라 일반 `PENDING`은 `reserved_balance`, host auto-created `LOCKED`는 `locked_balance`다. 승인은 bucket/state transition이며 새 원장 이벤트를 만들지 않는다.
+- `CREW_DEPOSIT_RESERVE`는 일반 `PENDING` 신청 reserve를 기록한다.
+- `CREW_DEPOSIT_LOCK`는 `PENDING` 승인 확정 시 reserve를 locked로 전환하는 이벤트다 (`reserved_balance → locked_balance`)이며 append/reuse로 기록된다.
 - 정산 또는 취소 시점에만 해당 잠금 금액이 환급되며, 환급은 `point_history`를 통해 `member` 계정 잔액에 다시 반영된다.
 - `point_history` insert와 `point_account` balance bucket 갱신은 동일 트랜잭션에서 처리한다.
 - 정산 지급의 `reference_type + reference_id`는 어느 `settlement_item`에서 발생했는지 추적 가능해야 한다.
 - 모든 포인트 변경은 이벤트 타입별 `idempotency_key`를 반드시 가진다.
 - 동일 이벤트는 항상 동일한 `idempotency_key`를 생성해야 하며, `settlement.id` 같은 런타임 상태값에 의존하지 않는다.
+- reserve/release의 `{cycle}`은 같은 participant의 current reserve cycle이다. 최초 cycle은 `1`이고, 새 reserve cycle은 누적 `CREW_RESERVE_RELEASE` 원장 수 + 1로 계산한다.
+- 일반 정산 환급은 participant별 최종 정산 1회를 뜻하는 `final` suffix를 사용해 중복 지급을 차단하고, `settlement_item.id`는 지급 근거 스냅샷 추적용 `reference_id` linkage metadata로 남긴다.
+- 동일 `settlement-refund:final` key 재시도는 기존 원장을 재사용/연결한다. 단, 같은 key인데 `settlement_item.id`, 환급 금액, 정산 algorithm version, 인정 성공 수 등 canonical payout input이 다르면 idempotency conflict로 실패해야 한다.
+- 추후 재정산/보정 지급은 `final`을 재사용하지 않고 별도 transaction type/key(예: `settlement-adjustment:{adjustmentId}`)로 분리한다.
 - 이벤트별 고정 규칙 예시는 아래와 같다.
-  - 포인트 충전: `charge:{paymentKey}`
-  - 보증금 reserve: `crew:{crewId}:participant:{participantId}:reserve`
-  - PENDING reserve release: `crew:{crewId}:participant:{participantId}:reserve-release`
-  - 일반 정산 환급: `crew:{crewId}:participant:{participantId}:settlement-refund`
+  - 포인트 충전: `charge:{payment_id}`
+  - 보증금 reserve: `crew:{crewId}:participant:{participantId}:reserve:{cycle}`
+  - 보증금 approval/lock: `crew:{crewId}:participant:{participantId}:reserve-lock:{cycle}`
+  - PENDING reserve release: `crew:{crewId}:participant:{participantId}:reserve-release:{cycle}`
+  - 일반 정산 환급: `crew:{crewId}:participant:{participantId}:settlement-refund:final`
 - `POINT_CHARGE`의 API field `payment_id`는 TossPayments `paymentKey`를 의미한다.
 - `orderId`는 confirm 검증과 로그 상관관계 추적용이며 `point_history.idempotency_key`에 사용하지 않는다.
-- 동일한 `paymentKey`는 반드시 하나의 충전 이벤트만 의미해야 하며, 재사용되거나 중복 발급되어서는 안 된다.
-- `charge:{paymentKey}`는 이 불변성을 전제로 한 설계다. 이 조건이 깨지면 충전 멱등성 보장이 함께 깨진다.
+- 동일한 `payment_id`는 반드시 하나의 충전 이벤트만 의미해야 하며, 재사용되거나 중복 발급되어서는 안 된다.
+- `charge:{payment_id}`는 이 불변성을 전제로 한 설계다. 이 조건이 깨지면 충전 멱등성 보장이 함께 깨진다.
 - 동일 `idempotency_key`와 동일 canonical input의 재시도는 기존 `point_history`를 반환/연결하고, 동일 키에 다른 canonical input이 확인되면 idempotency conflict로 처리해 새 원장을 만들지 않는다. `payload_hash` 저장이나 payload consistency framework는 MVP 필수 요건이 아니다.
 
 제약:
@@ -770,10 +776,11 @@ ordering_key = stable domain input(room_id, participant_id/member_id, event_id �
 이벤트별 권장 키:
 
 ```text
-charge:{paymentKey}
-crew:{crewId}:participant:{participantId}:reserve
-crew:{crewId}:participant:{participantId}:reserve-release
-crew:{crewId}:participant:{participantId}:settlement-refund
+charge:{payment_id}
+crew:{crewId}:participant:{participantId}:reserve:{cycle}
+crew:{crewId}:participant:{participantId}:reserve-lock:{cycle}
+crew:{crewId}:participant:{participantId}:reserve-release:{cycle}
+crew:{crewId}:participant:{participantId}:settlement-refund:final
 ```
 
 원칙:
@@ -786,10 +793,10 @@ crew:{crewId}:participant:{participantId}:settlement-refund
 - 동일 이벤트는 항상 동일한 `idempotency_key`를 사용한다.
 - `POINT_CHARGE`의 API field `payment_id`는 TossPayments `paymentKey`를 의미하며, 하나의 충전 이벤트에만 1:1로 매핑되어야 한다.
 - `orderId`는 confirm 검증과 로그 상관관계 추적용이며 `point_history.idempotency_key`에 사용하지 않는다.
-- 동일한 `paymentKey`가 재사용되거나 중복 발급되면 `charge:{paymentKey}` 기반 멱등성이 깨지므로, 결제 연동 계층에서 이를 허용하지 않아야 한다.
-- provider success 이후 client timeout이 발생해도 같은 `paymentKey` 재시도는 중복 충전이 아니라 기존 원장 재사용으로 수렴해야 한다.
+- 동일한 `payment_id`가 재사용되거나 중복 발급되면 `charge:{payment_id}` 기반 멱등성이 깨지므로, 결제 연동 계층에서 이를 허용하지 않아야 한다.
+- provider success 이후 client timeout이 발생해도 같은 `payment_id` 재시도는 중복 충전이 아니라 기존 원장 재사용으로 수렴해야 한다.
 - 재시도 중 중복 insert가 발생하면 unique 제약으로 차단된다.
-- 애플리케이션은 동일 키 충돌을 먼저 기존 `point_history`와 요청 canonical input이 같은 semantic event인지 검증한다. 동일 canonical input이면 기존 원장을 재사용/연결하고, 다른 canonical input이면 idempotency conflict로 실패 처리한다. `payload_hash` 기반 consistency framework는 MVP에서 구현하지 않는다.
+- 애플리케이션은 동일 키 충돌을 먼저 기존 `point_history`와 요청 canonical input이 같은 semantic event인지 검증한다. 동일 canonical input이면 기존 원장을 재사용/연결하고, 다른 canonical input이면 idempotency conflict로 실패 처리한다. 정산 환급의 canonical payout input에는 최소 `settlement_item.id`, 환급 금액, algorithm version, 인정 성공 수를 포함한다. `payload_hash` 기반 consistency framework는 MVP에서 구현하지 않는다.
 - 애플리케이션은 이 충돌을 `이미 지급됨`으로 해석하고 무조건 성공 처리하지 말고, 현재 `Settlement.status`, `settlement_item.point_history_id`, `point_history` canonical input 일치 여부를 함께 검증해야 한다.
 - 이 원칙은 정산 환급뿐 아니라 충전, 보증금 잠금 같은 모든 포인트 이벤트에도 동일하게 적용한다. 따라서 `point_history.idempotency_key`는 항상 `NOT NULL`이어야 한다.
 
@@ -1172,7 +1179,7 @@ total_remainder_amount = 0
 - `TS-14D` `point_account` balance bucket과 reconciliation 결과가 불일치할 때 원장/상태/linkage 기준으로 복구되는지
   기대 결과: 운영 검증은 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage, `point_account` cached balances를 함께 대조해 불일치 원인을 기록하고, 필요한 경우 `point_account` balance bucket cache를 보정한다.
 - `TS-15` 배치 재시도 시 `point_history.idempotency_key`로 중복 지급이 차단되는지
-  기대 결과: `crew:{crewId}:participant:{participantId}:reserve`, `crew:{crewId}:participant:{participantId}:reserve-release`, `crew:{crewId}:participant:{participantId}:settlement-refund` 규칙으로 같은 입력이면 같은 `idempotency_key`가 재사용되고, 동일 canonical input duplicate는 기존 원장 재사용/연결로 수렴하며, 다른 canonical input duplicate는 idempotency conflict로 실패한다.
+  기대 결과: `crew:{crewId}:participant:{participantId}:reserve:{cycle}`, `crew:{crewId}:participant:{participantId}:reserve-lock:{cycle}`, `crew:{crewId}:participant:{participantId}:reserve-release:{cycle}`, `crew:{crewId}:participant:{participantId}:settlement-refund:final` 규칙으로 같은 입력이면 같은 `idempotency_key`가 재사용되고, 동일 canonical input duplicate는 기존 원장 재사용/연결로 수렴하며, 다른 canonical input duplicate는 idempotency conflict로 실패한다.
 - `TS-15A` `point_history`는 존재하지만 `settlement_item.point_history_id`만 누락된 partial 상태를 안전하게 복구하는지
   기대 결과: 해당 participant는 이미 지급 완료로 간주되고 새 환급 원장은 생성되지 않으며, 관리자 API 또는 배치가 기존 `point_history`를 조회해 FK만 연결한 뒤 전체 연결이 완료되면 `Settlement.status`가 `SUCCEEDED`로 전이된다.
 - `TS-16` 정상 종료 사유와 시작 전 취소 사유의 settlement가 같은 조회 API 구조로 반환되는지

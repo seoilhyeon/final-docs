@@ -339,7 +339,7 @@ Unique / Index:
 주의사항:
 
 - 일반 `PENDING` reserve 생성은 `available_balance -= deposit_amount`, `reserved_balance += deposit_amount`로 처리한다. host auto-created `LOCKED` 보증금은 `available_balance -= deposit_amount`, `locked_balance += deposit_amount`로 직접 처리한다.
-- 승인(`PENDING -> LOCKED`)은 `reserved_balance -= deposit_amount`, `locked_balance += deposit_amount` bucket/state transition이다. 승인 시 새 `point_history` transaction type을 만들지 않는다.
+- 승인(`PENDING -> LOCKED`)은 `reserved_balance -= deposit_amount`, `locked_balance += deposit_amount` bucket/state transition이다. 승인 시 `CREW_DEPOSIT_LOCK` 거래 유형으로 동일한 금액 이동을 append/reuse한다.
 - reserve release는 terminal 전이와 같은 transaction에서 `reserved_balance -= deposit_amount`, `available_balance += deposit_amount`로 처리한다.
 - final settlement refund는 `locked_balance -= deposit_amount`와 환급 결과에 따른 `available_balance` 증가를 `point_history`와 같은 transaction에서 처리한다.
 - `active_locked_amount`와 `settlement_pending_amount`는 `locked_balance`를 source로 설명하는 projection-only split field다. reconciliation check는 `locked_balance == active_locked_amount + settlement_pending_amount`다.
@@ -386,32 +386,40 @@ Unique / Index:
 
 상태값 / Enum:
 
-- `transaction_type`: `POINT_CHARGE`, `CREW_DEPOSIT_RESERVE`, `CREW_RESERVE_RELEASE`, `CREW_SETTLEMENT_REFUND`
+- `transaction_type`: `POINT_CHARGE`, `CREW_DEPOSIT_RESERVE`, `CREW_DEPOSIT_LOCK`, `CREW_RESERVE_RELEASE`, `CREW_SETTLEMENT_REFUND`
 - `reference_type`: `POINT_CHARGE`, `CREW_PARTICIPANT`, `SETTLEMENT_ITEM`
 
 `reference_type` / `reference_id` 매핑:
 
 | 도메인 동작             | `transaction_type`       | `reference_type`   | `reference_id` 규칙                                                                                                                             |
 | ------------------------ | ------------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| 포인트 충전              | `POINT_CHARGE`           | `POINT_CHARGE`     | MVP에서는 생성된 `point_history.id`를 사용한다. API의 `payment_id`에 담긴 Toss `paymentKey`는 `idempotency_key = charge:{paymentKey}`에 남긴다. |
-| 보증금 reserve/lock event | `CREW_DEPOSIT_RESERVE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
+| 포인트 충전              | `POINT_CHARGE`           | `POINT_CHARGE`     | `0` sentinel. 별도 내부 aggregate 참조가 없음을 뜻하며, 요청 필드 `payment_id`는 `idempotency_key = charge:{payment_id}`에 남긴다. |
+| 보증금 reserve event | `CREW_DEPOSIT_RESERVE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
+| PENDING 승인 확정 event | `CREW_DEPOSIT_LOCK`      | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
 | PENDING reserve release  | `CREW_RESERVE_RELEASE`   | `CREW_PARTICIPANT` | `crew_participant.id`                                                                                                                           |
 | 일반 정산 환급           | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM`  | `settlement_item.id`                                                                                                                            |
 
 주의사항:
 
 - 모든 포인트 변경은 항상 `member_id` 기준으로 기록한다.
-- `CREW_DEPOSIT_RESERVE`는 일반 참여자의 `PENDING` 신청 reserve와 host auto-created `LOCKED` 보증금 lock event를 모두 기록한다. bucket destination은 participant status에 따라 일반 `PENDING`은 `reserved_balance`, host auto-created `LOCKED`는 `locked_balance`다.
+- `CREW_DEPOSIT_RESERVE`는 일반 참여자의 `PENDING` 신청 reserve를 기록한다.
+- `CREW_DEPOSIT_LOCK`는 `PENDING` 승인 확정 시 reserve를 locked로 전환하는 이벤트다 (`reserved_balance → locked_balance`).
 - `CREW_RESERVE_RELEASE`는 `PENDING -> REJECTED/CANCELLED/EXPIRED` 전이와 같은 transaction에서 reserve를 반환하는 이벤트다. `CANCELLED` row가 이후 reopen되어 새 `CREW_DEPOSIT_RESERVE`가 발행되어도 직전 `CREW_RESERVE_RELEASE` row는 append-only audit으로 유지되며, 매 사이클마다 별도 `point_history` row가 추가된다.
 - `CREW_SETTLEMENT_REFUND`는 일반 정산 환급 이벤트다.
 - `available_after`, `reserved_after`, `locked_after`는 reconciliation/debugging snapshot이며, append-only ledger ordering과 idempotency보다 우선하는 source of truth가 아니다.
 - `payload_hash` 저장과 payload consistency framework는 MVP에서 deferred이며 필수 컬럼/프레임워크로 도입하지 않는다.
 - 동일 이벤트는 항상 동일한 `idempotency_key`를 사용하고, 동일 canonical input retry는 기존 `point_history`를 재사용하거나 연결한다. 동일 키에 다른 canonical input이 확인되면 idempotency conflict로 처리한다.
+- `POINT_CHARGE.reference_id = 0`은 self-reference 사후 update를 피하기 위한 sentinel이며, 생성된 원장 row는 API 응답의 `point_history_id`로 식별한다.
+- `{cycle}`은 같은 participant의 reserve/release 재시작 단위다. 최초 cycle은 `1`이고, 새 reserve cycle은 해당 participant의 누적 `CREW_RESERVE_RELEASE` 원장 수 + 1로 계산한다. reserve 원장 수를 세어 증가시키지 않는다.
+- settlement refund idempotency key는 runtime-generated `settlement.id`를 포함하지 않고, crew/participant 자연키와 최종 정산 1회를 뜻하는 `final` suffix를 사용한다.
+- `final` key는 같은 participant의 최종 정산 환급 중복 지급을 막는 비즈니스 idempotency identity다. `settlement_item.id`는 지급 근거 스냅샷 linkage로 `reference_id`와 `settlement_item.point_history_id`에 남긴다.
+- 동일 `settlement-refund:final` key에 다른 canonical payout input(`settlement_item.id`, 환급 금액, algorithm version, 인정 성공 수 등)이 들어오면 idempotency conflict로 처리한다. 재정산/보정 지급은 별도 transaction type/key로 분리한다.
 - 이벤트별 고정 규칙 예시는 아래와 같다.
-  - 포인트 충전: `charge:{paymentKey}`
-  - 보증금 reserve: `crew:{crewId}:participant:{participantId}:reserve`
-  - PENDING reserve release: `crew:{crewId}:participant:{participantId}:reserve-release`
-  - 일반 정산 환급: `crew:{crewId}:participant:{participantId}:settlement-refund`
+  - 포인트 충전: `charge:{payment_id}`
+  - 보증금 reserve: `crew:{crewId}:participant:{participantId}:reserve:{cycle}`
+  - 보증금 approve/lock: `crew:{crewId}:participant:{participantId}:reserve-lock:{cycle}`
+  - PENDING reserve release: `crew:{crewId}:participant:{participantId}:reserve-release:{cycle}`
+  - 일반 정산 환급: `crew:{crewId}:participant:{participantId}:settlement-refund:final`
 
 ### `crew`
 
@@ -676,7 +684,7 @@ Unique / Index:
 - 보증금은 별도 계좌로 이동하지 않으며, `point_account.available_balance`에서 차감되고 append-only `CREW_DEPOSIT_RESERVE point_history`가 원장 이벤트로 남은 뒤 participant status에 따라 `reserved_balance` 또는 `locked_balance`와 `crew_participant.deposit_amount`로 상태를 표현한다.
 - `deposit_amount`는 participant 단위 예치금 snapshot의 source of truth다. `PENDING` 생성 시 `crew.deposit_amount`를 snapshot으로 복사 저장하고, `LOCKED` 전이 후에도 같은 값을 유지한다.
 - 신청 생성 트랜잭션은 capacity 확인(`PENDING + LOCKED < max_participants`) → `point_account.available_balance >= crew.deposit_amount` 조건부 차감 및 `reserved_balance` 증가 → `CREW_DEPOSIT_RESERVE point_history` insert → `crew_participant.deposit_amount` snapshot → `status = PENDING` 기록을 하나의 트랜잭션으로 함께 성공 또는 함께 롤백한다.
-- 방장 승인 트랜잭션은 기존 `PENDING` row를 `LOCKED`로 전이하고 `locked_at`을 기록한다. 추가 잔액 차감 없이 `reserved_balance -> locked_balance` bucket transition만 수행하며, 새 `point_history` row, host settlement authority, 중간 상태는 만들지 않는다.
+- 방장 승인 트랜잭션은 기존 `PENDING` row를 `LOCKED`로 전이하고 `locked_at`을 기록한다. 추가 잔액 차감 없이 `reserved_balance -> locked_balance` bucket transition을 수행하며, `CREW_DEPOSIT_LOCK` `point_history`를 생성/재사용해 보존한다.
 - 크루 생성 트랜잭션은 같은 transaction에서 호스트 본인의 `crew_participant` row를 `status=LOCKED`로 자동 생성하고 `crew.deposit_amount`를 `crew_participant.deposit_amount` snapshot으로 복사한다. 같은 transaction에서 `point_account.available_balance -= crew.deposit_amount` / `locked_balance += crew.deposit_amount` bucket transition과 `CREW_DEPOSIT_RESERVE point_history` insert를 함께 수행한다. host는 처음부터 `LOCKED`이므로 `PENDING`/`reserved_balance` bucket을 거치지 않는다. 호스트 잔액이 부족하면 lock 실패로 크루 생성 자체가 롤백된다. host auto-created row는 `unique(crew_id, member_id)` 제약을 일반 참여자와 동일하게 따르며, 호스트의 추가 신청은 같은 제약으로 차단된다.
 - host auto-created `LOCKED` row는 일반 `LOCKED` 참여자와 동일하게 capacity, `min_participants` baseline, activation eligibility, frozen participant baseline, settlement eligibility에 포함되고 최종 정산 대상이다. 호스트라는 사실은 moderation/operation role anchor이며 MVP `HOST_REMAINDER` fixed policy의 deterministic recipient reference가 될 수는 있지만 settlement privilege / discretionary remainder authority / ledger authority가 아니다. 별도 `HOST_LOCKED` / `HOST_PARTICIPANT` 상태나 host 전용 테이블을 만들지 않는다.
 
@@ -1133,7 +1141,7 @@ Unique / Index:
 
 정산 계산 관련 입력 원칙:
 
-- `point_history.idempotency_key`는 이벤트별 고정 규칙을 따른다. 예: `charge:{paymentKey}`, `crew:{crewId}:participant:{participantId}:reserve`, `crew:{crewId}:participant:{participantId}:reserve-release`, `crew:{crewId}:participant:{participantId}:settlement-refund`
+- `point_history.idempotency_key`는 이벤트별 고정 규칙을 따른다. 예: `charge:{payment_id}`, `crew:{crewId}:participant:{participantId}:reserve:{cycle}`, `crew:{crewId}:participant:{participantId}:reserve-lock:{cycle}`, `crew:{crewId}:participant:{participantId}:reserve-release:{cycle}`, `crew:{crewId}:participant:{participantId}:settlement-refund:final`
 - `point_history.idempotency_key`는 런타임 PK가 아니라 입력 기반 식별자를 사용한다.
 - `point_history.idempotency_key`는 `NOT NULL`, `UNIQUE`, 권장 `VARCHAR(160)`이며, 이벤트 종류마다 재현 가능한 규칙으로 생성한다.
 - 동일 키 + 동일 canonical input은 기존 원장 재사용/연결 대상이고, 동일 키 + 다른 canonical input은 멱등성 충돌로 저장하지 않는다. `payload_hash` 저장이나 payload consistency framework는 MVP 필수 요건이 아니다.

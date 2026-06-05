@@ -136,7 +136,7 @@ Current balance bucket cache/source for a member. It is updated transactionally 
 - `settlement_pending_amount` is projection-only.
 - `settlement_pending_balance` must not exist as a persisted DB/account column.
 - Apply/reserve: `available_balance` decreases and `reserved_balance` increases.
-- Approval: `reserved_balance` decreases and `locked_balance` increases. Approval is a bucket/state transition only and does not create a new ledger transaction type.
+- Approval: `reserved_balance` decreases and `locked_balance` increases. Approval 기록은 `CREW_DEPOSIT_LOCK` ledger transaction으로 남기며, 해당 transaction은 append/reuse 처리한다.
 - Reserve release: `reserved_balance` decreases and `available_balance` increases.
 - Settlement refund: `locked_balance` decreases and `available_balance` increases by the final refund amount.
 - Use optimistic locking or conditional update predicates for balance mutation concurrency.
@@ -174,7 +174,7 @@ Append-only authoritative point ledger. It records every reserve, reserve releas
   - `available_after >= 0`.
   - `reserved_after >= 0`.
   - `locked_after >= 0`.
-  - `transaction_type in ('POINT_CHARGE', 'CREW_DEPOSIT_RESERVE', 'CREW_RESERVE_RELEASE', 'CREW_SETTLEMENT_REFUND')` if DB-level enum checks are used.
+  - `transaction_type in ('POINT_CHARGE', 'CREW_DEPOSIT_RESERVE', 'CREW_DEPOSIT_LOCK', 'CREW_RESERVE_RELEASE', 'CREW_SETTLEMENT_REFUND')` if DB-level enum checks are used.
   - `reference_type in ('POINT_CHARGE', 'CREW_PARTICIPANT', 'SETTLEMENT_ITEM')` if DB-level enum checks are used.
 
 #### Indexes
@@ -190,7 +190,7 @@ Append-only authoritative point ledger. It records every reserve, reserve releas
 - `available_after`, `reserved_after`, and `locked_after` are reconciliation/debugging snapshots, not authority over append-only ledger ordering or idempotency.
 - `payload_hash` is deferred for MVP and is not required in this migration.
 - Payload consistency verification framework is deferred for MVP.
-- No `point_charge` table is created. Point charge confirmation appends directly to `point_history` with `transaction_type = POINT_CHARGE`, `reference_type = POINT_CHARGE`, `reference_id = created point_history.id`, and `idempotency_key = charge:{paymentKey}`.
+- No `point_charge` table is created. Point charge confirmation appends directly to `point_history` with `transaction_type = POINT_CHARGE`, `reference_type = POINT_CHARGE`, `reference_id = 0`, and `idempotency_key = charge:{payment_id}`. `reference_id = 0` is a sentinel meaning the charge ledger has no separate internal aggregate reference; do not update the inserted row afterward to self-reference `point_history.id`.
 - Same-key retry with the same canonical input should reuse/link the existing ledger row.
 - Same-key retry with a different canonical input is an idempotency conflict and must not create a new ledger row.
 
@@ -321,34 +321,37 @@ Active canonical MVP ledger transaction types:
 
 - `POINT_CHARGE`: created for successful point charge confirmation.
 - `CREW_DEPOSIT_RESERVE`: created when application reserve succeeds and participant enters `PENDING`.
+- `CREW_DEPOSIT_LOCK`: created at `PENDING -> LOCKED` approval to persist reserve-to-lock transition.
 - `CREW_RESERVE_RELEASE`: created once when `PENDING` transitions to `REJECTED`, `CANCELLED`, or `EXPIRED` and reserve is returned.
 - `CREW_SETTLEMENT_REFUND`: created for final settlement refund linked to `settlement_item`.
 
-Forbidden for MVP active implementation:
+Approval-time ledger note:
 
-- `CREW_DEPOSIT_LOCK` must not be introduced as an active ledger type.
-- Approval-time ledger creation is prohibited. Approval is only `crew_participant.status` plus balance bucket transition from `reserved_balance` to `locked_balance`.
-
+- `CREW_DEPOSIT_LOCK` is active and must be idempotent.
+- `PENDING -> LOCKED` approval은 `crew_participant.status` 전이와 함께 같은 트랜잭션에서 `point_account` bucket 변경이 수행돼야 한다.
 
 ## 4. Idempotency strategy
 
 Canonical idempotency key formats:
 
-- Reserve: `crew:{crewId}:participant:{participantId}:reserve`
-- Reserve release: `crew:{crewId}:participant:{participantId}:reserve-release`
-- Settlement refund: `crew:{crewId}:participant:{participantId}:settlement-refund`
+- Reserve: `crew:{crewId}:participant:{participantId}:reserve:{cycle}`
+- Reserve lock / approval: `crew:{crewId}:participant:{participantId}:reserve-lock:{cycle}`
+- Reserve release: `crew:{crewId}:participant:{participantId}:reserve-release:{cycle}`
+- Settlement refund: `crew:{crewId}:participant:{participantId}:settlement-refund:final`
 
 Rules:
 
 - `point_history.idempotency_key` is `NOT NULL` and `UNIQUE`.
-- Reserve release is allowed once per `crew_participant.id`.
-- Reserve release terminal transition and `CREW_RESERVE_RELEASE` ledger insertion happen in the same transaction.
+- Reserve release is allowed once per current reserve cycle of `crew_participant.id`.
+- `{cycle}` starts at `1`; a new reserve cycle is derived from the count of existing `CREW_RESERVE_RELEASE` ledger rows for the participant plus 1, not from reserve row count.
+- Reserve release terminal transition and `CREW_RESERVE_RELEASE` ledger insertion/reuse happen in the same transaction.
 - `crew_participant.released_point_history_id` links the terminal participant row to the authoritative release ledger row.
-- Settlement refund is allowed once per `settlement_item.id` / participant settlement item.
+- Settlement refund is allowed once per crew participant final settlement event, using `crew:{crewId}:participant:{participantId}:settlement-refund:final` as the idempotency identity.
 - `settlement_item.point_history_id` links the settlement calculation snapshot to the authoritative refund ledger row.
-- Runtime-generated `settlement.id` is linkage metadata, not authoritative idempotency identity. Settlement linkage is tracked through `settlement_item` and `point_history` linkage.
-- Same-key retry with same canonical input returns/reuses the existing `point_history` and linkage.
-- Same-key retry with different canonical input is an idempotency conflict; do not create a second ledger row.
+- Runtime-generated `settlement.id` is not authoritative idempotency identity. `settlement_item.id` is payout evidence linkage metadata through `point_history.reference_id` and `settlement_item.point_history_id`.
+- Same-key retry with same canonical payout input returns/reuses the existing `point_history` and linkage.
+- Same-key retry with different canonical payout input (for example different `settlement_item.id`, refund amount, algorithm version, or recognized success count) is an idempotency conflict; do not create a second ledger row.
+- Future recalculation/adjustment payouts must not reuse the `final` key; model them as a separate transaction type/key.
 - `payload_hash` is deferred for MVP, so same/different canonical input checks are application-level rules, not a persisted payload consistency framework.
 
 ## 5. Implementation enum / column notes
