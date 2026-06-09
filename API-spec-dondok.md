@@ -308,7 +308,8 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax
 | 알림        | `PATCH`  | `/api/notifications/read-all`                                  | 전체 읽음 처리                    |
 | 포인트      | `POST`   | `/api/points/charges`                                          | 포인트 충전                       |
 | 포인트      | `GET`    | `/api/points`                                                  | 포인트 잔액 조회                  |
-| 포인트      | `GET`    | `/api/points/history`                                          | 포인트 내역 조회                  |
+| 포인트      | `GET`    | `/api/points/history`                                          | 포인트 원장 내역 조회             |
+| 포인트      | `GET`    | `/api/points/wallet-history`                                   | 지갑 표시용 포인트 내역 조회      |
 
 ---
 
@@ -2589,6 +2590,54 @@ GET /api/points/history?limit=20&cursor=2026-05-07T09:30:00+09:00_3001
 - 정산 환급의 `settlement_item.id`는 지급 근거 스냅샷 추적용 linkage이며 `reference_id`와 `settlement_item.point_history_id`에 남긴다.
 - 동일 `settlement-refund:final` key 재시도는 기존 원장을 재사용/연결한다. 단, 같은 key인데 `settlement_item.id`, 환급 금액, 정산 algorithm version, 인정 성공 수 등 canonical payout input이 다르면 idempotency conflict로 실패해야 한다.
 - 추후 재정산/보정 지급이 필요하면 `final`을 재사용하지 않고 별도 transaction type/key(예: `settlement-adjustment:{adjustmentId}`)로 분리한다.
+
+---
+
+### `GET /api/points/wallet-history`
+
+> 지갑 화면에 표시할 사용자 관점의 포인트 이벤트 내역을 조회한다. Raw 원장 조회가 필요한 경우 기존 `GET /api/points/history`를 사용한다.
+
+**Query**
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `limit` | integer | N | 기본 20, 최대 100 |
+| `cursor` | string | N | 이전 응답의 `next_cursor` |
+| `type` | string | N | `charge`, `deposit`, `refund`, `withdrawal`, `settlement` |
+| `month` | string | N | `YYYY-MM`. Seoul local month 기준 |
+
+**Response** `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "wallet_event_id": "crew-deposit:9001",
+      "amount": -30000,
+      "balance_after": 300000,
+      "display_type": "DODIN_DEPOSIT",
+      "status": "CONFIRMED",
+      "reference_type": "CREW_PARTICIPANT",
+      "reference_id": 9001,
+      "reference_meta": {
+        "crew_id": 42,
+        "crew_title": "새벽 기상 챌린지"
+      },
+      "created_at": "2026-05-06T21:00:00+09:00"
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+**정책**
+
+- 기존 `/api/points/history`는 raw `point_history` row를 반환하고, 이 endpoint는 표시 이벤트를 반환한다.
+- `CREW_DEPOSIT_RESERVE` + matching `CREW_DEPOSIT_LOCK`은 하나의 `DODIN_DEPOSIT / CONFIRMED` 이벤트로 노출한다.
+- `CREW_DEPOSIT_LOCK`만 존재하는 방장/즉시 예치 케이스는 `DODIN_DEPOSIT / CONFIRMED`로 노출한다.
+- `limit`, `cursor`, `next_cursor`는 표시 이벤트 기준이다.
+- 표시 이벤트 정렬은 최신순(`created_at DESC, wallet_event_id DESC`)이다.
+- Error: `INVALID_LIMIT`, `INVALID_CURSOR`, `INVALID_HISTORY_TYPE`, `INVALID_HISTORY_MONTH`.
 
 ## 6. 상태 흐름
 
