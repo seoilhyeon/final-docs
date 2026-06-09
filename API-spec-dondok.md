@@ -2462,6 +2462,8 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
   "reserved_balance": 100000,
   "active_locked_amount": 60000,
   "settlement_pending_amount": 40000,
+  "settlement_failed_amount": 0,
+  "settlement_refunded_amount": 12000,
   "locked_balance": 100000,
   "total_balance": 550000,
   "updated_at": "2026-05-07T09:30:00+09:00"
@@ -2475,13 +2477,15 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 | `available_balance` | 현재 사용 가능한 잔액 |
 | `reserved_balance` | `PENDING` 상태 참여의 보증금 |
 | `active_locked_amount` | `RECRUITING`/`ACTIVE` 크루의 `LOCKED` 보증금 |
-| `settlement_pending_amount` | `CLOSED` 크루의 정산 전 `LOCKED` 보증금 |
+| `settlement_pending_amount` | `settlement_item.refund_amount` 기준 미지급 정산 환급 예정액. `point_history_id IS NULL`이고 settlement 상태가 `PENDING`/`RUNNING`/`RETRY_WAIT`인 항목 합계 |
+| `settlement_failed_amount` | `settlement_item.refund_amount` 기준 지급 실패 후 복구가 필요한 미지급 정산 환급액. `point_history_id IS NULL`이고 settlement 상태가 `FAILED`인 항목 합계 |
+| `settlement_refunded_amount` | `CREW_SETTLEMENT_REFUND` 기반 누적 환급 금액 |
 | `locked_balance` | `point_account.locked_balance`. `LOCKED` 크루 보증금 총액 persisted bucket |
 | `total_balance` | `available_balance + reserved_balance + locked_balance` |
 
 - `available_balance`, `reserved_balance`, `locked_balance`는 `point_account`의 persisted balance bucket이다. 포인트 변경 커맨드는 `point_account` bucket 변경과 `point_history` append/reuse를 같은 트랜잭션 안에서 처리한다.
-- `active_locked_amount`, `settlement_pending_amount`는 `locked_balance`를 현재 크루/정산 상태로 나누어 설명하는 read-time projection split이며 DB/account 컬럼으로 저장하지 않는다.
-- 조회 시 `active_locked_amount + settlement_pending_amount = locked_balance`가 되도록 집계한다. 불일치가 발견되면 `point_history`, `crew_participant`, `settlement_item` linkage와 `point_account`를 함께 대조한다.
+- `active_locked_amount`는 `locked_balance`를 현재 크루 상태로 설명하는 read-time projection이며 DB/account 컬럼으로 저장하지 않는다.
+- `settlement_pending_amount`는 locked principal split이 아니라 settlement-result projection이다. `active_locked_amount + settlement_pending_amount = locked_balance` 불변식을 두지 않는다. 불일치/이상값은 `settlement_item.refund_amount`, `settlement_item.point_history_id`, `settlement.status`, `point_history`, `crew_participant`, `point_account`를 함께 대조한다.
 - 이 필드들은 출금 가능 여부, 정산 결과 판단에 사용하지 않는다.
 - `CANCELLED` 상태의 reserve는 반환 완료 상태이므로 `reserved_balance` 합산 대상이 아니다. 동일 row가 이후 reopen되어 `PENDING`으로 복귀하면 새 사이클의 reserve가 `reserved_balance` projection에 다시 합산된다.
 

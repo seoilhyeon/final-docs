@@ -305,7 +305,7 @@ Unique / Index:
 - 사용자별 포인트 balance bucket의 현재값 캐시 테이블이다.
 - 실제 포인트 source of truth는 append-only `point_history`이며, `point_account`는 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage와 함께 reconciliation되는 cache/source layer다.
 - MVP에서 persisted balance column은 `available_balance`, `reserved_balance`, `locked_balance` 세 개다.
-- `settlement_pending_amount`는 wallet/API projection field이며 DB/account column이 아니다. `settlement_pending_balance` 컬럼은 두지 않는다.
+- `settlement_pending_amount`와 `settlement_failed_amount`는 wallet/API projection field이며 DB/account column이 아니다. `settlement_pending_balance`/`settlement_failed_balance` 컬럼은 두지 않는다. 두 값 모두 `settlement_item.refund_amount` 기준 미지급 정산 환급액이며, pending은 `PENDING`/`RUNNING`/`RETRY_WAIT`, failed는 `FAILED` 상태를 분리해 보여준다.
 
 주요 컬럼:
 
@@ -342,7 +342,7 @@ Unique / Index:
 - 승인(`PENDING -> LOCKED`)은 `reserved_balance -= deposit_amount`, `locked_balance += deposit_amount` bucket/state transition이다. 승인 시 `CREW_DEPOSIT_LOCK` 거래 유형으로 동일한 금액 이동을 append/reuse한다.
 - reserve release는 terminal 전이와 같은 transaction에서 `reserved_balance -= deposit_amount`, `available_balance += deposit_amount`로 처리한다.
 - final settlement refund는 `locked_balance -= deposit_amount`와 환급 결과에 따른 `available_balance` 증가를 `point_history`와 같은 transaction에서 처리한다.
-- `active_locked_amount`와 `settlement_pending_amount`는 `locked_balance`를 source로 설명하는 projection-only split field다. reconciliation check는 `locked_balance == active_locked_amount + settlement_pending_amount`다.
+- `active_locked_amount`는 `locked_balance`를 source로 설명하는 projection-only field다. `settlement_pending_amount`/`settlement_failed_amount`는 `settlement_item.refund_amount`, `settlement.status`, `point_history_id` linkage를 source로 하는 settlement-result projection이므로 `locked_balance == active_locked_amount + settlement_pending_amount` reconciliation check를 두지 않는다.
 - `point_account`와 reconciliation 결과가 불일치하면 append-only `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage를 함께 기준으로 원인을 조사하고 cache를 보정한다.
 - money/audit 성격 때문에 soft delete를 사용하지 않는다.
 
