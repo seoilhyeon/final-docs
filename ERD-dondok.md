@@ -421,6 +421,47 @@ Unique / Index:
   - PENDING reserve release: `crew:{crewId}:participant:{participantId}:reserve-release:{cycle}`
   - 일반 정산 환급: `crew:{crewId}:participant:{participantId}:settlement-refund:final`
 
+### `point_charge`
+
+역할:
+
+- TossPayments 충전 confirm 요청의 서버 측 멱등성과 원장 연결 상태를 보관한다.
+- Toss redirect success 자체가 아니라 서버 confirm과 `point_history` 연결 완료를 충전 성공 기준으로 삼기 위한 얇은 aggregate다.
+- 금액의 source of truth는 연결된 `point_history`이며, `point_charge`는 payment/order canonical input과 안전한 실패/재시도 상태를 추적한다.
+
+주요 컬럼:
+
+| 컬럼 | 타입 제안 | nullable | 설명 |
+| --- | --- | --- | --- |
+| `id` | `BIGINT` | N | PK, auto increment |
+| `member_id` | `BIGINT` | N | 충전 요청 사용자 FK |
+| `payment_id` | `VARCHAR(200)` | N | Toss `paymentKey`; 서버 로컬 멱등성 키 |
+| `order_id` | `VARCHAR(64)` | N | Toss `orderId`; 완료된 결제 재시도 canonical input |
+| `amount` | `BIGINT` | N | 원화 정수 충전 금액 |
+| `status` | `VARCHAR(30)` | N | `PENDING_CONFIRM`, `CONFIRM_FAILED`, `COMPLETED` |
+| `point_history_id` | `BIGINT` | Y | 성공 충전 원장 FK. 성공 판정은 이 연결 여부를 기준으로 한다. |
+| `failure_code` | `VARCHAR(80)` | Y | 마지막 안전 실패 코드 |
+| `failure_message` | `VARCHAR(500)` | Y | 마지막 안전 실패 요약. provider raw body나 secret은 저장하지 않는다. |
+| `created_at` | `DATETIME(6)` | N | 생성 시각 |
+| `updated_at` | `DATETIME(6)` | N | 갱신 시각 |
+
+제약/인덱스:
+
+- `unique(payment_id)`로 Toss `paymentKey` 단위의 로컬 confirm 중복 처리를 막는다.
+- `unique(order_id)`로 FE가 생성한 order id 중복 사용을 막는다.
+- nullable `unique(point_history_id)`로 하나의 충전 row가 하나의 원장 row에만 연결되게 한다.
+- `member_id -> member.id`, `point_history_id -> point_history.id`는 money/audit FK이므로 `RESTRICT` 정책을 사용한다.
+- 사용자별 운영 조회를 위해 `index(member_id, created_at)`을 둔다.
+
+정책:
+
+- `status = COMPLETED` 문자열만으로 성공을 판단하지 않는다. `point_history_id != null`인 row만 충전 성공 및 멱등 재사용 대상이다.
+- 이미 연결된 row가 다른 member, order, amount로 재시도되면 `IDEMPOTENCY_CONFLICT`다.
+- 아직 연결되지 않은 같은 사용자 실패/대기 row는 confirm 재시도 전에 보정된 `order_id`, `amount`로 갱신할 수 있다.
+- Toss confirm은 DB lock 밖에서 수행한다. 원장 변경 직전에는 `point_charge`를 다시 lock/reload해서 canonical input이 바뀌지 않았는지 확인한다.
+- Toss confirm 결과가 요청의 `paymentKey`, `orderId`, `totalAmount`, `currency=KRW`, `status=DONE`과 일치할 때만 `point_history`를 생성하고 연결한다.
+
+
 ### `crew`
 
 역할:
@@ -1267,8 +1308,23 @@ erDiagram
         DATETIME created_at
     }
     %% POINT_HISTORY: append-only ledger/source of truth; UK(idempotency_key); IDX(member_id, created_at), IDX(reference_type, reference_id).
-    %% POINT_HISTORY enums: transaction_type=POINT_CHARGE|CREW_DEPOSIT_RESERVE|CREW_RESERVE_RELEASE|CREW_SETTLEMENT_REFUND; reference_type=POINT_CHARGE|CREW_PARTICIPANT|SETTLEMENT_ITEM.
+    %% POINT_HISTORY enums: transaction_type=POINT_CHARGE|CREW_DEPOSIT_RESERVE|CREW_DEPOSIT_LOCK|CREW_RESERVE_RELEASE|CREW_SETTLEMENT_REFUND; reference_type=POINT_CHARGE|CREW_PARTICIPANT|SETTLEMENT_ITEM.
     %% POINT_HISTORY note: refund idempotency identity is deterministic input-based, not the runtime settlement row id.
+
+    POINT_CHARGE {
+        BIGINT id PK
+        BIGINT member_id FK
+        VARCHAR payment_id UK
+        VARCHAR order_id UK
+        BIGINT amount
+        VARCHAR status
+        BIGINT point_history_id FK, UK
+        VARCHAR failure_code
+        VARCHAR failure_message
+        DATETIME created_at
+        DATETIME updated_at
+    }
+    %% POINT_CHARGE: Toss confirm idempotency/link row. Success is point_history_id != null, not status alone.
 
     CREW {
         BIGINT id PK
@@ -1478,6 +1534,7 @@ erDiagram
     MEMBER ||--o{ NOTIFICATION : receives_notification
     MEMBER ||--|| POINT_ACCOUNT : owns
     MEMBER ||--o{ POINT_HISTORY : owns
+    MEMBER ||--o{ POINT_CHARGE : initiates_charge
     MEMBER ||--o{ CREW : hosts
     MEMBER ||--o{ CREW_PARTICIPANT : participates
     MEMBER ||--o{ CREW_NOTICE : writes_notice
@@ -1504,6 +1561,7 @@ erDiagram
 
     SETTLEMENT ||--o{ SETTLEMENT_ITEM : contains
     SETTLEMENT_ITEM o|--o| POINT_HISTORY : refund_ledger
+    POINT_CHARGE o|--o| POINT_HISTORY : charge_ledger
     CREW_PARTICIPANT o|--o| POINT_HISTORY : reserve_release_ledger
 ```
 
@@ -1531,3 +1589,4 @@ erDiagram
 - `member.is_host_ever`, `member.hosted_crew_count`는 별도 column으로 저장하지 않는 derived projection이며 authoritative counter source-of-truth가 아니다. host badge/카운터는 settlement/lifecycle authority가 아니다.
 - admin/correction/dispute workflow는 이 ERD가 발명하지 않는다. host moderation은 input authority이며 settlement/lifecycle/ledger authority가 아니다.
 - `ai_habit_report`는 MVP 제외 / Deferred/Brownfield historical/reference-only candidate다. MVP Core ERD에서는 테이블/FK/관계로 freeze하지 않는다. settlement/ledger/certification authority가 아니며, MVP schema authority도 아니다. 재도입하려면 backend API/API-spec 변경과 semantic guardrail 재검증 이후 settlement 성공 후행 산출물로 별도 결정한다. 다른 AI 기능 entity는 이 ERD가 발명하지 않는다.
+| `point_charge`         | TossPayments charge confirmation idempotency/link row | `member 1:N point_charge`, `point_charge 0..1:1 point_history` |

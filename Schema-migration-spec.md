@@ -15,7 +15,7 @@ Scope:
 
 - This document is DB/Flyway/JPA oriented.
 - Code generation must wait for docs freeze: entity/enums/Flyway migrations are created from the finalized ERD/Schema/guardrail docs.
-- It gives detailed Flyway guidance for high-risk core MVP backend entities: `crew_participant`, `point_account`, `point_history`, `settlement`, `settlement_item`.
+- It gives detailed Flyway guidance for high-risk core MVP backend entities: `crew_participant`, `point_account`, `point_history`, `point_charge`, `settlement`, `settlement_item`.
 - Greenfield V1 must create entities/migrations from finalized docs, not patch assumed existing entities. `docs/ERD-dondok.md` owns the active table/relationship set; this spec provides migration ordering and high-risk table guidance plus the minimal notification persistence required by the active notification API.
 - It does not redesign product semantics, lifecycle semantics, settlement semantics, or Deferred/Brownfield/Removed domains. It does not create active endpoint/status/feature semantics absent from backend API docs/API-spec.
 
@@ -190,11 +190,55 @@ Append-only authoritative point ledger. It records every reserve, reserve releas
 - `available_after`, `reserved_after`, and `locked_after` are reconciliation/debugging snapshots, not authority over append-only ledger ordering or idempotency.
 - `payload_hash` is deferred for MVP and is not required in this migration.
 - Payload consistency verification framework is deferred for MVP.
-- No `point_charge` table is created. Point charge confirmation appends directly to `point_history` with `transaction_type = POINT_CHARGE`, `reference_type = POINT_CHARGE`, `reference_id = 0`, and `idempotency_key = charge:{payment_id}`. `reference_id = 0` is a sentinel meaning the charge ledger has no separate internal aggregate reference; do not update the inserted row afterward to self-reference `point_history.id`.
+- Point charge confirmation is tracked by `point_charge` and appends to `point_history` only after Toss confirm succeeds.
+- `POINT_CHARGE` uses `reference_type = POINT_CHARGE`, `reference_id = 0`, and `idempotency_key = charge:{payment_id}`. `reference_id = 0` is a sentinel meaning the charge ledger has no separate public aggregate reference; do not update the inserted row afterward to self-reference `point_history.id`.
 - Same-key retry with the same canonical input should reuse/link the existing ledger row.
 - Same-key retry with a different canonical input is an idempotency conflict and must not create a new ledger row.
 
-### 2.4 `settlement`
+
+### 2.4 `point_charge`
+
+#### Table purpose
+
+Thin TossPayments charge confirmation aggregate. It records the payment/order canonical input, failure metadata, and optional linkage to the successful `point_history` row.
+
+#### Columns
+
+| Column | DB type | Nullable | Default | Meaning / purpose |
+| --- | --- | --- | --- | --- |
+| `id` | `BIGINT` | N | auto increment | Primary key. |
+| `member_id` | `BIGINT` | N | none | FK to `member.id`. |
+| `payment_id` | `VARCHAR(200)` | N | none | Toss `paymentKey`; local idempotency key. |
+| `order_id` | `VARCHAR(64)` | N | none | Toss `orderId`; completed retry canonical input. |
+| `amount` | `BIGINT` | N | none | Requested KRW charge amount. |
+| `status` | `VARCHAR(30)` | N | none | `PENDING_CONFIRM`, `CONFIRM_FAILED`, `COMPLETED`. |
+| `point_history_id` | `BIGINT` | Y | `NULL` | FK to successful charge ledger. `NULL` means not credited yet. |
+| `failure_code` | `VARCHAR(80)` | Y | `NULL` | Last safe failure code. |
+| `failure_message` | `VARCHAR(500)` | Y | `NULL` | Last safe failure summary; no secret/raw provider body. |
+| `created_at` | `DATETIME(6)` | N | current timestamp | Audit create time. |
+| `updated_at` | `DATETIME(6)` | N | current timestamp | Audit update time. |
+
+#### Constraints / indexes
+
+- PK: `primary key (id)`.
+- FK: `member_id -> member.id` with `RESTRICT` / `NO ACTION`.
+- FK: `point_history_id -> point_history.id` with `RESTRICT` / `NO ACTION`.
+- UNIQUE: `unique(payment_id)`.
+- UNIQUE: `unique(order_id)`.
+- UNIQUE: `unique(point_history_id)` with nullable unique semantics.
+- INDEX: `index(member_id, created_at)`.
+- CHECK: `amount > 0`.
+- CHECK: `status <> 'COMPLETED' OR point_history_id IS NOT NULL` where DB dialect support is acceptable.
+
+#### Notes
+
+- Success is `point_history_id IS NOT NULL`, not the `status` string alone.
+- Toss confirm must run outside the DB lock/transaction. Before ledger mutation, reload/lock `point_charge` and ensure member/order/amount still match the request and Toss response.
+- Linked/completed retry with different member/order/amount is an idempotency conflict.
+- Unlinked same-member failed/pending retry may update corrected `order_id`/`amount` before confirm.
+- Toss response must match requested `paymentKey`, `orderId`, `totalAmount`, `currency=KRW`, and `status=DONE` before creating `point_history`.
+
+### 2.5 `settlement`
 
 #### Table purpose
 
@@ -255,7 +299,7 @@ Settlement header and execution claim row for one crew. It stores frozen aggrega
 - Retry/replay/correction remain separated. Retry completes unfinished existing settlement execution; replay is audit/reconstruction; correction workflow is Deferred/Brownfield historical/reference-only and not implemented by this migration.
 - `last_retry_at` / `next_retry_at` may be omitted from V1 unless the runtime intentionally implements DB polling/scheduling. If retained, they remain Deferred/runtime metadata candidates and never active scheduler/API authority.
 
-### 2.5 `settlement_item`
+### 2.6 `settlement_item`
 
 #### Table purpose
 
@@ -334,6 +378,7 @@ Approval-time ledger note:
 
 Canonical idempotency key formats:
 
+- Point charge: `charge:{payment_id}`
 - Reserve: `crew:{crewId}:participant:{participantId}:reserve:{cycle}`
 - Reserve lock / approval: `crew:{crewId}:participant:{participantId}:reserve-lock:{cycle}`
 - Reserve release: `crew:{crewId}:participant:{participantId}:reserve-release:{cycle}`
@@ -481,9 +526,10 @@ Recommended Flyway-style order:
 5. Add/verify `crew_participant.released_point_history_id -> point_history.id` FK if circular ordering requires a post-create `ALTER TABLE`.
 6. Create `settlement` with status, baseline freeze, retry metadata, aggregate snapshots, and `version`.
 7. Create `settlement_item` with calculation snapshot fields and nullable `point_history_id` linkage.
-8. Create minimal notification tables after `member` exists: `notification_device`, then `notification`.
-9. Add indexes and constraint hardening after base tables exist.
-10. Add DB-level CHECK constraints only where supported consistently by the chosen RDBMS and migration policy; otherwise enforce the same rules at application/JPA validation layer.
+8. Create `point_charge` after `member` and `point_history` exist.
+9. Create minimal notification tables after `member` exists: `notification_device`, then `notification`.
+10. Add indexes and constraint hardening after base tables exist.
+11. Add DB-level CHECK constraints only where supported consistently by the chosen RDBMS and migration policy; otherwise enforce the same rules at application/JPA validation layer.
 
 ## 9. Explicitly deferred MVP hardening
 
