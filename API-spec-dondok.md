@@ -290,6 +290,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax
 | 미션 인증   | `GET`    | `/api/me/verification-history`                                 | 내 검증 결과 현황 조회            |
 | 미션 인증   | `GET`    | `/api/me/mission-feed`                                         | 내 크루별 인증 활동 타임라인 조회 |
 | 미션 인증   | `GET`    | `/api/crews/{crewId}/moderation-logs`                          | 방장 검수 이력 조회 (방장 전용)   |
+| 미션 인증   | `GET`    | `/api/crews/{crewId}/host/mission-logs/reviewable`             | 방장 인증 검토 목록 조회          |
 | 미션 인증   | `POST`   | `/api/mission-logs/{missionLogId}/moderation/approve`          | 방장 검수 승인                    |
 | 미션 인증   | `POST`   | `/api/mission-logs/{missionLogId}/moderation/reject`           | 방장 검수 거절                    |
 | 피드/리액션 | `GET`    | `/api/crews/{crewId}/feed`                                     | 인증 피드 조회                    |
@@ -1519,6 +1520,78 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 - `before_state`, `after_state`는 검수 결정 시점의 최신 유효 스냅샷 JSON이다. 정산 결과를 재계산하는 입력으로 사용하지 않는다.
 - 검수자 식별은 `moderator_member_uuid`로만 노출한다. 내부 FK `moderator_id`는 응답에 포함하지 않는다.
 - 이 API는 운영 관리자 권한 엔드포인트가 아니다. MVP에서는 관리자 수정 워크플로를 추가하지 않는다.
+
+---
+
+### `GET /api/crews/{crewId}/host/mission-logs/reviewable`
+
+> 방장이 인증 검토/확인 대상 목록을 bucket별 cursor 페이지로 조회한다.
+
+**Query**
+
+| 필드     | 타입      | 필수 | 설명                                                                                         |
+| -------- | --------- | ---- | -------------------------------------------------------------------------------------------- |
+| `bucket` | `string`  | Y    | `urgent`, `warning`, `normal` 중 하나. bucket별 분류 정책은 아래 정책 섹션을 따른다.          |
+| `cursor` | `string`  | N    | 이전 응답의 `next_cursor`로 다음 slice를 조회한다. 다른 bucket에 재사용하면 `INVALID_INPUT`. |
+| `limit`  | `integer` | N    | 기본 20, 최대 50. 1 미만이면 `INVALID_INPUT`.                                                 |
+
+**Response** `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "mission_log_id": 9001,
+      "crew_id": 42,
+      "crew_participant_id": 101,
+      "member_uuid": "018f4fd2-6d7a-7a41-9f58-6d07f5c3c901",
+      "nickname": "민서",
+      "profile_image_url": "https://cdn.example.com/profile/018f4fd2.png",
+      "image_url": "https://cdn.example.com/mission/9001.jpg",
+      "caption": "오늘 분량 완료했습니다.",
+      "submitted_at": "2026-06-01T08:42:00+09:00",
+      "captured_at": null,
+      "exif_status": "MISSING",
+      "is_duplicate": false,
+      "review_bucket": "warning",
+      "certification_status": "PENDING_REVIEW",
+      "decision_type": null,
+      "reject_reason_code": null,
+      "host_reviewable_until": "2026-06-05T12:00:00+09:00"
+    }
+  ],
+  "next_cursor": "d2FybmluZ3wyMDI2LTA2LTAxVDA4OjQyOjAwfDkwMDE",
+  "has_next": true,
+  "counts": {
+    "urgent": 2,
+    "warning": 1,
+    "normal": 1
+  }
+}
+```
+
+**Error**
+
+- `CREW_NOT_FOUND`
+- `FORBIDDEN_NOT_HOST`
+- `MISSION_RULE_NOT_FOUND`
+- `INVALID_INPUT`
+
+**정책**
+
+- 호출자가 해당 크루의 host여야 한다. host가 아니면 `FORBIDDEN_NOT_HOST`를 반환한다.
+- 정산 입력이 이미 생성된 크루는 더 이상 방장 검토/확인 목록을 제공하지 않으며, 빈 `items`, `next_cursor = null`, `has_next = false`, `counts = 0`으로 응답한다.
+- 응답은 선택한 `bucket`의 `items` slice와 전체 검토/확인 대상의 bucket별 `counts`를 함께 반환한다. `counts`는 현재 요청 bucket에만 한정되지 않는다.
+- `has_next = true`이면 다음 slice가 있으며 `next_cursor`를 다음 요청의 `cursor`로 전달한다. `has_next = false`이면 `next_cursor`는 `null`이다.
+- `cursor`는 opaque 값이다. 클라이언트는 값을 해석하거나 수정하지 않는다. cursor에는 bucket 정보가 포함되므로 `warning` cursor를 `urgent` 요청에 재사용하는 등 bucket이 맞지 않으면 `INVALID_INPUT`이다.
+- bucket 분류는 다음과 같다.
+  - `urgent`: 시스템 자동 판정이 끝난 인증 중 `certification_status = SUCCESS AND decision_type = AUTO_APPROVE` 또는 `certification_status = FAILED AND decision_type = AUTO_REJECT`인 로그. `DailySettlementType.autoCertificationAt(server_time 날짜) + 72시간` 이내인 항목만 노출한다.
+  - `warning`: 아직 결정되지 않은 `PENDING_REVIEW` 로그 중 `exif_status != NORMAL` 또는 `is_duplicate = true`인 로그.
+  - `normal`: 아직 결정되지 않은 `PENDING_REVIEW` 로그 중 `exif_status = NORMAL`이고 `is_duplicate = false`인 로그.
+- `urgent`는 자동 판정 완료 후 방장이 3일 동안 확인/검토해야 하는 bucket이다. `warning`/`normal`은 자동 판정 전 방장 검토 대기 bucket이다.
+- `urgent` 정렬 기준은 `host_reviewable_until ASC, mission_log_id ASC`다. `warning`/`normal` 정렬 기준은 `submitted_at ASC, mission_log_id ASC`다.
+- `exif_status`는 `NORMAL`, `MISSING`, `TIME_INVALID` 중 하나이며, `is_duplicate`는 서버가 계산한 이미지 hash 중복 신호다. 둘 다 검토 보조 신호이며 단독 settlement authority가 아니다.
+- 내부 DB 식별자인 `member.id`는 노출하지 않고, 회원 식별자는 `member_uuid`로만 제공한다.
 
 ---
 
