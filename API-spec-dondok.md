@@ -2526,9 +2526,10 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 - `point_history` 생성과 `point_account.available_balance` 증가는 같은 트랜잭션에서 처리한다.
 - 충전 완료 판정은 `point_history_id != null` 기준이다. `status` 문자열만으로 성공 여부를 판단하지 않는다.
 - 이미 원장에 연결된 `payment_id`가 다른 member/order/amount로 재시도되면 `IDEMPOTENCY_CONFLICT`를 반환한다.
-- 아직 원장에 연결되지 않은 같은 사용자 `payment_id`의 실패/대기 row는 최신 `order_id`와 `amount`로 보정한 뒤 confirm을 재시도할 수 있다.
+- 아직 원장에 연결되지 않은 같은 사용자 `payment_id`의 실패/대기 row는 동일한 `order_id`와 `amount`일 때만 confirm을 재시도한다. `payment_id`는 Toss `paymentKey`이며 `order_id`와 1:1로 취급하므로, 다른 `order_id` 또는 `amount`로 재시도하면 `IDEMPOTENCY_CONFLICT`를 반환한다.
 - Toss confirm 결과의 `paymentKey`, `orderId`, `totalAmount`, `currency=KRW`, `status=DONE`이 요청과 일치할 때만 원장을 생성한다.
-- confirm 진행 중 row의 canonical 입력이 바뀌면 원장을 생성하지 않고 `PAYMENT_CONFIRM_STALE`을 반환한다.
+- confirm 진행 중 row의 canonical 입력이 바뀌면 원장을 생성하지 않고 `PAYMENT_CONFIRM_STALE`을 반환하며, 이미 승인된 결제에 대해서는 보상 cancel을 시도한다.
+- Toss confirm이 `DONE`으로 끝난 뒤 원장 생성이 영구 도메인 오류(`POINT_ACCOUNT_NOT_FOUND`, `IDEMPOTENCY_CONFLICT`, `PAYMENT_CONFIRM_STALE` 등)로 실패하면 서버는 Toss cancel을 보상 호출하고 `point_charge`를 실패 상태로 기록한다. DB 연결 장애 같은 일시적 런타임 실패는 row를 `PENDING_CONFIRM`으로 남겨 같은 요청 재시도로 원장 연결을 복구할 수 있게 한다.
 - Toss secret key는 서버 설정으로만 사용하며 FE/API 응답에 노출하지 않는다.
 - `balance_after`는 `point_history.available_after`의 read-only alias다. 별도 persisted column이 아니다.
 
