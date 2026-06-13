@@ -299,6 +299,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax
 | 대시보드    | `GET`    | `/api/crews/{crewId}/dashboard`                                | 진행 현황 및 예상 환급 조회       |
 | 정산        | `GET`    | `/api/crews/{crewId}/settlement`                               | 방 기준 정산 상태 조회            |
 | 정산        | `GET`    | `/api/settlements/{settlementId}`                              | 정산 결과 상세 조회               |
+| 정산        | `GET`    | `/api/settlements/{settlementId}/me`                              | 본인 정산 결과 조회             |
 | AI          | `POST`   | `/api/ai/mission-recommendations`                              | AI 크루 생성 도우미               |
 | 알림        | `POST`   | `/api/notification-devices`                                    | FCM 디바이스 등록                 |
 | 알림        | `PATCH`  | `/api/notification-devices/{deviceId}`                         | FCM 토큰 갱신                     |
@@ -759,6 +760,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 **Error**
 
 - `CREW_NOT_FOUND`
+- `CREW_ACCESS_DENIED`
 
 **정책**
 
@@ -2195,53 +2197,106 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 
 **Error**
 
-- `SETTLEMENT_NOT_FOUND`
+- `INVALID_INPUT`
+- `CREW_ACCESS_DENIED`
 
 **헤더 필드 정책**
 
 | 필드 | 설명 |
 | --- | --- |
-| `total_participants` | 정산 대상 frozen `LOCKED` participant 수 |
-| `total_locked_amount` | 정산 시점의 `crew_participant.deposit_amount` 합계 스냅샷. `point_account`/`point_history`를 재합산하지 않는다 |
-| `total_recognized_success` | 전체 참여자의 인정 성공 수 합계 |
-| `total_base_refund_amount` | floor 연산 후 전체 기본 환급 합계 |
-| `total_remainder_amount` | floor 연산 후 남은 잔액 |
-| `remainder_policy` | 잔액 처리 정책. MVP active 값은 `HOST_REMAINDER`이며 의미는 “절사 후 남은 1~14원 수준의 remainder를 host의 `crew_participant`에 deterministic하게 배정하는 fixed policy”다. 이는 host discretion, random winner, payout mutation authority, settlement/ledger authority가 아니다. host item의 remainder bonus 금액은 해당 `settlement_item.remainder_bonus_amount`로만 확인하며, persisted payout authority는 `settlement_item.refund_amount`와 연결된 `point_history`다 |
+| `total_participants` | 정산 시점의 frozen `LOCKED` participant 수 |
+| `total_locked_amount` | 정산 시점의 `crew_participant.deposit_amount` 합계 스냅샷 |
+| `total_recognized_success` | 전체 참여자의 정산 인정 성공 수 합계 |
+| `total_base_refund_amount` | floor 계산 후 전체 기본 환급 합계 |
+| `total_remainder_amount` | floor 계산 후 남은 잔여 금액 |
+| `remainder_policy` | 잔여금 처리 정책. MVP active 값은 `HOST_REMAINDER`다. |
 
 **정산 항목(item) 필드 정책**
 
 | 필드 | 설명 |
 | --- | --- |
-| `participant_status_snapshot` | 정산 시점의 참여 상태 스냅샷. 정산 후 row가 변경되어도 이 값이 계산 기준 |
+| `settlement_item_id` | 정산 항목 식별자 |
+| `crew_participant_id` | 정산 당시 참여자 식별자 |
+| `participant_status_snapshot` | 정산 시점의 참여 상태 스냅샷 |
 | `deposit_amount` | 해당 참여자의 보증금 |
 | `success_count_raw` | 중복/비유효 포함 raw 성공 로그 수 |
-| `recognized_success_count` | 중복·비유효 제외 후 정산에서 실제 인정된 성공 수 |
+| `recognized_success_count` | 중복/비유효 제외 후 정산에서 인정한 성공 수 |
 | `recognized_dates_count` | 인정된 날짜 수 |
-| `excluded_success_count` | 중복 등 제외된 성공 수 (`success_count_raw - recognized_success_count`) |
-| `share_ratio` | 전체 인정 성공 중 해당 참여자 비율. `DECIMAL(10,6)` 기준 소수 6자리 string decimal로 반환 |
-| `base_refund_amount` | `FLOOR(total_locked_amount × share_ratio)`. FLOOR 적용 후, `remainder_bonus_amount` 합산 전 기본 환급액 |
-| `remainder_bonus_amount` | `HOST_REMAINDER` fixed policy에 따라 host item에 deterministic하게 배정된 절사 잔액 스냅샷. host discretion/authority가 아니며 payout authority는 `refund_amount`와 연결된 `point_history`다 |
-| `refund_amount` | 실제 환급된 금액 (`base_refund_amount + remainder_bonus_amount`). **persisted 최종 환급 source of truth**이며 연결된 `point_history`와 함께 payout authority다 |
+| `excluded_success_count` | 제외된 성공 수 (`success_count_raw - recognized_success_count`) |
+| `share_ratio` | 전체 인정 성공 중 해당 참여자 비율. scale 6 string decimal |
+| `base_refund_amount` | 기본 환급액 |
+| `remainder_bonus_amount` | 잔여금 정책에 따라 추가 지급된 금액. 일반 참여자는 `0` |
+| `refund_amount` | 실제 최종 환급액 (`base_refund_amount + remainder_bonus_amount`) |
 | `point_history_id` | 연결된 포인트 원장 ID. `null`이면 아직 지급 미완료 상태 |
-| `calculation_reason` | 정산 포함/제외 근거. `includedDates`(인정된 날짜 목록)와 `excludedLogs`(제외된 로그의 `serverTime` + 제외 `code`) |
-
-**`final_rank` (응답 포함 시)**
-
-- 저장 컬럼이 아닌 logical projection이다.
-- `recognized_success_count DESC`, 동률이면 `crew_participant_id ASC` 기준 read-time 계산한다.
-- payout authority가 아니며 지급 결과 변경에 사용하지 않는다.
+| `calculation_reason` | 정산 포함/제외 근거 JSON object |
 
 **정책**
 
-- `settlement_item`은 참여자별 계산 스냅샷의 source of truth다.
-- `point_history`는 실제 잔액에 반영된 금액 source of truth다.
-- `SUCCEEDED`는 모든 `settlement_item.point_history_id`가 채워지고 대응 `point_history` 존재가 검증된 상태다.
-- partial 상태에서는 일부 item의 `point_history_id`가 `null`일 수 있으며, 이 경우 `status`는 `SUCCEEDED`가 아니라 `RETRY_WAIT` 또는 `FAILED`다.
-- `SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item + point_history`다. `MissionLog` 기반 replay는 감사/디버깅용 검증에만 사용하며 지급 결과를 변경하지 않는다.
-- 전체 인정 성공이 `0`이면 all-fail equal-principal refund를 적용한다:
-  - 모든 참여자의 `refund_amount = deposit_amount` (보증금 원금 그대로 환급).
-  - `remainder_bonus_amount = 0`이며 추가 지급 없음.
-- `total_remainder_amount > 0`이면 MVP `HOST_REMAINDER` fixed policy에 따라 host `crew_participant` item의 `remainder_bonus_amount`/`refund_amount`에 deterministic하게 persisted된다. 이는 host가 금액, 수령자, 원장, 최종 정산을 선택하거나 override할 권한을 가진다는 뜻이 아니다.
+- 이 endpoint는 전체 상세/운영 확인용이며 `items[]`를 반환한다.
+- `settlement_item`은 참여자별 최종 계산 결과의 source of truth다.
+- `point_history`는 실제 금액 지급 원장의 source of truth다.
+- `SUCCEEDED` 이후 운영/분쟁/조회 기준은 `settlement_item + point_history`이며, MissionLog replay는 감사/디버깅 검증에만 사용한다.
+- `items[]`는 `settlement_item.id ASC`로 안정 정렬한다.
+- `member_id`, 내부 `id`, `member_uuid`는 item 응답에 포함하지 않는다.
+
+---
+
+### `GET /api/settlements/{settlementId}/me`
+
+> 인증 사용자의 본인 정산 결과를 조회한다. 최종 정산 완료 UI에서 개인 환급액을 표시할 때 사용한다.
+
+**Response** `200 OK`
+
+```json
+{
+  "settlement_id": 501,
+  "crew_id": 42,
+  "status": "SUCCEEDED",
+  "retry_count": 1,
+  "failure_code": null,
+  "failure_message": null,
+  "started_at": "2026-06-01T13:12:10+09:00",
+  "finished_at": "2026-06-01T13:12:18+09:00",
+  "my_item": {
+    "settlement_item_id": 7001,
+    "crew_participant_id": 101,
+    "participant_status_snapshot": "LOCKED",
+    "deposit_amount": 100000,
+    "success_count_raw": 92,
+    "recognized_success_count": 90,
+    "recognized_dates_count": 30,
+    "excluded_success_count": 2,
+    "share_ratio": "0.230769",
+    "base_refund_amount": 115384,
+    "remainder_bonus_amount": 4,
+    "refund_amount": 115388,
+    "point_history_id": 99001,
+    "calculation_reason": {
+      "included_dates": ["2026-05-01", "2026-05-02"],
+      "excluded_logs": [
+        {
+          "server_time": "2026-05-02T07:10:11+09:00",
+          "code": "DAILY_DUPLICATE"
+        }
+      ]
+    }
+  }
+}
+```
+
+**Error**
+
+- `INVALID_INPUT`
+- `CREW_ACCESS_DENIED`
+
+**정책**
+
+- `my_item`은 인증 사용자의 본인 `settlement_item` projection이다.
+- `my_item.refund_amount`는 인증 사용자의 최종 환급액 source of truth다.
+- 서버가 `settlement_id + member_uuid`로 bounded 조회해 `my_item`을 선택한다. 클라이언트가 전체 `items[]`에서 본인 row를 추론하지 않는다.
+- 이 endpoint는 `items[]`를 반환하지 않는다.
+- 인증 사용자가 접근 가능한 호스트지만 대응되는 `settlement_item` row가 없는 brownfield/legacy 케이스에서는 `my_item`이 `null`일 수 있다.
+- `member_id`, 내부 `id`, `member_uuid`는 item 응답에 포함하지 않는다.
 
 ---
 
