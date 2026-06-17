@@ -243,7 +243,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax
 | Enum                         | 값                                                                                                                         |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `FrequencyType`              | `DAILY`, `SPECIFIC_DAYS`                                                                                                   |
-| `PointTransactionType`       | `POINT_CHARGE`, `CREW_DEPOSIT_RESERVE`, `CREW_DEPOSIT_LOCK`, `CREW_RESERVE_RELEASE`, `CREW_SETTLEMENT_REFUND`                                   |
+| `PointTransactionType`       | `POINT_CHARGE`, `CREW_DEPOSIT_RESERVE`, `CREW_DEPOSIT_LOCK`, `CREW_RESERVE_RELEASE`, `CREW_CANCEL_REFUND`, `CREW_SETTLEMENT_REFUND`                                   |
 | `DailySettlementType`        | `A` (인증마감 09:00 / 정산 12:00), `B` (인증마감 21:00 / 정산 00:00), `C` (인증마감 23:59 / 정산 익일 12:00)               |
 | `MissionLogDecisionType`     | `MANUAL_APPROVE`, `MANUAL_REJECT`, `AUTO_APPROVE`, `AUTO_REJECT`                                                           |
 | `MissionLogRejectReasonCode` | `TIME_VIOLATION`, `DUPLICATE`, `MISSION_MISMATCH`, `UNCLEAR`, `INAPPROPRIATE`, `OTHER`                                     |
@@ -2718,6 +2718,7 @@ GET /api/points/history?limit=20&cursor=2026-05-07T09:30:00+09:00_3001
 | 크루 참여 보증금 reserve | `CREW_DEPOSIT_RESERVE` | `CREW_PARTICIPANT` | `crew_participant.id` | `crew:{crewId}:participant:{participantId}:reserve:{cycle}` |
 | 크루 참여 승인 확정(PENDING→LOCKED) | `CREW_DEPOSIT_LOCK` | `CREW_PARTICIPANT` | `crew_participant.id` | `crew:{crewId}:participant:{participantId}:reserve-lock:{cycle}` |
 | PENDING reserve 반환 | `CREW_RESERVE_RELEASE` | `CREW_PARTICIPANT` | `crew_participant.id` | `crew:{crewId}:participant:{participantId}:reserve-release:{cycle}` |
+| LOCKED 예치 반환 | `CREW_CANCEL_REFUND` | `CREW_PARTICIPANT` | `crew_participant.id` | `crew:{crewId}:participant:{participantId}:crew-cancel-refund` |
 | 일반 정산 환급 | `CREW_SETTLEMENT_REFUND` | `SETTLEMENT_ITEM` | `settlement_item.id` | `crew:{crewId}:participant:{participantId}:settlement-refund:final` |
 
 - `POINT_CHARGE.reference_id = 0`은 충전 원장이 별도 내부 aggregate를 참조하지 않는 sentinel이다. 요청 필드 `payment_id`는 `idempotency_key = charge:{payment_id}`로만 저장하며, 응답의 `point_history_id`가 생성된 원장 row를 식별한다. `point_history.id`를 자기 자신의 `reference_id`로 사후 업데이트하지 않는다.
@@ -2774,6 +2775,7 @@ GET /api/points/history?limit=20&cursor=2026-05-07T09:30:00+09:00_3001
 - 기존 `/api/points/history`는 raw `point_history` row를 반환하고, 이 endpoint는 표시 이벤트를 반환한다.
 - `CREW_DEPOSIT_RESERVE` + matching `CREW_DEPOSIT_LOCK`은 하나의 `DODIN_DEPOSIT / CONFIRMED` 이벤트로 노출한다.
 - `CREW_DEPOSIT_LOCK`만 존재하는 방장/즉시 예치 케이스는 `DODIN_DEPOSIT / CONFIRMED`로 노출한다.
+- `CREW_CANCEL_REFUND`는 wallet-history에서 `DODIN_DEPOSIT_REFUND / RELEASED`로 노출한다.
 - `limit`, `cursor`, `next_cursor`는 표시 이벤트 기준이다.
 - 표시 이벤트 정렬은 최신순(`created_at DESC, wallet_event_id DESC`)이다.
 - Error: `INVALID_LIMIT`, `INVALID_CURSOR`, `INVALID_HISTORY_TYPE`, `INVALID_HISTORY_MONTH`.
