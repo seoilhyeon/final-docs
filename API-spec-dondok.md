@@ -1845,6 +1845,9 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
       "caption": "오늘도 미션 완료했습니다",
       "server_time": "2026-05-11T05:58:10+09:00",
       "created_at": "2026-05-11T05:58:10+09:00",
+      "exif_taken_at": "2026-05-11T05:57:58+09:00",
+      "exif_risk": "NORMAL",
+      "is_duplicate": false,
       "certification_status": "SUCCESS",
       "reject_reason_code": null,
       "reaction_counts": { "👏": 2, "🔥": 1 },
@@ -1888,6 +1891,7 @@ Set-Cookie: refreshToken=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax
 - `day_statuses[]`와 `participant_day_slots[]`는 참여자/일자 표시용 latest/effective summary다. `NOT_SUBMITTED`는 `mission_log` row가 없는 synthetic slot projection이며 feed item이 아니다.
 - 같은 참여자/같은 날짜/cadence slot에 여러 `mission_log` row가 생기는 경우는 `FAILED`/`PENDING_REVIEW` 재업로드와 host moderation 상태 전이로 한정된다. 이전 `FAILED`/`PENDING_REVIEW` item도 visible item으로 유지하며, 삭제/overwrite로 정산 입력을 바꾸지 않는다.
 - `reject_reason_code`는 호스트 검수 거절 사유이며, 해당 없으면 `null`이다. `reject_memo`는 internal/private context이므로 feed 응답에 포함하지 않는다.
+- `exif_taken_at`, `exif_risk`, `is_duplicate`는 서버가 계산/추출한 검토 보조 신호다. `exif_taken_at`은 authoritative timing source가 아니며, EXIF/hash 이상은 단독 실패/정산 기준이 아니다.
 - 참여자/일자 summary 대표 규칙:
     - 성공 로그(`SUCCESS`)가 하나 이상 있으면 `SUCCESS`. 대표 로그는 가장 이른 `server_time`, 동률이면 가장 낮은 `mission_log.id`.
     - 성공 로그가 없고 검수 대기 로그(`PENDING_REVIEW`)가 있으면 `PENDING_REVIEW`.
