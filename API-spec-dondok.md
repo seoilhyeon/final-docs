@@ -2748,7 +2748,9 @@ GET /api/points/history?limit=20&cursor=2026-05-07T09:30:00+09:00_3001
 | `limit` | integer | N | 기본 20, 최대 100 |
 | `cursor` | string | N | 이전 응답의 `next_cursor` |
 | `type` | string | N | `charge`, `deposit`, `refund`, `withdrawal`, `settlement` |
-| `month` | string | N | `YYYY-MM`. Seoul local month 기준 |
+| `from` | string | N | `YYYY-MM-DD`. Seoul local date range start inclusive |
+| `to` | string | N | `YYYY-MM-DD`. Seoul local date range end exclusive |
+| `month` | string | N | `YYYY-MM`. Deprecated compatibility shim. Seoul local month 기준 |
 
 **Response** `200 OK`
 
@@ -2782,7 +2784,12 @@ GET /api/points/history?limit=20&cursor=2026-05-07T09:30:00+09:00_3001
 - `CREW_CANCEL_REFUND`는 wallet-history에서 `DODIN_DEPOSIT_REFUND / RELEASED`로 노출한다.
 - `limit`, `cursor`, `next_cursor`는 표시 이벤트 기준이다.
 - 표시 이벤트 정렬은 최신순(`created_at DESC, wallet_event_id DESC`)이다.
-- Error: `INVALID_LIMIT`, `INVALID_CURSOR`, `INVALID_HISTORY_TYPE`, `INVALID_HISTORY_MONTH`.
+- `from` / `to` are date-only range params interpreted as Seoul local calendar dates. The range is half-open: `[from, to)`.
+- `from` and `to` must be supplied together. `from >= to` is invalid.
+- `month` is kept for compatibility and maps to `[first day of month, first day of next month)`. New callers should prefer `from` / `to`.
+- `month` cannot be combined with either `from` or `to`.
+- Date params may be omitted for backward-compatible low-volume recent-summary calls.
+- Error: `INVALID_LIMIT`, `INVALID_CURSOR`, `INVALID_HISTORY_TYPE`, `INVALID_HISTORY_MONTH`, `INVALID_HISTORY_RANGE`.
 
 ## 6. 상태 흐름
 
