@@ -136,18 +136,14 @@ MVP active status는 아래 다섯 개만 사용한다.
 
 ### Projection-only fields
 
-- `settlement_pending_amount`는 종료 후 최종 정산 전 `LOCKED` 금액을 보여주는 wallet/projection 응답 필드다.
+- `settlement_pending_amount`는 미션 종료 후 사용자에게 환급 예정액을 보여주는 wallet/projection 응답 필드다.
 - `settlement_pending_amount`는 DB/account column이 아니다.
 - `settlement_pending_balance`라는 persisted column을 만들지 않는다.
 
 ### Reconciliation invariant
 
-- `active_locked_amount`와 `settlement_pending_amount`는 `locked_balance`의 projection-only split field다.
-- 구현 검증/정합성 점검에서는 아래 관계를 만족해야 한다.
-
-```text
-locked_balance == active_locked_amount + settlement_pending_amount
-```
+- `active_locked_amount`는 `locked_balance` 설명용 projection-only field이고, `settlement_pending_amount`는 정산/스냅샷 기반 환급 예정 projection-only field다.
+- `locked_balance == active_locked_amount + settlement_pending_amount` 정합성 불변식을 두지 않는다. pending 환급액은 손익 반영으로 인해 locked principal과 다를 수 있다.
 
 ## 3. Ledger invariants
 
@@ -268,7 +264,7 @@ MVP 구현에서 이 guardrail 범위의 canonical transaction type은 아래와
 
 - `locked_balance`: persisted `point_account` cache/source
 - `active_locked_amount`: 진행/모집 중 `LOCKED` 금액을 보여주는 projection-only split
-- `settlement_pending_amount`: 종료 후 final settlement success 전 `LOCKED` 금액을 보여주는 projection-only split
+- `settlement_pending_amount`: 정산 row 우선, 없으면 `CLOSED` 크루의 최신 `FINALIZED`/`SUCCEEDED` 일일 정산 스냅샷으로 계산하는 환급 예정 projection-only field
 
 구현은 projection 값을 출금 가능 여부, 최종 환급 확정, settlement authority 판단에 사용하지 않는다.
 

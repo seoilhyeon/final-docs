@@ -416,14 +416,12 @@ Rules:
 Wallet/projection fields:
 
 - `active_locked_amount`: projection-only split of `locked_balance` for active/recruiting/ongoing crews.
-- `settlement_pending_amount`: projection-only split of `locked_balance` for ended crews before final settlement success.
+- `settlement_pending_amount`: projection-only refund estimate for ended crews; settlement row wins, otherwise a `CLOSED` crew can fall back to the latest `FINALIZED`/`SUCCEEDED` daily settlement participant snapshot.
 - `locked_balance`: persisted `point_account` cache/source.
 
 Invariant:
 
-```text
-locked_balance == active_locked_amount + settlement_pending_amount
-```
+No invariant requires `locked_balance == active_locked_amount + settlement_pending_amount`; pending refund can differ from locked principal after settlement gains/losses.
 
 Rules:
 

@@ -528,7 +528,7 @@ MVP `calculation_reason` vocabulary:
 - 모든 포인트 변경은 반드시 `point_history`를 통해서만 발생한다.
 - `point_history`는 항상 `member_id` 기준으로 기록되며, 정산 계산 결과를 실제 계정 잔액 변화로 반영하는 금액 source of truth다.
 - `PointAccount` 또는 `MemberPoint` 같은 현재 잔액 테이블이 있다면, 이 값은 항상 `사용 가능한 포인트 잔액`만 나타내는 재계산 가능한 캐시다.
-- MVP balance model은 `available_balance`(즉시 사용 가능), `reserved_balance`(`PENDING` 신청 reserve), `locked_balance`(`LOCKED` 크루 보증금)로 노출한다. `settlement_pending_amount`는 종료 후 최종 정산 전 `LOCKED` 금액을 보여주는 wallet/projection 응답 필드이며 DB/account column이 아니다. 별도 `settlement_pending_balance` persisted column은 두지 않는다.
+- MVP balance model은 `available_balance`(즉시 사용 가능), `reserved_balance`(`PENDING` 신청 reserve), `locked_balance`(`LOCKED` 크루 보증금)로 노출한다. `settlement_pending_amount`는 미션 종료 후 사용자에게 환급 예정액을 보여주는 wallet/projection 응답 필드이며 DB/account column이 아니다. 별도 `settlement_pending_balance` persisted column은 두지 않는다.
 - 현재 잔액 캐시와 운영 검증 결과가 다르면 `point_history`, `crew_participant` lifecycle/deposit state, `settlement_item` linkage, `point_account` cached balances를 함께 대조해 원인을 조사하고 잔액 캐시를 보정하거나 재생성한다. 승인 bucket transition은 ledger row 없이 처리된다.
 - 일반 참여자의 `PENDING` 신청 reserve는 `point_account.available_balance`에서 차감되고 `reserved_balance`에 반영되며, 승인 시 `reserved_balance -> locked_balance` bucket으로 전이된다.
 - `POST /api/crews` 시점의 host auto-created `LOCKED` participant 보증금은 `PENDING` reserve bucket을 거치지 않고 `point_account.available_balance`에서 차감되어 `locked_balance`에 직접 반영된다.
@@ -564,14 +564,13 @@ MVP `calculation_reason` vocabulary:
 원칙:
 
 - 포인트 충전은 `point_account.available_balance`를 증가시키는 일반 잔액 충전으로 처리한다.
-- Implementation policy: `point_account`는 `available_balance`, `reserved_balance`, `locked_balance`를 persisted cache/source로 둔다. `settlement_pending_amount`는 projection-only이며 `settlement_pending_balance` 컬럼은 두지 않는다.
+- Implementation policy: `point_account`는 `available_balance`, `reserved_balance`, `locked_balance`를 persisted cache/source로 둔다. `settlement_pending_amount`는 환급 예정 projection-only이며 `settlement_pending_balance` 컬럼은 두지 않는다.
 - `point_account`는 `member`와 분리해 사용자 식별·인증 책임과 포인트 잔액 bucket 갱신 책임을 나눈다.
 - 일반 참여 신청 시 보증금은 별도 자산으로 이동하지 않고, `available_balance`에서 차감되어 `reserved_balance`와 해당 `crew_participant.deposit_amount`에 participant 단위 reserve 금액으로 기록된다. host auto-created `LOCKED` participant는 신청/승인 플로우를 거치지 않으므로 `available_balance -> locked_balance`로 직접 반영된다.
 - 보증금 잠금 상태는 `point_account.locked_balance` persisted cache/source와 `crew_participant.deposit_amount` 기록으로 표현한다.
-- 사용자에게 보여줄 `GET /api/points.locked_balance`는 persisted `point_account.locked_balance`를 기준으로 하며, `active_locked_amount`와 `settlement_pending_amount`는 projection-only split field다. `active_locked_amount`는 모집/진행 중 crew의 `LOCKED` 금액, `settlement_pending_amount`는 종료 후 최종 정산 전 crew의 `LOCKED` 금액이다.
+- 사용자에게 보여줄 `GET /api/points.locked_balance`는 persisted `point_account.locked_balance`를 기준으로 한다. `active_locked_amount`는 모집/진행 중 crew의 `LOCKED` 금액 projection이고, `settlement_pending_amount`는 미션 종료 후 환급 예정액 projection이다.
 - 이 projection은 UX 표시용이며 정산 계산, 포인트 원장, 출금 가능 여부, 환급 가능 여부, 분쟁 처리, 정산 결과 판단의 source of truth가 아니다.
-- MVP projection은 `crew_participant.deposit_amount`와 `crew.status IN ('RECRUITING', 'ACTIVE', 'CLOSED')`를 기준으로 시작하며, settlement 조인을 강제하지 않는다.
-- `CLOSED` 포함은 post-mission pre-settlement 금액을 `settlement_pending_amount`로 보여주되 `locked_balance` 안에 남기기 위한 근사값이다. `Settlement.status = SUCCEEDED` 이후 lock 해제 여부를 더 정확히 제외하는 조건은 Settlement 조회/정산 구현 단계에서 보강할 수 있다.
+- `settlement_pending_amount` 계산 우선순위는 crew 단위로 settlement row 우선이다. settlement row가 있으면 미지급 `settlement_item.refund_amount`를 settlement 상태별로 pending/failed에 반영하고, settlement row가 없고 crew가 `CLOSED`이면 최신 `FINALIZED`/`SUCCEEDED` 일일 정산 participant snapshot의 `expected_refund_amount`를 pending으로 보여준다. `ACTIVE && end_at < now` drift는 lifecycle/batch 보정 대상이며 point projection에서 임의로 CLOSED 취급하지 않는다.
 - 정산 계산의 입력 금액은 여전히 정산 대상 participant의 `crew_participant.deposit_amount` 합계다.
 - 일반 `PENDING` 보증금 reserve는 `point_account`에 대한 조건부 update로 수행한다. 즉, `WHERE available_balance >= deposit_amount` 조건을 포함해 사용 가능 잔액이 충분할 때만 `available_balance`를 차감하고 `reserved_balance`를 증가시킨다.
 - host auto-created `LOCKED` participant 보증금 처리는 같은 잔액 충분성 조건을 적용하되 `reserved_balance`가 아니라 `locked_balance`를 증가시킨다.
